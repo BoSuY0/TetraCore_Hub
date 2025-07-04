@@ -140,12 +140,118 @@ class StreamHubLauncher:
                 handlers=[logging.StreamHandler()]
             )
 
+    def _check_if_frontend_needs_rebuild(self) -> bool:
+        """Перевіряє чи потрібна перезбірка frontend на основі дат модифікації"""
+        try:
+            # Перевіряємо чи існує зібраний frontend
+            static_index = self.static_dir / "index.html"
+            build_index = self.frontend_dir / "build" / "index.html"
+            
+            # Якщо немає зібраного frontend - потрібна збірка
+            if not static_index.exists() and not build_index.exists():
+                return True
+            
+            # Знаходимо найновіший зібраний файл
+            latest_built = None
+            if static_index.exists():
+                latest_built = static_index.stat().st_mtime
+            if build_index.exists():
+                build_time = build_index.stat().st_mtime
+                if latest_built is None or build_time > latest_built:
+                    latest_built = build_time
+            
+            if latest_built is None:
+                return True
+            
+            # Перевіряємо дати модифікації вихідних файлів frontend
+            src_dir = self.frontend_dir / "src"
+            public_dir = self.frontend_dir / "public"
+            package_json = self.frontend_dir / "package.json"
+            
+            # Файли що можуть впливати на збірку
+            check_paths = []
+            
+            if src_dir.exists():
+                for src_file in src_dir.rglob("*"):
+                    if src_file.is_file():
+                        check_paths.append(src_file)
+            
+            if public_dir.exists():
+                for pub_file in public_dir.rglob("*"):
+                    if pub_file.is_file():
+                        check_paths.append(pub_file)
+            
+            if package_json.exists():
+                check_paths.append(package_json)
+            
+            # Перевіряємо чи якийсь файл новіший за збірку
+            for file_path in check_paths:
+                if file_path.stat().st_mtime > latest_built:
+                    print(f"🔍 Знайдено оновлений файл: {file_path.name}")
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            print(f"⚠️  Помилка перевірки дат файлів: {e}")
+            return True  # У разі помилки краще перезібрати
+
+    def _copy_build_files(self, start_time=None) -> bool:
+        """Копіює файли з frontend/build до static директорії"""
+        try:
+            build_dir = self.frontend_dir / "build"
+            if not build_dir.exists():
+                print("❌ Build директорія не знайдена")
+                return False
+
+            print("📁 Копіюємо зібрані файли до static/...")
+            self.static_dir.mkdir(exist_ok=True)
+
+            for item in build_dir.iterdir():
+                if item.name == "static":
+                    for static_item in item.iterdir():
+                        dest = self.static_dir / static_item.name
+                        if static_item.is_dir():
+                            if dest.exists():
+                                shutil.rmtree(dest)
+                            shutil.copytree(static_item, dest)
+                        else:
+                            shutil.copy2(static_item, dest)
+                else:
+                    dest = self.static_dir / item.name
+                    if item.is_dir():
+                        if dest.exists():
+                            shutil.rmtree(dest)
+                        shutil.copytree(item, dest)
+                    else:
+                        shutil.copy2(item, dest)
+
+            if start_time:
+                build_time = time.time() - start_time
+                print(f"✅ Frontend зібрано та скопійовано за {build_time:.2f}s")
+            else:
+                print("✅ Frontend файли скопійовано")
+            return True
+
+        except Exception as e:
+            print(f"❌ Помилка копіювання файлів: {e}")
+            return False
+
     def check_node_available(self) -> bool:
         """Перевіряє чи доступний Node.js"""
         try:
-            subprocess.run(['node', '--version'], capture_output=True, check=True, timeout=5)
+            result = subprocess.run(['node', '--version'], capture_output=True, check=True, timeout=5)
+            version = result.stdout.decode().strip()
+            print(f"✅ Node.js знайдено: {version}")
             return True
-        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        except FileNotFoundError:
+            print("❌ Node.js не знайдено в PATH")
+            return False
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Помилка запуску Node.js: {e}")
+            return False
+        except subprocess.TimeoutExpired:
+            print("❌ Таймаут при перевірці Node.js")
             return False
 
     def install_dependencies(self) -> bool:
@@ -154,45 +260,75 @@ class StreamHubLauncher:
             print("🟡 Frontend директорія не знайдена, пропускаємо...")
             return True
 
-        if not self.check_node_available():
-            print("🟡 Node.js не знайдено, пропускаємо frontend...")
-            return True
+        print("🔍 Перевіряємо доступність Node.js...")
+        node_available = self.check_node_available()
+        if not node_available:
+            print("⚠️  Node.js недоступний, спробуємо продовжити...")
+            # Не повертаємо False, спробуємо продовжити
 
         node_modules = self.frontend_dir / "node_modules"
         if not node_modules.exists():
             print("📦 Встановлюємо frontend залежності...")
             try:
-                subprocess.run(['npm', 'ci'], cwd=self.frontend_dir, check=True, timeout=120)
-                print("✅ Frontend залежності встановлено")
+                # Спочатку спробуємо npm ci
+                print("🔄 Запускаємо npm ci...")
+                subprocess.run(['npm', 'ci'], cwd=self.frontend_dir, check=True, timeout=180)
+                print("✅ Frontend залежності встановлено через npm ci")
                 return True
             except subprocess.CalledProcessError as e:
-                print(f"❌ Помилка встановлення залежностей: {e}")
+                print(f"⚠️  npm ci не вдався: {e}")
+                print("🔄 Пробуємо npm install...")
+                try:
+                    subprocess.run(['npm', 'install'], cwd=self.frontend_dir, check=True, timeout=180)
+                    print("✅ Frontend залежності встановлено через npm install")
+                    return True
+                except subprocess.CalledProcessError as e2:
+                    print(f"❌ npm install також не вдався: {e2}")
+                    return False
+            except FileNotFoundError:
+                print("❌ npm команда не знайдена")
                 return False
+        else:
+            print("✅ node_modules вже існує")
         return True
 
     def build_frontend(self, force=False) -> bool:
         """Збирає frontend для production"""
-        if not self.frontend_dir.exists() or not self.check_node_available():
-            print("🟡 Пропускаємо збірку frontend")
+        if not self.frontend_dir.exists():
+            print("🟡 Frontend директорія не знайдена, пропускаємо збірку frontend")
             return True
+            
+        # В продакшені завжди намагаємося зібрати frontend
+        if not self.check_node_available():
+            print("⚠️  Node.js не знайдено, але спробуємо зібрати frontend...")
+            # Не повертаємо False, продовжуємо спробу
 
-        if not force and self.static_dir.exists() and (self.static_dir / "index.html").exists():
-            print("✅ Frontend вже зібраний")
-            return True
+        # Перевіряємо чи frontend потребує перезбірки
+        if not force:
+            needs_rebuild = self._check_if_frontend_needs_rebuild()
+            if not needs_rebuild:
+                print("✅ Frontend актуальний, перезбірка не потрібна")
+                return True
+            else:
+                print("🔄 Frontend потребує перезбірки (файли оновлені)")
 
         print("🔨 Збираємо frontend...")
         try:
             start_time = time.time()
 
             # Встановлюємо залежності якщо потрібно
+            print("🔍 Перевіряємо залежності...")
             if not self.install_dependencies():
+                print("❌ Не вдалося встановити залежності")
                 return False
 
             # Очищуємо попередню збірку
             if self.static_dir.exists():
+                print("🧹 Очищуємо попередню збірку...")
                 shutil.rmtree(self.static_dir)
 
             # Збираємо frontend з оптимізаціями
+            print("⚙️  Налаштовуємо змінні середовища для збірки...")
             env = os.environ.copy()
             env.update({
                 'GENERATE_SOURCEMAP': 'false',
@@ -202,38 +338,11 @@ class StreamHubLauncher:
                 'DISABLE_ESLINT_PLUGIN': 'true',
             })
 
-            subprocess.run(['npm', 'run', 'build'], cwd=self.frontend_dir, env=env, check=True, timeout=180)
+            print("🔄 Запускаємо npm run build...")
+            subprocess.run(['npm', 'run', 'build'], cwd=self.frontend_dir, env=env, check=True, timeout=300)
 
             # Копіюємо зібрані файли
-            build_dir = self.frontend_dir / "build"
-            if build_dir.exists():
-                self.static_dir.mkdir(exist_ok=True)
-
-                for item in build_dir.iterdir():
-                    if item.name == "static":
-                        for static_item in item.iterdir():
-                            dest = self.static_dir / static_item.name
-                            if static_item.is_dir():
-                                if dest.exists():
-                                    shutil.rmtree(dest)
-                                shutil.copytree(static_item, dest)
-                            else:
-                                shutil.copy2(static_item, dest)
-                    else:
-                        dest = self.static_dir / item.name
-                        if item.is_dir():
-                            if dest.exists():
-                                shutil.rmtree(dest)
-                            shutil.copytree(item, dest)
-                        else:
-                            shutil.copy2(item, dest)
-
-                build_time = time.time() - start_time
-                print(f"✅ Frontend зібрано за {build_time:.2f}s")
-                return True
-            else:
-                print("❌ Build директорія не знайдена")
-                return False
+            return self._copy_build_files(start_time)
 
         except subprocess.CalledProcessError as e:
             print(f"❌ Помилка збірки frontend: {e}")
@@ -353,11 +462,14 @@ class StreamHubLauncher:
     async def run_backend(self, quiet_mode=False):
         """Запускає backend сервер"""
         app = self.create_app()
+        
+        port = int(os.environ.get("PORT", 8000))
+        print(f"🌐 Запускаємо сервер на порту {port}")
 
         config = uvicorn.Config(
             app=app,
             host="0.0.0.0",
-            port=int(os.environ.get("PORT", 8000)),
+            port=port,
             log_level="error" if quiet_mode else "warning",
             access_log=False,
             reload=False,

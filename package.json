@@ -5,7 +5,7 @@
   "main": "start_hub.py",
   "scripts": {
     "heroku-prebuild": "echo 'Installing frontend dependencies...' && cd frontend && npm install",
-    "heroku-postbuild": "echo 'Frontend will be built by start_hub.py'",
+    "heroku-postbuild": "echo 'Building frontend...' && cd frontend && npm run build && echo 'Frontend built successfully'",
     "build": "cd frontend && npm run build",
     "dev": "python start_hub.py dev",
     "start": "python start_hub.py prod",
