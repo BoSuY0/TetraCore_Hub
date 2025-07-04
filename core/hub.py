@@ -826,9 +826,6 @@ class StreamHub:
                     # Оновлюємо час останньої активності
                     self.self_client.info.stats.last_activity = datetime.utcnow()
                     
-                    # Оновлюємо статистику
-                    self.self_client.info.stats.total_messages_sent += 1
-                    
                 # Оновлюємо кожні 30 секунд
                 await asyncio.sleep(30)
         except asyncio.CancelledError:
