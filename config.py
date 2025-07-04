@@ -179,6 +179,7 @@ PRODUCTION_OVERRIDES = {
     "log_level": LogLevel.INFO,
     "enable_metrics": True,
     "enable_compression": True,
+    "redis_enabled": True,  # Redis увімкнений в продакшені
 }
 
 TESTING_OVERRIDES = {
