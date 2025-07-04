@@ -398,7 +398,6 @@ class StreamHubLauncher:
                 "LOG_LEVEL": "INFO",
                 "HOT_RELOAD": "true",
                 "HOST": "0.0.0.0",
-                "PORT": "8000",
             },
             "fast": {
                 "ENVIRONMENT": "development",
@@ -406,7 +405,6 @@ class StreamHubLauncher:
                 "LOG_LEVEL": "INFO",
                 "HOT_RELOAD": "false",
                 "HOST": "0.0.0.0",
-                "PORT": "8000",
             },
             "prod": {
                 "ENVIRONMENT": "production",
@@ -414,11 +412,15 @@ class StreamHubLauncher:
                 "LOG_LEVEL": "INFO",
                 "HOT_RELOAD": "false",
                 "HOST": "0.0.0.0",
-                "PORT": "8000",
             }
         }
 
         config = env_configs.get(mode, env_configs["dev"])
+        
+        # Не перезаписуємо PORT якщо він вже встановлений (наприклад, Heroku)
+        if "PORT" not in os.environ:
+            config["PORT"] = "8000"
+            
         os.environ.update(config)
 
     def create_app(self) -> FastAPI:
@@ -496,11 +498,13 @@ class StreamHubLauncher:
 
         # Запускаємо FastAPI з reload
         app = self.create_app()
+        
+        port = int(os.environ.get("PORT", 8000))
 
         config = uvicorn.Config(
             app=app,
             host="0.0.0.0",
-            port=8000,
+            port=port,
             log_level="error" if not verbose else "info",
             access_log=False,
             reload=True,
@@ -548,7 +552,8 @@ class StreamHubLauncher:
             print("⚠️  Продовжуємо без frontend")
 
         try:
-            print("🏭 Запускаємо production сервер...")
+            port = int(os.environ.get("PORT", 8000))
+            print(f"🏭 Запускаємо production сервер на порту {port}...")
             await self.run_backend(quiet_mode=not verbose)
         except KeyboardInterrupt:
             print("\n🛑 Зупинка сервера...")
