@@ -62,6 +62,9 @@ class StreamHub:
         self.total_connections = 0
         self.total_tasks_processed = 0
         self.total_errors = 0
+        
+        # Задачі
+        self.self_client_task: Optional[asyncio.Task] = None
 
     async def initialize(self):
         """Ініціалізація всіх компонентів"""
@@ -722,6 +725,14 @@ class StreamHub:
 
         self.is_running = False
 
+        # Зупинка задачі підтримки активності
+        if self.self_client_task and not self.self_client_task.done():
+            self.self_client_task.cancel()
+            try:
+                await self.self_client_task
+            except asyncio.CancelledError:
+                pass
+
         # Видалення самореєстрації
         if hasattr(self, 'self_client') and self.client_manager:
             try:
@@ -792,9 +803,13 @@ class StreamHub:
 
             # Встановлення статусу як підключений
             self.self_client.info.connection_status = ConnectionStatus.CONNECTED
+            self.self_client.info.stats.last_activity = datetime.utcnow()
 
             # Додавання до менеджера клієнтів
             await self.client_manager.add_client(self.self_client)
+
+            # Запуск задачі для підтримки активності
+            self.self_client_task = asyncio.create_task(self._maintain_self_client_activity())
 
             self.logger.info("StreamHub registered as client",
                            client_id=client_info.client_id,
@@ -802,6 +817,24 @@ class StreamHub:
 
         except Exception as e:
             self.logger.error("Failed to register StreamHub as client", error=str(e))
+
+    async def _maintain_self_client_activity(self):
+        """Підтримка активності внутрішнього клієнта StreamHub"""
+        try:
+            while self.is_running:
+                if hasattr(self, 'self_client') and self.self_client:
+                    # Оновлюємо час останньої активності
+                    self.self_client.info.stats.last_activity = datetime.utcnow()
+                    
+                    # Оновлюємо статистику
+                    self.self_client.info.stats.total_messages_sent += 1
+                    
+                # Оновлюємо кожні 30 секунд
+                await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            self.logger.error("Error maintaining self client activity", error=str(e))
 
     def get_app(self) -> FastAPI:
         """Отримання FastAPI додатка"""
