@@ -1,0 +1,47 @@
+# TetraCore Stream Hub Dependencies
+# Compatible with Python 3.11+ including 3.13
+
+# Core Framework
+# Використовуємо точні версії, які перевірено працюють з Python 3.13
+fastapi==0.115.12
+pydantic==2.11.5
+pydantic-core==2.33.2
+uvicorn[standard]==0.24.0
+websockets==12.0
+jinja2==3.1.2
+
+# Redis for Pub/Sub
+redis==5.0.1
+
+# HTTP client
+httpx==0.25.2
+
+# Logging and monitoring
+structlog==23.2.0
+python-json-logger==2.0.7
+
+# Utilities
+python-dotenv==1.0.0
+click==8.1.7
+
+# System monitoring
+psutil==5.9.7
+
+# Type hints
+typing-extensions>=4.12.2
+
+# Production
+gunicorn==21.2.0
+
+# Development and testing
+pytest==7.4.4
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+black==23.12.1
+flake8==7.0.0
+
+# JSON handling
+orjson==3.9.10
+
+# Date/time utilities
+python-dateutil==2.8.2

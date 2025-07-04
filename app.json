@@ -1,0 +1,70 @@
+{
+  "name": "TetraCore StreamHub",
+  "description": "Централізований Stream Hub для маршрутизації завдань між ботом і воркерами TetraCore",
+  "repository": "https://github.com/your-username/tetracore-streamhub",
+  "logo": "https://via.placeholder.com/512x512/3b82f6/ffffff?text=TC",
+  "keywords": [
+    "tetracore",
+    "streamhub",
+    "websocket",
+    "fastapi",
+    "react",
+    "redis",
+    "task-queue",
+    "microservices"
+  ],
+  "success_url": "/",
+  "website": "https://github.com/your-username/tetracore-streamhub",
+  "env": {
+    "ENVIRONMENT": {
+      "description": "Середовище розгортання",
+      "value": "production",
+      "required": true
+    },
+    "DEBUG": {
+      "description": "Режим налагодження",
+      "value": "false",
+      "required": false
+    },
+    "LOG_LEVEL": {
+      "description": "Рівень логування",
+      "value": "INFO",
+      "required": false
+    },
+    "HOST": {
+      "description": "Хост для прив'язки",
+      "value": "0.0.0.0",
+      "required": false
+    },
+    "REDIS_URL": {
+      "description": "URL для підключення до Redis",
+      "required": true
+    },
+    "AUTH_TOKEN": {
+      "description": "Токен аутентифікації (опціонально)",
+      "required": false
+    }
+  },
+  "formation": {
+    "web": {
+      "quantity": 1,
+      "size": "basic"
+    }
+  },
+  "image": "heroku/python",
+  "addons": [
+    {
+      "plan": "heroku-redis:mini",
+      "as": "REDIS"
+    }
+  ],
+  "buildpacks": [
+    {
+      "url": "heroku/python"
+    }
+  ],
+  "stack": "heroku-22",
+  "scripts": {
+    "postdeploy": "echo 'TetraCore StreamHub deployed successfully!'"
+  }
+}

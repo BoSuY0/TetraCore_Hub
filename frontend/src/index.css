@@ -1,0 +1,761 @@
+/* Tailwind CSS directives */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Import Google Fonts */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap");
+
+/* CSS Custom Properties - Спрощена кольорова палітра */
+:root {
+    /* Primary Colors - Синя палітра */
+    --primary-50: #eff6ff;
+    --primary-100: #dbeafe;
+    --primary-200: #bfdbfe;
+    --primary-300: #93c5fd;
+    --primary-400: #60a5fa;
+    --primary-500: #3b82f6;
+    --primary-600: #2563eb;
+    --primary-700: #1d4ed8;
+    --primary-800: #1e40af;
+    --primary-900: #1e3a8a;
+
+    /* Secondary Colors - Сіра палітра */
+    --secondary-50: #f9fafb;
+    --secondary-100: #f3f4f6;
+    --secondary-200: #e5e7eb;
+    --secondary-300: #d1d5db;
+    --secondary-400: #9ca3af;
+    --secondary-500: #6b7280;
+    --secondary-600: #4b5563;
+    --secondary-700: #374151;
+    --secondary-800: #1f2937;
+    --secondary-900: #111827;
+
+    /* Success Colors - Зелена палітра */
+    --success-50: #f0fdf4;
+    --success-100: #dcfce7;
+    --success-200: #bbf7d0;
+    --success-300: #86efac;
+    --success-400: #4ade80;
+    --success-500: #22c55e;
+    --success-600: #16a34a;
+    --success-700: #15803d;
+    --success-800: #166534;
+    --success-900: #14532d;
+
+    /* Warning Colors - Жовта палітра */
+    --warning-50: #fffbeb;
+    --warning-100: #fef3c7;
+    --warning-200: #fde68a;
+    --warning-300: #fcd34d;
+    --warning-400: #fbbf24;
+    --warning-500: #f59e0b;
+    --warning-600: #d97706;
+    --warning-700: #b45309;
+    --warning-800: #92400e;
+    --warning-900: #78350f;
+
+    /* Error Colors - Червона палітра */
+    --error-50: #fef2f2;
+    --error-100: #fee2e2;
+    --error-200: #fecaca;
+    --error-300: #fca5a5;
+    --error-400: #f87171;
+    --error-500: #ef4444;
+    --error-600: #dc2626;
+    --error-700: #b91c1c;
+    --error-800: #991b1b;
+    --error-900: #7f1d1d;
+
+    /* Info Colors - Блакитна палітра */
+    --info-50: #f0f9ff;
+    --info-100: #e0f2fe;
+    --info-200: #bae6fd;
+    --info-300: #7dd3fc;
+    --info-400: #38bdf8;
+    --info-500: #0ea5e9;
+    --info-600: #0284c7;
+    --info-700: #0369a1;
+    --info-800: #075985;
+    --info-900: #0c4a6e;
+
+    /* Простіші градієнти */
+    --gradient-primary: linear-gradient(
+        135deg,
+        var(--primary-500) 0%,
+        var(--primary-600) 100%
+    );
+    --gradient-secondary: linear-gradient(
+        135deg,
+        var(--secondary-500) 0%,
+        var(--secondary-600) 100%
+    );
+    --gradient-success: linear-gradient(
+        135deg,
+        var(--success-500) 0%,
+        var(--success-600) 100%
+    );
+    --gradient-warning: linear-gradient(
+        135deg,
+        var(--warning-500) 0%,
+        var(--warning-600) 100%
+    );
+    --gradient-error: linear-gradient(
+        135deg,
+        var(--error-500) 0%,
+        var(--error-600) 100%
+    );
+    --gradient-info: linear-gradient(
+        135deg,
+        var(--info-500) 0%,
+        var(--info-600) 100%
+    );
+
+    /* Мінімальні тіні */
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --shadow-md:
+        0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    --shadow-lg:
+        0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+}
+
+/* Basic reset and body styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family:
+        "Inter",
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        "Roboto",
+        "Oxygen",
+        "Ubuntu",
+        "Cantarell",
+        "Fira Sans",
+        "Droid Sans",
+        "Helvetica Neue",
+        sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background: var(--secondary-50);
+    min-height: 100vh;
+}
+
+code {
+    font-family:
+        "JetBrains Mono", source-code-pro, Menlo, Monaco, Consolas,
+        "Courier New", monospace;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--secondary-100);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--secondary-400);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--secondary-500);
+}
+
+/* Спрощені класи градієнтів */
+.gradient-primary {
+    background: var(--gradient-primary);
+}
+.gradient-secondary {
+    background: var(--gradient-secondary);
+}
+.gradient-success {
+    background: var(--gradient-success);
+}
+.gradient-warning {
+    background: var(--gradient-warning);
+}
+.gradient-error {
+    background: var(--gradient-error);
+}
+.gradient-info {
+    background: var(--gradient-info);
+}
+
+/* Статус індикатори без анімацій */
+.status-online {
+    background: var(--success-500);
+}
+
+.status-offline {
+    background: var(--error-500);
+}
+
+.status-warning {
+    background: var(--warning-500);
+}
+
+.status-processing {
+    background: var(--info-500);
+}
+
+/* Простий hover ефект для карток */
+.card-hover {
+    transition: all 0.2s ease;
+}
+
+.card-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+}
+
+/* Простий text gradient */
+.text-gradient {
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* Основні утиліти */
+.min-h-screen {
+    min-height: 100vh;
+}
+.fixed {
+    position: fixed;
+}
+.inset-0 {
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+}
+.z-40 {
+    z-index: 40;
+}
+.z-50 {
+    z-index: 50;
+}
+.bg-black {
+    background-color: #000;
+}
+.bg-opacity-50 {
+    background-color: rgba(0, 0, 0, 0.5);
+}
+
+.transition-all {
+    transition: all 0.2s ease;
+}
+.duration-200 {
+    transition-duration: 200ms;
+}
+
+.p-4 {
+    padding: 1rem;
+}
+.p-6 {
+    padding: 1.5rem;
+}
+.px-4 {
+    padding-left: 1rem;
+    padding-right: 1rem;
+}
+.py-4 {
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+}
+
+.max-w-7xl {
+    max-width: 80rem;
+}
+.mx-auto {
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.bg-white {
+    background-color: #fff;
+}
+.rounded-xl {
+    border-radius: 0.75rem;
+}
+.rounded-lg {
+    border-radius: 0.5rem;
+}
+.shadow-sm {
+    box-shadow: var(--shadow-sm);
+}
+.shadow-md {
+    box-shadow: var(--shadow-md);
+}
+.shadow-lg {
+    box-shadow: var(--shadow-lg);
+}
+
+.text-2xl {
+    font-size: 1.5rem;
+    line-height: 2rem;
+}
+.text-3xl {
+    font-size: 1.875rem;
+    line-height: 2.25rem;
+}
+.text-4xl {
+    font-size: 2.25rem;
+    line-height: 2.5rem;
+}
+.font-bold {
+    font-weight: 700;
+}
+.font-semibold {
+    font-weight: 600;
+}
+.font-medium {
+    font-weight: 500;
+}
+
+.mb-2 {
+    margin-bottom: 0.5rem;
+}
+.mb-4 {
+    margin-bottom: 1rem;
+}
+.mb-6 {
+    margin-bottom: 1.5rem;
+}
+
+.space-y-6 > * + * {
+    margin-top: 1.5rem;
+}
+.space-y-4 > * + * {
+    margin-top: 1rem;
+}
+.space-x-4 > * + * {
+    margin-left: 1rem;
+}
+
+.hidden {
+    display: none;
+}
+.flex {
+    display: flex;
+}
+.items-center {
+    align-items: center;
+}
+.justify-between {
+    justify-content: space-between;
+}
+.justify-center {
+    justify-content: center;
+}
+
+.h-16 {
+    height: 4rem;
+}
+.w-3 {
+    width: 0.75rem;
+}
+.h-3 {
+    height: 0.75rem;
+}
+.w-4 {
+    width: 1rem;
+}
+.h-4 {
+    height: 1rem;
+}
+.rounded-full {
+    border-radius: 9999px;
+}
+
+.text-sm {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+}
+.text-xs {
+    font-size: 0.75rem;
+    line-height: 1rem;
+}
+
+.grid {
+    display: grid;
+}
+.grid-cols-1 {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+}
+.gap-6 {
+    gap: 1.5rem;
+}
+.gap-4 {
+    gap: 1rem;
+}
+
+@media (min-width: 768px) {
+    .md\:grid-cols-2 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (min-width: 1024px) {
+    .lg\:grid-cols-4 {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+    .lg\:grid-cols-3 {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .lg\:col-span-2 {
+        grid-column: span 2 / span 2;
+    }
+    .lg\:ml-64 {
+        margin-left: 16rem;
+    }
+    .lg\:ml-16 {
+        margin-left: 4rem;
+    }
+    .lg\:hidden {
+        display: none;
+    }
+    .lg\:flex {
+        display: flex;
+    }
+    .lg\:w-64 {
+        width: 16rem;
+    }
+    .lg\:w-16 {
+        width: 4rem;
+    }
+}
+
+/* Focus ring для доступності */
+.focus-ring {
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+}
+
+.focus-ring:focus {
+    outline: 2px solid var(--primary-500);
+    outline-offset: 2px;
+}
+
+/* Спеціальні класи для захисту від перекриття хедером */
+.header-safe {
+    padding-top: 5rem !important; /* 80px - більше ніж висота хедера */
+    min-height: calc(100vh - 4rem);
+}
+
+.content-safe {
+    margin-top: 1rem !important;
+    position: relative;
+    z-index: 1;
+}
+
+.no-header-overlap {
+    top: 4.5rem !important; /* 72px - відступ від хедера */
+}
+
+/* Гарантовані z-index значення */
+.z-header {
+    z-index: 100 !important;
+}
+
+.z-sidebar {
+    z-index: 60 !important;
+}
+
+.z-overlay {
+    z-index: 70 !important;
+}
+
+.z-mobile-sidebar {
+    z-index: 80 !important;
+}
+
+/* Спеціальні анімації для сайд-бара */
+.sidebar-smooth {
+    transition: all 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94) !important;
+}
+
+.sidebar-text-fade {
+    transition:
+        opacity 0.4s cubic-bezier(0.4, 0, 0.6, 1),
+        transform 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+        width 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) !important;
+}
+
+.sidebar-text-typewriter {
+    transition:
+        clip-path 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+        opacity 0.3s cubic-bezier(0.4, 0, 0.6, 1) 0.2s !important;
+    clip-path: inset(0 0 0 0);
+    text-overflow: clip;
+    white-space: nowrap;
+    overflow: hidden;
+    will-change: clip-path, opacity;
+}
+
+.sidebar-text-typewriter.collapsed {
+    clip-path: inset(0 100% 0 0);
+    opacity: 0;
+    transition:
+        clip-path 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+        opacity 0.3s cubic-bezier(0.4, 0, 0.6, 1) 0s !important;
+}
+
+/* Стабільність тексту під час анімацій */
+.text-stable {
+    font-kerning: none !important;
+    font-feature-settings: "kern" 0 !important;
+    text-rendering: optimizeSpeed !important;
+    -webkit-font-smoothing: antialiased !important;
+    -moz-osx-font-smoothing: grayscale !important;
+    will-change: clip-path, opacity !important;
+}
+
+.sidebar-text-stable {
+    backface-visibility: hidden !important;
+    perspective: 1000px !important;
+    transform: translateZ(0) !important;
+    font-variant-ligatures: none !important;
+    letter-spacing: normal !important;
+    word-spacing: normal !important;
+}
+
+.sidebar-icon-smooth {
+    width: 1.5rem !important;
+    min-width: 1.5rem !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+/* Спрощені стилі для сайд-бара */
+.sidebar-icon-wrapper {
+    width: 1.5rem;
+    min-width: 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+/* Клас для іконок без анімації */
+.icon-no-animation {
+    transition: none !important;
+    transform: none !important;
+}
+
+.icon-no-animation * {
+    transition: none !important;
+    transform: none !important;
+}
+
+.tooltip-delayed {
+    transition:
+        opacity 0.25s cubic-bezier(0.4, 0, 0.6, 1) 0.3s,
+        visibility 0.25s cubic-bezier(0.4, 0, 0.6, 1) 0.3s !important;
+}
+
+/* Покращена анімація для основного контенту */
+.content-shift {
+    transition: margin-left 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94) !important;
+}
+
+/* Додаткові утилітарні класи для анімацій */
+.animate-bounce-subtle {
+    animation: bounce-subtle 2s infinite;
+}
+
+.animate-slide-in-left {
+    animation: slide-in-left 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+.animate-slide-out-left {
+    animation: slide-out-left 0.4s cubic-bezier(0.55, 0.085, 0.68, 0.53)
+        forwards;
+}
+
+/* Keyframes для кастомних анімацій */
+@keyframes bounce-subtle {
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+    50% {
+        transform: translateY(-2px);
+    }
+}
+
+@keyframes slide-in-left {
+    from {
+        transform: translateX(-100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slide-out-left {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(-100%);
+        opacity: 0;
+    }
+}
+
+@keyframes text-clip-out {
+    0% {
+        clip-path: inset(0 0 0 0);
+        opacity: 1;
+    }
+    80% {
+        clip-path: inset(0 90% 0 0);
+        opacity: 0.3;
+    }
+    100% {
+        clip-path: inset(0 100% 0 0);
+        opacity: 0;
+    }
+}
+
+@keyframes text-clip-in {
+    0% {
+        clip-path: inset(0 100% 0 0);
+        opacity: 0;
+    }
+    20% {
+        clip-path: inset(0 90% 0 0);
+        opacity: 0.3;
+    }
+    100% {
+        clip-path: inset(0 0 0 0);
+        opacity: 1;
+    }
+}
+
+/* Спеціальні стани для кращого UX */
+.sidebar-button-enhanced {
+    transition:
+        background-color 0.3s cubic-bezier(0.4, 0, 0.6, 1),
+        box-shadow 0.3s cubic-bezier(0.4, 0, 0.6, 1) !important;
+}
+
+/* Анімації для Dashboard компонентів */
+.dashboard-fade-in {
+    animation: dashboardFadeIn 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94)
+        forwards;
+}
+
+.dashboard-slide-up {
+    animation: dashboardSlideUp 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94)
+        forwards;
+}
+
+.dashboard-slide-up-delayed {
+    animation: dashboardSlideUp 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) 0.2s
+        both;
+}
+
+.dashboard-scale-in {
+    animation: dashboardScaleIn 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.dashboard-stagger-1 {
+    animation: dashboardSlideUp 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94) 0.1s
+        both;
+}
+
+.dashboard-stagger-2 {
+    animation: dashboardSlideUp 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94) 0.2s
+        both;
+}
+
+.dashboard-stagger-3 {
+    animation: dashboardSlideUp 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94) 0.3s
+        both;
+}
+
+.dashboard-stagger-4 {
+    animation: dashboardSlideUp 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94) 0.4s
+        both;
+}
+
+/* Keyframes для Dashboard анімацій */
+@keyframes dashboardFadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes dashboardSlideUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes dashboardScaleIn {
+    from {
+        opacity: 0;
+        transform: scale(0.9);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* Медіа запит для зменшення анімацій */
+@media (prefers-reduced-motion: reduce) {
+    * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+
+    .sidebar-smooth,
+    .sidebar-text-fade,
+    .sidebar-text-typewriter,
+    .sidebar-icon-smooth,
+    .sidebar-icon-container,
+    .sidebar-icon-wrapper,
+    .tooltip-delayed,
+    .content-shift,
+    .text-stable,
+    .sidebar-text-stable,
+    .dashboard-fade-in,
+    .dashboard-slide-up,
+    .dashboard-slide-up-delayed,
+    .dashboard-scale-in,
+    .dashboard-stagger-1,
+    .dashboard-stagger-2,
+    .dashboard-stagger-3,
+    .dashboard-stagger-4 {
+        transition: none !important;
+        animation: none !important;
+        will-change: auto !important;
+    }
+}

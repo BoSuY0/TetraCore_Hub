@@ -1,0 +1,542 @@
+{
+  "common": {
+    "loading": "Завантаження...",
+    "error": "Помилка",
+    "success": "Успішно",
+    "warning": "Попередження",
+    "info": "Інформація",
+    "save": "Зберегти",
+    "cancel": "Скасувати",
+    "delete": "Видалити",
+    "edit": "Редагувати",
+    "create": "Створити",
+    "search": "Пошук",
+    "refresh": "Оновити",
+    "back": "Назад",
+    "next": "Далі",
+    "previous": "Попередній",
+    "close": "Закрити",
+    "open": "Відкрити",
+    "yes": "Так",
+    "no": "Ні",
+    "ok": "OK",
+    "apply": "Застосувати",
+    "reset": "Скинути",
+    "clear": "Очистити",
+    "export": "Експорт",
+    "import": "Імпорт",
+    "settings": "Налаштування",
+    "status": "Статус",
+    "online": "Онлайн",
+    "offline": "Офлайн",
+    "connected": "Підключено",
+    "disconnected": "Відключено",
+    "active": "Активний",
+    "inactive": "Неактивний",
+    "enabled": "Увімкнено",
+    "disabled": "Вимкнено",
+    "of": "з",
+    "total": "всього",
+    "noData": "Немає даних для відображення",
+    "lastUpdated": "Останнє оновлення",
+    "id": "ID",
+    "type": "Тип",
+    "add": "Додати",
+    "remove": "Видалити",
+    "filter": "Фільтр",
+    "sort": "Сортування",
+    "unknown": "Невідомо",
+    "all": "Всі",
+    "none": "Немає",
+    "other": "Інше",
+    "more": "Більше",
+    "less": "Менше",
+    "show": "Показати",
+    "hide": "Приховати",
+    "expand": "Розгорнути",
+    "collapse": "Згорнути",
+    "details": "Деталі",
+    "danger": "Небезпека",
+    "primary": "Основний",
+    "secondary": "Другорядний"
+  },
+  "navigation": {
+    "dashboard": "Панель керування",
+    "clients": "Клієнти",
+    "tasks": "Завдання",
+    "metrics": "Метрики",
+    "settings": "Налаштування",
+    "toggleSidebar": "Перемкнути бічну панель",
+    "collapseSidebar": "Згорнути бічну панель"
+  },
+  "header": {
+    "title": "TetraCore Hub",
+    "subtitle": "Панель керування Stream Hub",
+    "systemStatus": "Статус системи",
+    "connectionStatus": {
+      "connected": "Підключено",
+      "connecting": "Підключення...",
+      "disconnected": "Відключено",
+      "error": "Помилка з'єднання"
+    },
+    "languageSwitcher": {
+      "ukrainian": "Українська",
+      "english": "English"
+    }
+  },
+  "dashboard": {
+    "title": "Панель керування",
+    "subtitle": "Моніторинг та управління системою в реальному часі",
+    "totalClients": "Всього клієнтів",
+    "activeConnections": "Активні клієнти",
+    "tasksProcessed": "Оброблено завдань",
+    "systemUptime": "Час роботи системи",
+    "cpuUsage": "Навантаження CPU",
+    "memoryUsage": "Використання пам'яті",
+    "networkTraffic": "Мережевий трафік",
+    "errorRate": "Рівень помилок",
+    "responseTime": "Час відповіді",
+    "throughput": "Пропускна здатність",
+    "systemHealth": "Стан системи",
+    "excellent": "Відмінно",
+    "good": "Добре",
+    "critical": "Критично",
+    "resourceMonitor": "Моніторинг ресурсів",
+    "liveActivity": "Активність в реальному часі",
+    "networkStats": "Мережева статистика",
+    "performanceMetrics": "Метрики продуктивності",
+    "recentActivity": "Остання активність",
+    "systemAlerts": "Системні оповіщення",
+    "quickStats": "Швидка статистика",
+    "averageUsage": "Середнє використання",
+    "ramMemory": "Оперативна пам'ять",
+    "high": "Високе",
+    "normal": "Нормальне",
+    "stable": "Стабільно",
+    "healthy": "Здорова",
+    "issues": "Проблеми",
+    "overallStatus": "Загальний статус",
+    "realtimeCommunication": "Комунікація в реальному часі",
+    "dataCachingLayer": "Шар кешування даних",
+    "connectionManagement": "Управління з'єднаннями",
+    "taskDistribution": "Розподіл завдань",
+    "systemVersion": "Версія системи",
+    "memory": "Пам'ять",
+    "disk": "Диск",
+    "clientsConnected": "клієнтів підключено",
+    "incomingTraffic": "Вхідний трафік",
+    "outgoingTraffic": "Вихідний трафік",
+    "packets": "пакетів"
+  },
+  "clients": {
+    "title": "Клієнти",
+    "subtitle": "Підключені клієнти та їх статус",
+    "totalClients": "Всього клієнтів",
+    "connectedClients": "Підключені клієнти",
+    "clientTypes": "Типи клієнтів",
+    "bot": "Бот",
+    "worker": "Воркер",
+    "workerApi": "API-воркери",
+    "streamHub": "Stream Hub",
+    "monitor": "Монітор",
+    "admin": "Адміністратор",
+    "clientId": "ID клієнта",
+    "clientName": "Ім'я клієнта",
+    "connectionTime": "Час підключення",
+    "lastActivity": "Остання активність",
+    "ipAddress": "IP адреса",
+    "version": "Версія",
+    "platform": "Платформа",
+    "noClients": "Немає клієнтів",
+    "allConnected": "Всі підключені",
+    "allDisconnected": "Всі відключені",
+    "connected": "підключено",
+    "noWorkers": "Немає воркерів",
+    "available": "доступно",
+    "busy": "зайнято",
+    "loadingClients": "Завантаження даних клієнтів",
+    "detailedInfo": "Детальна інформація про клієнтів",
+    "connectionStatus": "Статус з'єднання",
+    "workerStatus": "Статус воркера",
+    "standardWorkers": "Стандартні воркери",
+    "apiWorkers": "API воркери",
+    "activity": "Активність"
+  },
+  "tasks": {
+    "title": "Завдання",
+    "subtitle": "Черга завдань та статус виконання",
+    "totalTasks": "Всього завдань",
+    "pendingTasks": "Завдання в очікуванні",
+    "processingTasks": "Завдання в обробці",
+    "completedTasks": "Завершені завдання",
+    "failedTasks": "Невдалі завдання",
+    "taskId": "ID завдання",
+    "taskType": "Тип завдання",
+    "taskStatus": "Статус завдання",
+    "taskPriority": "Пріоритет",
+    "createdAt": "Створено",
+    "startedAt": "Розпочато",
+    "completedAt": "Завершено",
+    "duration": "Тривалість",
+    "worker": "Воркер",
+    "result": "Результат",
+    "errorMessage": "Повідомлення про помилку",
+    "retryCount": "Кількість повторів",
+    "maxRetries": "Максимум повторів",
+    "timeout": "Таймаут",
+    "payload": "Дані",
+    "noTasks": "Немає завдань",
+    "loadingTasks": "Завантаження завдань",
+    "status": {
+      "pending": "Очікування",
+      "processing": "Обробка",
+      "completed": "Завершено",
+      "failed": "Невдало",
+      "timeout": "Таймаут",
+      "retry": "Повтор",
+      "cancelled": "Скасовано"
+    },
+    "priority": {
+      "low": "Низький",
+      "normal": "Нормальний",
+      "high": "Високий",
+      "critical": "Критичний"
+    },
+    "filtersAndManagement": "Фільтри та управління",
+    "searchPlaceholder": "Пошук завдань...",
+    "allStatuses": "Всі статуси",
+    "allPriorities": "Всі пріоритети",
+    "allTypes": "Всі типи",
+    "allWorkers": "Всі воркери",
+    "taskList": "Список завдань",
+    "noTasksFound": "Завдання не знайдено"
+  },
+  "metrics": {
+    "title": "Метрики",
+    "subtitle": "Продуктивність системи та аналітика",
+    "systemMetrics": "Системні метрики",
+    "workerMetrics": "Метрики воркерів",
+    "taskMetrics": "Метрики завдань",
+    "networkMetrics": "Мережеві метрики",
+    "cpuUsage": "Використання CPU",
+    "memoryUsage": "Використання пам'яті",
+    "diskUsage": "Використання диска",
+    "networkUsage": "Використання мережі",
+    "requestsPerSecond": "Запитів за секунду",
+    "averageResponseTime": "Середній час відповіді",
+    "errorRate": "Відсоток помилок",
+    "throughput": "Пропускна здатність",
+    "uptime": "Час роботи",
+    "lastHour": "Остання година",
+    "last24Hours": "Останні 24 години",
+    "lastWeek": "Останній тиждень",
+    "lastMonth": "Останній місяць",
+    "last6Hours": "Останні 6 годин",
+    "totalWorkers": "Всі воркери",
+    "workers": "Воркери",
+    "activeTasks": "Активні завдання",
+    "activeBotServers": "Активні сервери Бота",
+    "noStandardWorkers": "Немає підключених стандартних воркерів",
+    "noApiWorkers": "Немає підключених API воркерів",
+    "noBots": "Немає підключених ботів",
+    "noStreamHubs": "Немає підключених стрім-хабів",
+    "systemResourceMonitor": "Моніторинг системних ресурсів",
+    "selectClientForAnalysis": "Вибрати клієнт для детального аналізу",
+    "additionalInfo": "Додаткова інформація",
+    "clientType": "Тип клієнта",
+    "connectionStatus": "Статус з'єднання",
+    "activeTasksCount": "Активні завдання"
+  },
+  "settings": {
+    "title": "Налаштування",
+    "subtitle": "Конфігурація системи та налаштування",
+    "import": "Імпорт",
+    "reset": "Скинути",
+    "management": "Управління налаштуваннями",
+    "resetCurrentSection": "Скинути поточну секцію",
+    "addIpAddress": "Додати IP адресу",
+    "tabs": {
+      "connection": "З'єднання",
+      "interface": "Інтерфейс",
+      "monitoring": "Моніторинг",
+      "security": "Безпека",
+      "export": "Експорт"
+    },
+    "connection": {
+      "websocketConnection": {
+        "title": "WebSocket З'єднання",
+        "description": "Налаштування WebSocket підключення до сервера",
+        "serverUrl": "URL сервера",
+        "port": "Порт"
+      },
+      "apiSettings": {
+        "title": "Налаштування API",
+        "description": "Конфігурація API ендпоінтів",
+        "endpoint": "Ендпоінт API"
+      },
+      "timeoutsRetries": {
+        "title": "Таймаути та повтори",
+        "description": "Налаштування таймаутів та повторних спроб",
+        "timeout": "Таймаут з'єднання (мс)",
+        "retryInterval": "Інтервал повтору (мс)",
+        "maxAttempts": "Максимум спроб"
+      }
+    },
+    "interface": {
+      "appearance": {
+        "title": "Зовнішній вигляд",
+        "description": "Налаштування теми та мови інтерфейсу",
+        "theme": "Тема",
+        "language": "Мова",
+        "themes": {
+          "light": "Світла",
+          "dark": "Темна",
+          "system": "Системна"
+        },
+        "languages": {
+          "ukrainian": "Українська",
+          "english": "English"
+        }
+      },
+      "displayFormats": {
+        "title": "Формати відображення",
+        "description": "Налаштування форматів дати, часу та оновлення",
+        "dateFormat": "Формат дати",
+        "timeFormat": "Формат часу",
+        "refreshInterval": "Інтервал оновлення (сек)",
+        "dateFormats": {
+          "ddmmyyyy": "ДД/ММ/РРРР",
+          "mmddyyyy": "ММ/ДД/РРРР",
+          "yyyymmdd": "РРРР-ММ-ДД"
+        },
+        "timeFormats": {
+          "24h": "24-годинний",
+          "12h": "12-годинний"
+        }
+      },
+      "displayMode": {
+        "title": "Режим відображення",
+        "compactMode": "Компактний режим",
+        "compactModeDescription": "Зменшити відступи та розміри елементів для економії місця"
+      }
+    },
+    "monitoring": {
+      "notifications": {
+        "title": "Сповіщення",
+        "description": "Налаштування системних сповіщень",
+        "enable": "Увімкнути сповіщення",
+        "enableDescription": "Отримувати сповіщення про системні події",
+        "errors": "Сповіщення про помилки",
+        "errorsDescription": "Сповіщати про системні помилки",
+        "newClients": "Нові клієнти",
+        "newClientsDescription": "Сповіщати про підключення нових клієнтів",
+        "disconnects": "Відключення",
+        "disconnectsDescription": "Сповіщати про відключення клієнтів"
+      },
+      "logging": {
+        "title": "Логування",
+        "description": "Налаштування системного логування",
+        "logLevel": "Рівень логування",
+        "maxEntries": "Максимум записів",
+        "levels": {
+          "debug": "Відлагодження",
+          "info": "Інформація",
+          "warn": "Попередження",
+          "error": "Помилка"
+        }
+      },
+      "performanceMetrics": {
+        "title": "Метрики продуктивності",
+        "description": "Збір та відображення метрик системи",
+        "enable": "Увімкнути метрики",
+        "enableDescription": "Збирати метрики продуктивності системи",
+        "collectionInterval": "Інтервал збору (сек)",
+        "cpu": "Моніторинг CPU",
+        "cpuDescription": "Відстежувати використання процесора",
+        "memory": "Моніторинг пам'яті",
+        "memoryDescription": "Відстежувати використання пам'яті",
+        "network": "Моніторинг мережі",
+        "networkDescription": "Відстежувати мережевий трафік"
+      }
+    },
+    "security": {
+      "authentication": {
+        "title": "Аутентифікація",
+        "description": "Налаштування безпеки та аутентифікації",
+        "enable": "Увімкнути аутентифікацію",
+        "enableDescription": "Вимагати аутентифікацію для доступу",
+        "sessionTimeout": "Таймаут сесії (хв)",
+        "twoFactor": "Двофакторна аутентифікація",
+        "twoFactorDescription": "Вимагати додаткову верифікацію",
+        "auditLog": "Журнал аудиту",
+        "auditLogDescription": "Записувати дії користувачів"
+      },
+      "passwordPolicy": {
+        "title": "Політика паролів",
+        "description": "Налаштування вимог до паролів",
+        "minLength": "Мінімальна довжина",
+        "requireUppercase": "Вимагати великі літери",
+        "requireNumbers": "Вимагати цифри",
+        "requireSymbols": "Вимагати символи"
+      },
+      "allowedIPs": {
+        "title": "Дозволені IP адреси",
+        "description": "Список IP адрес з дозволом доступу"
+      },
+      "accessControl": {
+        "title": "Контроль доступу",
+        "description": "Управління доступом та дозволами",
+        "allowedIPs": "Дозволені IP адреси",
+        "allowedIPsDescription": "Список IP адрес з дозволом доступу",
+        "ipAddress": "IP адреса"
+      },
+      "audit": {
+        "title": "Аудит",
+        "description": "Журналювання дій користувачів",
+        "enable": "Увімкнути журнал аудиту",
+        "enableDescription": "Записувати дії користувачів",
+        "retention": "Період зберігання (днів)"
+      }
+    },
+    "export": "Експорт",
+    "exportSettings": {
+      "autoExport": {
+        "title": "Автоекспорт",
+        "description": "Налаштування автоматичного експорту",
+        "enable": "Увімкнути автоекспорт",
+        "enableDescription": "Автоматично експортувати дані за розкладом",
+        "maxSize": "Максимальний розмір"
+      },
+      "formatFrequency": {
+        "title": "Формат та частота",
+        "description": "Налаштування формату та частоти експорту",
+        "fileFormat": "Формат файлу",
+        "frequency": "Частота",
+        "formats": {
+          "json": "JSON",
+          "csv": "CSV",
+          "xml": "XML"
+        },
+        "frequencies": {
+          "daily": "Щодня",
+          "weekly": "Щотижня",
+          "monthly": "Щомісяця"
+        }
+      },
+      "dataSelection": {
+        "title": "Вибір даних",
+        "description": "Оберіть, які дані включити в експорт",
+        "metrics": "Метрики",
+        "metricsDescription": "Включити метрики продуктивності",
+        "logs": "Логи",
+        "logsDescription": "Включити системні логи",
+        "clientData": "Дані клієнтів",
+        "clientDataDescription": "Включити інформацію про клієнтів"
+      }
+    },
+    "notifications": {
+      "exportSuccess": "Налаштування успішно експортовано",
+      "exportError": "Помилка експорту налаштувань",
+      "importSuccess": "Налаштування успішно імпортовано",
+      "importError": "Помилка імпорту налаштувань",
+      "resetSuccess": "Налаштування успішно скинуто",
+      "resetError": "Помилка скидання налаштувань"
+    }
+  },
+  "alerts": {
+    "systemAlert": "Системне оповіщення",
+    "connectionLost": "З'єднання з сервером втрачено",
+    "connectionRestored": "З'єднання відновлено",
+    "highCpuUsage": "Виявлено високе використання CPU",
+    "highMemoryUsage": "Виявлено високе використання пам'яті",
+    "diskSpaceLow": "Мало місця на диску",
+    "workerDisconnected": "Воркер відключено",
+    "workerReconnected": "Воркер переподключено",
+    "taskFailed": "Виконання завдання невдале",
+    "queueOverload": "Черга завдань перевантажена",
+    "acknowledgeAlert": "Підтвердити",
+    "dismissAlert": "Відхилити",
+    "noActiveAlerts": "Немає активних оповіщень",
+    "title": "Системні оповіщення",
+    "noAlerts": "Немає активних оповіщень",
+    "severity": {
+      "info": "Інформація",
+      "warning": "Попередження",
+      "error": "Помилка",
+      "critical": "Критично"
+    },
+    "types": {
+      "systemError": "Системна помилка",
+      "connectionLost": "З'єднання втрачено",
+      "highCpuUsage": "Високе використання CPU",
+      "lowMemory": "Мало пам'яті",
+      "diskSpaceLow": "Мало місця на диску"
+    }
+  },
+  "errors": {
+    "connectionFailed": "Не вдалося підключитися до сервера",
+    "loadingFailed": "Не вдалося завантажити дані",
+    "savingFailed": "Не вдалося зберегти зміни",
+    "unexpectedError": "Сталася неочікувана помилка",
+    "permissionDenied": "Доступ заборонено",
+    "notFound": "Ресурс не знайдено",
+    "serverError": "Помилка сервера",
+    "networkError": "Мережева помилка",
+    "timeoutError": "Таймаут запиту",
+    "validationError": "Помилка валідації",
+    "tryAgain": "Спробувати знову",
+    "contactSupport": "Зв'язатися з підтримкою",
+    "reload": "Перезавантажити сторінку",
+    "unknownError": "Невідома помилка",
+    "retry": "Спробувати знову",
+    "goBack": "Повернутися назад"
+  },
+  "time": {
+    "seconds": "секунд",
+    "minutes": "хвилин",
+    "hours": "годин",
+    "days": "днів",
+    "ago": "тому",
+    "justNow": "щойно",
+    "never": "ніколи",
+    "minutesAgo": "хвилин тому",
+    "hoursAgo": "годин тому",
+    "daysAgo": "днів тому",
+    "weeksAgo": "тижнів тому",
+    "monthsAgo": "місяців тому",
+    "formats": {
+      "shortDate": "ДД/ММ/РРРР",
+      "longDate": "ДД ММММ РРРР",
+      "shortTime": "ГГ:ХХ",
+      "longTime": "ГГ:ХХ:СС",
+      "dateTime": "ДД/ММ/РРРР ГГ:ХХ"
+    }
+  },
+  "auth": {
+    "login": {
+      "title": "Вхід до TetraCore Hub",
+      "subtitle": "Увійдіть для доступу до управління",
+      "demoLogin": "Демо вхід (розробка)",
+      "loggingIn": "Вхід...",
+      "failed": "Помилка входу. Спробуйте знову.",
+      "failedMessage": "Не вдалося увійти. Перевірте конфігурацію."
+    },
+    "logout": {
+      "loggingOut": "Вихід...",
+      "success": "Успішно вийшли",
+      "failed": "Помилка виходу"
+    },
+    "role": "Роль",
+    "session": "Сесія",
+    "noActiveSession": "Немає активної сесії",
+    "activeSession": "Активна сесія",
+    "sessions": "Сесії",
+    "accessDenied": "Доступ заборонено",
+    "accessDeniedMessage": "У вас немає прав для доступу до цієї сторінки. Зверніться до адміністратора.",
+    "roles": {
+      "admin": "Адміністратор",
+      "user": "Користувач",
+      "viewer": "Переглядач"
+    }
+  }
+}

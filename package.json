@@ -1,0 +1,33 @@
+{
+  "name": "tetra-core-hub",
+  "version": "1.0.0",
+  "description": "TetraCore StreamHub - Integrated Backend and Frontend",
+  "main": "start_hub.py",
+  "scripts": {
+    "heroku-prebuild": "echo 'Installing frontend dependencies...' && cd frontend && npm install",
+    "heroku-postbuild": "echo 'Frontend will be built by start_hub.py'",
+    "build": "cd frontend && npm run build",
+    "dev": "python start_hub.py dev",
+    "start": "python start_hub.py prod",
+    "build-frontend": "python start_hub.py build",
+    "dev-integrated": "python start_hub.py dev",
+    "dev-backend-only": "python start_hub.py fast"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/tetra-core-hub.git"
+  },
+  "author": "TetraCore Team",
+  "license": "MIT",
+  "keywords": [
+    "fastapi",
+    "react",
+    "websockets",
+    "streamhub",
+    "dashboard"
+  ]
+}
