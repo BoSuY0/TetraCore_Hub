@@ -21,7 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import structlog
 
-from config import Settings, get_settings, detect_heroku_app_name, is_heroku_environment
+from config import Settings, get_settings, is_heroku_environment
 from models.messages import (
     BaseMessage, MessageType, parse_message, create_message
 )
@@ -158,8 +158,6 @@ class StreamHub:
                         dashboard_url=self.settings.get_dashboard_url(),
                         websocket_url=self.settings.get_websocket_url(),
                         is_heroku=is_heroku_environment(),
-                        detected_heroku_app_name=detect_heroku_app_name(),
-                        heroku_app_name_env=os.getenv("HEROKU_APP_NAME"),
                         host=self.settings.host,
                         port=self.settings.port)
         self.app.add_middleware(

@@ -28,34 +28,7 @@ class LogLevel(str, Enum):
     CRITICAL = "CRITICAL"
 
 
-def detect_heroku_app_name() -> Optional[str]:
-    """Визначає назву Heroku додатку з різних джерел"""
-    # 1. Пряма змінна HEROKU_APP_NAME
-    app_name = os.getenv("HEROKU_APP_NAME")
-    if app_name:
-        return app_name
-
-    # 2. З Heroku Labs metadata (якщо увімкнено)
-    app_name = os.getenv("HEROKU_APP_ID")
-    if app_name:
-        return app_name
-
-    # 3. З домену якщо є
-    dyno = os.getenv("DYNO")
-    if dyno:
-        # На Heroku можна спробувати отримати hostname
-        try:
-            hostname = socket.gethostname()
-            # Heroku hostnames часто мають формат: <app-name>.<random-id>
-            if hostname and '.' in hostname:
-                potential_name = hostname.split('.')[0]
-                # Перевірка чи це схоже на app name (не dyno id)
-                if not potential_name.startswith('web.') and not potential_name.startswith('worker.'):
-                    return potential_name
-        except:
-            pass
-
-    return None
+# Функція detect_heroku_app_name видалена - використовуємо статичний домен
 
 
 def is_heroku_environment() -> bool:
@@ -145,12 +118,6 @@ class Settings:
             self.redis_enabled = True  # На Heroku зазвичай використовуємо Redis
             self.debug = False
 
-            # Спробуємо визначити app name якщо його немає
-            if not os.getenv("HEROKU_APP_NAME"):
-                detected_name = detect_heroku_app_name()
-                if detected_name:
-                    os.environ["HEROKU_APP_NAME"] = detected_name
-
         env_name = os.getenv("ENVIRONMENT", self.environment.value)
         try:
             self.environment = Environment(env_name)
@@ -170,15 +137,11 @@ class Settings:
         """Налаштування CORS origins залежно від середовища"""
         origins = []
 
-        # Heroku URL
+        # Custom domain URL
         if is_heroku_environment():
-            heroku_app_name = detect_heroku_app_name()
-            if heroku_app_name:
-                heroku_url = f"https://{heroku_app_name}.herokuapp.com"
-                origins.extend([heroku_url])
-            else:
-                # Якщо це Heroku але не можемо визначити app name
-                origins.extend(["*"])
+            custom_url = "https://hub.tetra-core.website"
+            origins.extend([custom_url])
+
 
         # Локальні URL для розробки
         if self.environment == Environment.DEVELOPMENT:
@@ -235,12 +198,8 @@ class Settings:
         """Отримання URL додатку (Heroku або локальний)"""
         # Перевіряємо чи це Heroku
         if is_heroku_environment():
-            heroku_app_name = detect_heroku_app_name()
-            if heroku_app_name:
-                return f"https://{heroku_app_name}.herokuapp.com"
-            else:
-                # Fallback - повертаємо placeholder який потрібно буде замінити
-                return "https://YOUR-APP-NAME.herokuapp.com"
+            # Використовуємо кастомний домен
+            return "https://hub.tetra-core.website"
 
         # Для локальної розробки
         if self.environment == Environment.DEVELOPMENT:

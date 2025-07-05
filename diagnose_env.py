@@ -42,31 +42,11 @@ def check_environment():
 
     print_section("HEROKU APP ІНФОРМАЦІЯ")
 
-    # Різні способи отримання app name
-    heroku_app_name = os.getenv("HEROKU_APP_NAME")
-    heroku_app_id = os.getenv("HEROKU_APP_ID")
-    heroku_slug_id = os.getenv("HEROKU_SLUG_ID")
+    # Heroku специфічна інформація
     heroku_slug_commit = os.getenv("HEROKU_SLUG_COMMIT")
-
-    print(f"HEROKU_APP_NAME: {heroku_app_name or '<не встановлено>'}")
-    print(f"HEROKU_APP_ID: {heroku_app_id or '<не встановлено>'}")
-    print(f"HEROKU_SLUG_ID: {heroku_slug_id or '<не встановлено>'}")
     print(f"HEROKU_SLUG_COMMIT: {heroku_slug_commit or '<не встановлено>'}")
 
-    # Спроба визначити app name
-    detected_name = None
-    if heroku_app_name:
-        detected_name = heroku_app_name
-    elif heroku_app_id:
-        detected_name = heroku_app_id
-    elif is_heroku and hostname:
-        # На Heroku hostname може містити app name
-        if '.' in hostname:
-            potential_name = hostname.split('.')[0]
-            if not potential_name.startswith(('web.', 'worker.')):
-                detected_name = potential_name
 
-    print(f"\nВизначене ім'я додатку: {detected_name or '<не вдалося визначити>'}")
 
     print_section("КОНФІГУРАЦІЯ СЕРЕДОВИЩА")
 
@@ -105,10 +85,8 @@ def check_environment():
 
     # Імітуємо логіку з config.py
     if is_heroku:
-        if detected_name:
-            app_url = f"https://{detected_name}.herokuapp.com"
-        else:
-            app_url = "https://YOUR-APP-NAME.herokuapp.com"
+        # Використовуємо кастомний домен
+        app_url = "https://hub.tetra-core.website"
     else:
         port = os.getenv("PORT", "8000")
         app_url = f"http://localhost:{port}"
@@ -120,10 +98,8 @@ def check_environment():
 
     print_section("РЕКОМЕНДАЦІЇ")
 
-    if is_heroku and not detected_name:
-        print("⚠️  Ви на Heroku, але не вдалося визначити назву додатку!")
-        print("   Рекомендовано встановити змінну HEROKU_APP_NAME:")
-        print("   heroku config:set HEROKU_APP_NAME=ваш-додаток")
+    if is_heroku:
+        print("✅  Використовується кастомний домен hub.tetra-core.website")
 
     if not is_heroku and os.getenv("HOST") == "0.0.0.0":
         print("ℹ️  Локальне середовище з HOST=0.0.0.0")

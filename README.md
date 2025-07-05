@@ -46,6 +46,9 @@ heroku create your-app-name
 heroku buildpacks:add heroku/python
 heroku buildpacks:add heroku/nodejs
 
+# Налаштуйте кастомний домен
+heroku domains:add hub.tetra-core.website
+
 # Додайте Redis
 heroku addons:create heroku-redis:hobby-dev
 ```
@@ -53,9 +56,6 @@ heroku addons:create heroku-redis:hobby-dev
 ### 2. Конфігурація змінних середовища
 
 ```bash
-# ВАЖЛИВО: Встановіть назву вашого додатку
-heroku config:set HEROKU_APP_NAME=your-app-name
-
 # Опціональні налаштування
 heroku config:set LOG_LEVEL=INFO
 heroku config:set AUTH_TOKEN=your-secret-token
@@ -73,15 +73,15 @@ heroku logs --tail
 
 ### 4. Діагностика
 
-Якщо URL показуються неправильно (0.0.0.0 замість app name):
-
 ```bash
-# Запустіть діагностичний скрипт
+# Запустіть діагностичний скрипт для перевірки конфігурації
 heroku run python diagnose_env.py
-
-# Переконайтеся що HEROKU_APP_NAME встановлено
-heroku config:get HEROKU_APP_NAME
 ```
+
+### 5. Кастомний домен
+
+Хаб налаштований на використання кастомного домену `hub.tetra-core.website`.
+Переконайтеся, що DNS записи правильно налаштовані для вашого домену.
 
 ## Конфігурація
 
@@ -95,12 +95,11 @@ heroku config:get HEROKU_APP_NAME
 | `REDIS_ENABLED` | Увімкнути Redis | true (на Heroku) |
 | `LOG_LEVEL` | Рівень логування | INFO |
 | `AUTH_TOKEN` | Токен для аутентифікації клієнтів | - |
-| `HEROKU_APP_NAME` | Назва Heroku додатку | - |
 
 ### Автоматичне визначення Heroku
 
 Hub автоматично визначає що запущений на Heroku за наявністю змінної `DYNO`.
-Для правильної роботи URL необхідно встановити `HEROKU_APP_NAME`.
+У production режимі використовується кастомний домен `hub.tetra-core.website`.
 
 ## API Endpoints
 
@@ -151,8 +150,8 @@ Hub автоматично визначає що запущений на Heroku 
 # Локально
 curl http://localhost:8000/health
 
-# На Heroku
-curl https://your-app-name.herokuapp.com/health
+# На Heroku з кастомним доменом
+curl https://hub.tetra-core.website/health
 ```
 
 ## Розробка
@@ -183,16 +182,15 @@ npm run dev
 
 ## Усунення проблем
 
-### URL показує 0.0.0.0 на Heroku
+### URL кастомного домену
 
-1. Переконайтеся що встановлено `HEROKU_APP_NAME`:
-   ```bash
-   heroku config:set HEROKU_APP_NAME=your-app-name
-   ```
+Хаб використовує кастомний домен `hub.tetra-core.website` замість стандартного Heroku URL.
+Якщо виникають проблеми з доменом:
 
-2. Перезапустіть додаток:
+1. Перевірте налаштування DNS
+2. Переконайтеся що домен додано до Heroku:
    ```bash
-   heroku restart
+   heroku domains
    ```
 
 ### Redis connection failed
