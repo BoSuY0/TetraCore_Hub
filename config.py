@@ -49,6 +49,7 @@ class Settings:
     # Мережеві налаштування
     host: str = "0.0.0.0"
     port: int = 8000
+    custom_domain: str = "hub.tetra-core.website"
 
     # WebSocket налаштування
     websocket_path: str = "/ws"
@@ -137,11 +138,13 @@ class Settings:
         """Налаштування CORS origins залежно від середовища"""
         origins = []
 
-        # Custom domain URL
-        if is_heroku_environment():
-            custom_url = "https://hub.tetra-core.website"
-            origins.extend([custom_url])
-
+        # Production domains
+        if is_heroku_environment() or self.environment == Environment.PRODUCTION:
+            # Custom domain
+            origins.extend([
+                "https://hub.tetra-core.website",
+                "https://tetra-core-hub-29fb6c8b7947.herokuapp.com"
+            ])
 
         # Локальні URL для розробки
         if self.environment == Environment.DEVELOPMENT:
