@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 import os
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
-from .cors_middleware import setup_cors
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import structlog
 
@@ -146,8 +146,15 @@ class StreamHub:
             lifespan=lifespan
         )
 
-        # CORS middleware - using custom dynamic CORS handler
-        setup_cors(self.app, self.settings)
+        # CORS middleware
+        self.app.add_middleware(
+            CORSMiddleware,
+            allow_origins=self.settings.allowed_origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+            expose_headers=["*"]
+        )
 
         # Детальне логування URL конфігурації
         self.logger.info("URL Configuration",
@@ -158,7 +165,6 @@ class StreamHub:
                         is_heroku=is_heroku_environment(),
                         host=self.settings.host,
                         port=self.settings.port)
-        # CORS middleware is now handled by setup_cors() above
 
         # Templates removed - using React SPA instead
 

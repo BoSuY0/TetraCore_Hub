@@ -5,7 +5,6 @@ import React, {
   useEffect,
   ReactNode,
 } from "react";
-import config from "../config";
 
 export interface ConnectionSettings {
   websocketUrl: string;
@@ -86,9 +85,9 @@ interface SettingsContextType {
 
 const defaultSettings: AppSettings = {
   connection: {
-    websocketUrl: config.websocket.url.replace("/ws", ""),
+    websocketUrl: "", // Will be determined dynamically from window.location
     websocketPort: 8000,
-    apiEndpoint: `${config.api.baseUrl}/api`,
+    apiEndpoint: "/api", // Using relative URL
     connectionTimeout: 5000,
     reconnectInterval: 3000,
     maxReconnectAttempts: 5,

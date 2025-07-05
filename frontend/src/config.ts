@@ -1,33 +1,17 @@
 // Configuration for API endpoints
-
-// Determine if we're in production based on the hostname
-const isProduction =
-  window.location.hostname !== "localhost" &&
-  window.location.hostname !== "127.0.0.1" &&
-  !window.location.hostname.startsWith("192.168.");
+// Using relative URLs to avoid CORS issues - requests will go to the same domain as frontend
 
 // Get the base URL for API calls
 export const getApiBaseUrl = (): string => {
-  // If API_URL is set in environment variables (for development)
-  if (process.env.REACT_APP_API_URL) {
-    return process.env.REACT_APP_API_URL;
-  }
-
-  // In production, use the same host as the frontend
-  if (isProduction) {
-    return `${window.location.protocol}//${window.location.host}`;
-  }
-
-  // In development, default to localhost:8000
-  return "http://localhost:8000";
+  // Always use relative URLs - this ensures same-origin requests
+  return "";
 };
 
 // Get WebSocket URL
 export const getWebSocketUrl = (): string => {
-  const apiUrl = getApiBaseUrl();
-
-  // Convert http/https to ws/wss
-  return apiUrl.replace("http://", "ws://").replace("https://", "wss://");
+  // For WebSocket, we need absolute URL
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}`;
 };
 
 // Export configuration object with dynamic values
@@ -84,7 +68,8 @@ export const endpoints = {
 
 // Helper function to build full URL
 export const buildUrl = (endpoint: string): string => {
-  return `${config.api.baseUrl}${endpoint}`;
+  // With relative URLs, just return the endpoint
+  return endpoint;
 };
 
 // Helper function for WebSocket URL with path
@@ -92,8 +77,8 @@ export const buildWsUrl = (path: string = "/ws"): string => {
   return `${config.websocket.url}${path}`;
 };
 
-// Export individual values for backward compatibility as getters
-export const API_BASE_URL = getApiBaseUrl();
+// Export individual values for backward compatibility
+export const API_BASE_URL = "";
 export const WS_BASE_URL = getWebSocketUrl();
 
 export default config;

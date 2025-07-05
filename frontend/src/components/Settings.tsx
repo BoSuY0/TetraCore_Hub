@@ -1,7 +1,6 @@
 import React, { useState, useRef } from "react";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
-import config from "../config";
 
 interface TabButtonProps {
   id: string;
@@ -335,7 +334,7 @@ export const Settings: React.FC = () => {
             updateSettings("connection", { apiEndpoint: value })
           }
           type="url"
-          placeholder={`${config.api.baseUrl}/api`}
+          placeholder="/api"
           icon="⚡"
         />
       </SettingCard>
