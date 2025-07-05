@@ -7,6 +7,7 @@ import {
   SystemAlert,
   DashboardData,
 } from "../types/api";
+import config, { buildUrl, buildWsUrl } from "../config";
 
 interface StatusState {
   health: StreamHubHealth | null;
@@ -127,7 +128,7 @@ interface StatusProviderProps {
 
 export const StatusProvider: React.FC<StatusProviderProps> = ({
   children,
-  apiBaseUrl = "http://localhost:8000",
+  apiBaseUrl = config.api.baseUrl,
   refreshInterval = 10000,
 }) => {
   const [state, dispatch] = useReducer(statusReducer, initialState);
@@ -136,7 +137,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
   // API calls
   const fetchHealth = async (): Promise<StreamHubHealth | null> => {
     try {
-      const response = await fetch(`${apiBaseUrl}/health`);
+      const response = await fetch(buildUrl("/health"));
       if (!response.ok) throw new Error("Health check failed");
       return await response.json();
     } catch (error) {
@@ -147,7 +148,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
   const fetchMetrics = async (): Promise<StreamHubMetrics | null> => {
     try {
-      const response = await fetch(`${apiBaseUrl}/metrics`);
+      const response = await fetch(buildUrl("/metrics"));
       if (!response.ok) throw new Error("Metrics fetch failed");
       return await response.json();
     } catch (error) {
@@ -158,7 +159,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
   const fetchClients = async (): Promise<Client[]> => {
     try {
-      const response = await fetch(`${apiBaseUrl}/clients`);
+      const response = await fetch(buildUrl("/clients"));
       if (!response.ok) {
         // Return empty array if service unavailable (no clients connected)
         if (response.status === 503) return [];
@@ -174,7 +175,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
   const fetchTaskStats = async (): Promise<TaskQueueStats | null> => {
     try {
-      const response = await fetch(`${apiBaseUrl}/tasks`);
+      const response = await fetch(buildUrl("/tasks"));
       if (!response.ok) throw new Error("Task stats fetch failed");
       return await response.json();
     } catch (error) {
@@ -216,10 +217,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
     dispatch({ type: "SET_CONNECTION_STATUS", payload: "connecting" });
 
-    const wsUrl = apiBaseUrl
-      .replace("http://", "ws://")
-      .replace("https://", "wss://");
-    const ws = new WebSocket(`${wsUrl}/ws`);
+    const ws = new WebSocket(buildWsUrl("/ws"));
 
     ws.onopen = () => {
       dispatch({ type: "SET_CONNECTION_STATUS", payload: "connected" });

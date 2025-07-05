@@ -1,4 +1,11 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  ReactNode,
+} from "react";
+import config from "../config";
 
 export interface ConnectionSettings {
   websocketUrl: string;
@@ -10,11 +17,11 @@ export interface ConnectionSettings {
 }
 
 export interface UISettings {
-  theme: 'light' | 'dark' | 'system';
-  language: 'uk' | 'en';
+  theme: "light" | "dark" | "system";
+  language: "uk" | "en";
   refreshInterval: number;
-  dateFormat: 'dd/mm/yyyy' | 'mm/dd/yyyy' | 'yyyy-mm-dd';
-  timeFormat: '12h' | '24h';
+  dateFormat: "dd/mm/yyyy" | "mm/dd/yyyy" | "yyyy-mm-dd";
+  timeFormat: "12h" | "24h";
   compactMode: boolean;
 }
 
@@ -23,7 +30,7 @@ export interface MonitoringSettings {
   notifyOnErrors: boolean;
   notifyOnNewClients: boolean;
   notifyOnDisconnects: boolean;
-  logLevel: 'debug' | 'info' | 'warn' | 'error';
+  logLevel: "debug" | "info" | "warn" | "error";
   maxLogEntries: number;
   enableMetrics: boolean;
   metricsInterval: number;
@@ -48,8 +55,8 @@ export interface SecuritySettings {
 
 export interface ExportSettings {
   autoExportLogs: boolean;
-  exportFormat: 'json' | 'csv' | 'xml';
-  exportInterval: 'daily' | 'weekly' | 'monthly';
+  exportFormat: "json" | "csv" | "xml";
+  exportInterval: "daily" | "weekly" | "monthly";
   maxExportSize: number;
   includeMetrics: boolean;
   includeLogs: boolean;
@@ -66,7 +73,10 @@ export interface AppSettings {
 
 interface SettingsContextType {
   settings: AppSettings;
-  updateSettings: (category: keyof AppSettings, newSettings: Partial<any>) => void;
+  updateSettings: (
+    category: keyof AppSettings,
+    newSettings: Partial<any>,
+  ) => void;
   resetSettings: (category?: keyof AppSettings) => void;
   exportSettings: () => string;
   importSettings: (settingsJson: string) => boolean;
@@ -76,19 +86,19 @@ interface SettingsContextType {
 
 const defaultSettings: AppSettings = {
   connection: {
-    websocketUrl: 'ws://localhost',
+    websocketUrl: config.websocket.url.replace("/ws", ""),
     websocketPort: 8000,
-    apiEndpoint: 'http://localhost:8000/api',
+    apiEndpoint: `${config.api.baseUrl}/api`,
     connectionTimeout: 5000,
     reconnectInterval: 3000,
     maxReconnectAttempts: 5,
   },
   ui: {
-    theme: 'system',
-    language: 'uk',
+    theme: "system",
+    language: "uk",
     refreshInterval: 5000,
-    dateFormat: 'dd/mm/yyyy',
-    timeFormat: '24h',
+    dateFormat: "dd/mm/yyyy",
+    timeFormat: "24h",
     compactMode: false,
   },
   monitoring: {
@@ -96,7 +106,7 @@ const defaultSettings: AppSettings = {
     notifyOnErrors: true,
     notifyOnNewClients: true,
     notifyOnDisconnects: false,
-    logLevel: 'info',
+    logLevel: "info",
     maxLogEntries: 1000,
     enableMetrics: true,
     metricsInterval: 1000,
@@ -108,7 +118,7 @@ const defaultSettings: AppSettings = {
     enableAuth: false,
     sessionTimeout: 3600,
     requireTwoFactor: false,
-    allowedIPs: ['127.0.0.1', '::1'],
+    allowedIPs: ["127.0.0.1", "::1"],
     enableAuditLog: true,
     passwordPolicy: {
       minLength: 8,
@@ -119,8 +129,8 @@ const defaultSettings: AppSettings = {
   },
   export: {
     autoExportLogs: false,
-    exportFormat: 'json',
-    exportInterval: 'daily',
+    exportFormat: "json",
+    exportInterval: "daily",
     maxExportSize: 10,
     includeMetrics: true,
     includeLogs: true,
@@ -128,12 +138,14 @@ const defaultSettings: AppSettings = {
   },
 };
 
-const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
+const SettingsContext = createContext<SettingsContextType | undefined>(
+  undefined,
+);
 
 export const useSettings = (): SettingsContextType => {
   const context = useContext(SettingsContext);
   if (!context) {
-    throw new Error('useSettings must be used within a SettingsProvider');
+    throw new Error("useSettings must be used within a SettingsProvider");
   }
   return context;
 };
@@ -142,11 +154,16 @@ interface SettingsProviderProps {
   children: ReactNode;
 }
 
-export const SettingsProvider: React.FC<SettingsProviderProps> = ({ children }) => {
+export const SettingsProvider: React.FC<SettingsProviderProps> = ({
+  children,
+}) => {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
 
-  const updateSettings = (category: keyof AppSettings, newSettings: Partial<any>) => {
-    setSettings(prev => ({
+  const updateSettings = (
+    category: keyof AppSettings,
+    newSettings: Partial<any>,
+  ) => {
+    setSettings((prev) => ({
       ...prev,
       [category]: {
         ...prev[category],
@@ -157,7 +174,7 @@ export const SettingsProvider: React.FC<SettingsProviderProps> = ({ children }) 
 
   const resetSettings = (category?: keyof AppSettings) => {
     if (category) {
-      setSettings(prev => ({
+      setSettings((prev) => ({
         ...prev,
         [category]: defaultSettings[category],
       }));
@@ -174,7 +191,7 @@ export const SettingsProvider: React.FC<SettingsProviderProps> = ({ children }) 
     try {
       const imported = JSON.parse(settingsJson);
       // Валідація структури
-      if (imported && typeof imported === 'object') {
+      if (imported && typeof imported === "object") {
         setSettings({ ...defaultSettings, ...imported });
         return true;
       }
@@ -186,21 +203,21 @@ export const SettingsProvider: React.FC<SettingsProviderProps> = ({ children }) 
 
   const saveSettings = () => {
     try {
-      localStorage.setItem('tetracore-settings', JSON.stringify(settings));
+      localStorage.setItem("tetracore-settings", JSON.stringify(settings));
     } catch (error) {
-      console.error('Failed to save settings:', error);
+      console.error("Failed to save settings:", error);
     }
   };
 
   const loadSettings = () => {
     try {
-      const saved = localStorage.getItem('tetracore-settings');
+      const saved = localStorage.getItem("tetracore-settings");
       if (saved) {
         const parsed = JSON.parse(saved);
         setSettings({ ...defaultSettings, ...parsed });
       }
     } catch (error) {
-      console.error('Failed to load settings:', error);
+      console.error("Failed to load settings:", error);
     }
   };
 
@@ -227,4 +244,4 @@ export const SettingsProvider: React.FC<SettingsProviderProps> = ({ children }) 
       {children}
     </SettingsContext.Provider>
   );
-}; 
+};

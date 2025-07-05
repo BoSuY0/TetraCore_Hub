@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, memo, useCallback } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { useStatus } from "../contexts/StatusContext";
 import { Client } from "../types/api";
+import { API_BASE_URL } from "../config";
 import "../animations.css";
 import {
   CpuIcon,
@@ -40,25 +41,30 @@ interface WorkerMetricsProps {
 }
 
 // API функції для отримання реальних даних
-const API_BASE_URL = 'http://localhost:8000';
+// API_BASE_URL імпортується з config.ts
 
 const fetchHubMetrics = async (): Promise<any> => {
   try {
     const response = await fetch(`${API_BASE_URL}/dashboard/api/hub-metrics`);
-    if (!response.ok) throw new Error('Failed to fetch hub metrics');
+    if (!response.ok) throw new Error("Failed to fetch hub metrics");
     return await response.json();
   } catch (error) {
-    console.error('Error fetching hub metrics:', error);
+    console.error("Error fetching hub metrics:", error);
     return null;
   }
 };
 
-const fetchClientMetrics = async (clientId: string): Promise<WorkerMetricsData[]> => {
+const fetchClientMetrics = async (
+  clientId: string,
+): Promise<WorkerMetricsData[]> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/dashboard/api/clients/${clientId}/metrics`);
-    if (!response.ok) throw new Error(`Failed to fetch metrics for client ${clientId}`);
+    const response = await fetch(
+      `${API_BASE_URL}/dashboard/api/clients/${clientId}/metrics`,
+    );
+    if (!response.ok)
+      throw new Error(`Failed to fetch metrics for client ${clientId}`);
     const data = await response.json();
-    
+
     // Перетворюємо дані з API у формат WorkerMetricsData
     if (data.metrics && Array.isArray(data.metrics)) {
       return data.metrics.map((metric: any) => ({
@@ -71,7 +77,7 @@ const fetchClientMetrics = async (clientId: string): Promise<WorkerMetricsData[]
         response_time: metric.response_time || 0,
       }));
     }
-    
+
     return [];
   } catch (error) {
     console.error(`Error fetching metrics for client ${clientId}:`, error);
@@ -81,17 +87,19 @@ const fetchClientMetrics = async (clientId: string): Promise<WorkerMetricsData[]
 
 const fetchRealTimeMetrics = async (): Promise<any> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/dashboard/api/real-time-metrics`);
-    if (!response.ok) throw new Error('Failed to fetch real-time metrics');
+    const response = await fetch(
+      `${API_BASE_URL}/dashboard/api/real-time-metrics`,
+    );
+    if (!response.ok) throw new Error("Failed to fetch real-time metrics");
     return await response.json();
   } catch (error) {
-    console.error('Error fetching real-time metrics:', error);
+    console.error("Error fetching real-time metrics:", error);
     return null;
   }
 };
 
 // Компонент системного моніторингу ресурсів
-const SystemResourceMonitor: React.FC<{ 
+const SystemResourceMonitor: React.FC<{
   selectedClient?: Client | null;
   resourceData?: SystemResourceData;
 }> = ({ selectedClient, resourceData }) => {
@@ -104,7 +112,7 @@ const SystemResourceMonitor: React.FC<{
     const fetchData = async () => {
       const hubMetrics = await fetchHubMetrics();
       const rtMetrics = await fetchRealTimeMetrics();
-      
+
       if (hubMetrics || rtMetrics) {
         setRealTimeData({ hub: hubMetrics, realTime: rtMetrics });
       }
@@ -144,8 +152,14 @@ const SystemResourceMonitor: React.FC<{
 
   // Використовуємо реальні дані з API
   const systemData = resourceData || {
-    cpu_usage: realTimeData?.hub?.system?.cpu_usage || realTimeData?.realTime?.performance_data?.cpu_usage || 0,
-    memory_usage: realTimeData?.hub?.system?.memory_usage || realTimeData?.realTime?.performance_data?.memory_usage || 0,
+    cpu_usage:
+      realTimeData?.hub?.system?.cpu_usage ||
+      realTimeData?.realTime?.performance_data?.cpu_usage ||
+      0,
+    memory_usage:
+      realTimeData?.hub?.system?.memory_usage ||
+      realTimeData?.realTime?.performance_data?.memory_usage ||
+      0,
     disk_usage: realTimeData?.hub?.system?.disk_usage || 0,
     network_in: realTimeData?.realTime?.performance_data?.network_io || 0,
     network_out: realTimeData?.realTime?.performance_data?.network_io || 0,
@@ -192,7 +206,7 @@ const SystemResourceMonitor: React.FC<{
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
-                {typeof resource.icon === 'string' ? (
+                {typeof resource.icon === "string" ? (
                   <span className="text-2xl">{resource.icon}</span>
                 ) : (
                   resource.icon
@@ -201,7 +215,9 @@ const SystemResourceMonitor: React.FC<{
                   {resource.name}
                 </span>
               </div>
-              <span className={`text-lg font-bold ${getUsageTextColor(resource.value)}`}>
+              <span
+                className={`text-lg font-bold ${getUsageTextColor(resource.value)}`}
+              >
                 {Math.round(resource.value)}%
               </span>
             </div>
@@ -220,13 +236,17 @@ const SystemResourceMonitor: React.FC<{
             <p className="text-lg font-bold text-blue-600">
               {formatBytes(systemData.network_in * 1024 * 1024)}
             </p>
-            <p className="text-sm text-blue-700">{t("dashboard.incomingTraffic")}</p>
+            <p className="text-sm text-blue-700">
+              {t("dashboard.incomingTraffic")}
+            </p>
           </div>
           <div className="text-center p-4 bg-green-50 rounded-lg">
             <p className="text-lg font-bold text-green-600">
               {formatBytes(systemData.network_out * 1024 * 1024)}
             </p>
-            <p className="text-sm text-green-700">{t("dashboard.outgoingTraffic")}</p>
+            <p className="text-sm text-green-700">
+              {t("dashboard.outgoingTraffic")}
+            </p>
           </div>
         </div>
 
@@ -234,7 +254,9 @@ const SystemResourceMonitor: React.FC<{
         {systemData.uptime > 0 && (
           <div className="pt-4 border-t border-secondary-200">
             <div className="flex justify-between items-center">
-              <span className="text-sm text-secondary-600">{t("dashboard.systemUptime")}</span>
+              <span className="text-sm text-secondary-600">
+                {t("dashboard.systemUptime")}
+              </span>
               <span className="text-lg font-bold text-purple-600">
                 {formatUptime(systemData.uptime)}
               </span>
@@ -257,21 +279,35 @@ const MetricChart: React.FC<{
     const { maxValue, minValue, range, points, yAxisLabels } = useMemo(() => {
       // Handle empty or invalid data
       if (!data || data.length === 0) {
-        return { maxValue: 0, minValue: 0, range: 1, points: [], yAxisLabels: [] };
+        return {
+          maxValue: 0,
+          minValue: 0,
+          range: 1,
+          points: [],
+          yAxisLabels: [],
+        };
       }
 
-      const values = data.map((d) => {
-        const val = Number(d[dataKey]);
-        return isNaN(val) ? 0 : val;
-      }).filter(val => !isNaN(val));
+      const values = data
+        .map((d) => {
+          const val = Number(d[dataKey]);
+          return isNaN(val) ? 0 : val;
+        })
+        .filter((val) => !isNaN(val));
 
       if (values.length === 0) {
-        return { maxValue: 0, minValue: 0, range: 1, points: [], yAxisLabels: [] };
+        return {
+          maxValue: 0,
+          minValue: 0,
+          range: 1,
+          points: [],
+          yAxisLabels: [],
+        };
       }
 
       const max = Math.max(...values);
       const min = Math.min(...values);
-      
+
       // Додаємо відступи для кращого відображення
       const padding = (max - min) * 0.1 || 1;
       const adjustedMax = max + padding;
@@ -285,15 +321,21 @@ const MetricChart: React.FC<{
       const topMargin = 20;
 
       const chartPoints = data.map((point, index) => {
-        const x = leftMargin + (index * chartWidth) / Math.max(data.length - 1, 1);
+        const x =
+          leftMargin + (index * chartWidth) / Math.max(data.length - 1, 1);
         const value = Number(point[dataKey]);
         const safeValue = isNaN(value) ? 0 : value;
-        const y = topMargin + chartHeight - ((safeValue - adjustedMin) / r) * chartHeight;
-        return { 
-          x, 
-          y: isNaN(y) ? topMargin + chartHeight : Math.max(topMargin, Math.min(topMargin + chartHeight, y)), 
-          value: safeValue, 
-          timestamp: point.timestamp 
+        const y =
+          topMargin +
+          chartHeight -
+          ((safeValue - adjustedMin) / r) * chartHeight;
+        return {
+          x,
+          y: isNaN(y)
+            ? topMargin + chartHeight
+            : Math.max(topMargin, Math.min(topMargin + chartHeight, y)),
+          value: safeValue,
+          timestamp: point.timestamp,
         };
       });
 
@@ -305,12 +347,12 @@ const MetricChart: React.FC<{
         return { value, y };
       });
 
-      return { 
-        maxValue: adjustedMax, 
-        minValue: adjustedMin, 
-        range: r, 
+      return {
+        maxValue: adjustedMax,
+        minValue: adjustedMin,
+        range: r,
         points: chartPoints,
-        yAxisLabels: yLabels
+        yAxisLabels: yLabels,
       };
     }, [data, dataKey]);
 
@@ -322,10 +364,16 @@ const MetricChart: React.FC<{
         <div className="relative h-56">
           {points.length === 0 ? (
             <div className="flex items-center justify-center h-full">
-              <p className="text-secondary-500 text-sm">Немає даних для відображення</p>
+              <p className="text-secondary-500 text-sm">
+                Немає даних для відображення
+              </p>
             </div>
           ) : (
-            <svg className="w-full h-full" viewBox="0 0 420 180" preserveAspectRatio="xMidYMid meet">
+            <svg
+              className="w-full h-full"
+              viewBox="0 0 420 180"
+              preserveAspectRatio="xMidYMid meet"
+            >
               {/* Grid lines */}
               {yAxisLabels.map((label, i) => (
                 <line
@@ -369,7 +417,8 @@ const MetricChart: React.FC<{
                   className="text-xs fill-secondary-500"
                   fontSize="10"
                 >
-                  {label.value.toFixed(1)}{unit}
+                  {label.value.toFixed(1)}
+                  {unit}
                 </text>
               ))}
 
@@ -423,12 +472,7 @@ const MetricChart: React.FC<{
                     strokeWidth="2"
                     className="hover:r-6 transition-all cursor-pointer"
                   />
-                  <circle
-                    cx={point.x}
-                    cy={point.y}
-                    r="2"
-                    fill={color}
-                  />
+                  <circle cx={point.x} cy={point.y} r="2" fill={color} />
                   <title>{`${title}: ${point.value.toFixed(2)}${unit}\nЧас: ${new Date(point.timestamp).toLocaleTimeString()}`}</title>
                 </g>
               ))}
@@ -444,7 +488,8 @@ const MetricChart: React.FC<{
                     fill={color}
                     fontSize="11"
                   >
-                    {points[points.length - 1].value.toFixed(1)}{unit}
+                    {points[points.length - 1].value.toFixed(1)}
+                    {unit}
                   </text>
                 </g>
               )}
@@ -476,7 +521,7 @@ const WorkerCard: React.FC<{
   metrics: WorkerMetricsData[];
   onSelect?: () => void;
   isSelected?: boolean;
-  }> = memo(
+}> = memo(
   ({ client, metrics, onSelect, isSelected = false }) => {
     const isHealthy = client.is_healthy !== false;
     const currentLoad = client.current_load || 0;
@@ -507,21 +552,17 @@ const WorkerCard: React.FC<{
     };
 
     return (
-      <div className={`bg-white rounded-xl shadow-sm p-6 space-y-4 card-hover hover-glow transition-all duration-300 ${isSelected ? 'ring-2 ring-primary-500 bg-primary-50' : ''}`}>
+      <div
+        className={`bg-white rounded-xl shadow-sm p-6 space-y-4 card-hover hover-glow transition-all duration-300 ${isSelected ? "ring-2 ring-primary-500 bg-primary-50" : ""}`}
+      >
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className="p-2 bg-primary-50 rounded-lg">
               {client.client_type === "worker_api" ? (
-                <CpuIcon
-                  size="lg"
-                  className="text-primary-600"
-                />
+                <CpuIcon size="lg" className="text-primary-600" />
               ) : (
-                <MemoryIcon
-                  size="lg"
-                  className="text-primary-600"
-                />
+                <MemoryIcon size="lg" className="text-primary-600" />
               )}
             </div>
             <div>
@@ -543,10 +584,7 @@ const WorkerCard: React.FC<{
               {isHealthy ? (
                 <AnimatedHeartIcon size="md" className="text-success-500" />
               ) : (
-                <ErrorIcon
-                  size="md"
-                  className="text-error-500"
-                />
+                <ErrorIcon size="md" className="text-error-500" />
               )}
             </div>
           </div>
@@ -681,7 +719,7 @@ const WorkerCard: React.FC<{
             </div>
           );
         }, [metrics, client.client_id])}
-        
+
         {/* Select button */}
         {onSelect && (
           <div className="pt-4 border-t border-secondary-200 animate-slide-up">
@@ -689,19 +727,27 @@ const WorkerCard: React.FC<{
               onClick={onSelect}
               className={`w-full px-4 py-2 rounded-lg font-medium transition-all duration-300 transform hover:scale-105 ${
                 isSelected
-                  ? 'bg-primary-500 text-white shadow-lg animate-pulse-soft'
-                  : 'bg-secondary-100 text-secondary-700 hover:bg-primary-100 hover:text-primary-700 hover:shadow-md'
+                  ? "bg-primary-500 text-white shadow-lg animate-pulse-soft"
+                  : "bg-secondary-100 text-secondary-700 hover:bg-primary-100 hover:text-primary-700 hover:shadow-md"
               }`}
             >
               {isSelected ? (
                 <span className="flex items-center justify-center space-x-2">
-                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  <svg
+                    className="w-4 h-4"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                      clipRule="evenodd"
+                    />
                   </svg>
                   <span>Обрано для аналізу</span>
                 </span>
               ) : (
-                'Обрати для аналізу'
+                "Обрати для аналізу"
               )}
             </button>
           </div>
@@ -749,10 +795,7 @@ const WorkerMetrics: React.FC<WorkerMetricsProps> = ({ clients }) => {
   );
 
   // Розширюємо для всіх типів клієнтів (воркери, API-воркери, боти, стрім-хаби)
-  const allClients = useMemo(
-    () => clients,
-    [clients],
-  );
+  const allClients = useMemo(() => clients, [clients]);
 
   const { apiWorkers, regularWorkers, bots, streamHubs } = useMemo(
     () => ({
@@ -762,9 +805,7 @@ const WorkerMetrics: React.FC<WorkerMetricsProps> = ({ clients }) => {
       regularWorkers: workers.filter(
         (worker) => worker.client_type === "worker",
       ),
-      bots: clients.filter(
-        (client) => client.client_type === "bot",
-      ),
+      bots: clients.filter((client) => client.client_type === "bot"),
       streamHubs: clients.filter(
         (client) => client.client_type === "stream_hub",
       ),
@@ -773,27 +814,30 @@ const WorkerMetrics: React.FC<WorkerMetricsProps> = ({ clients }) => {
   );
 
   // Memoize worker selection handler
-  const handleWorkerSelect = useCallback((workerId: string) => {
-    const isNewSelection = selectedWorker !== workerId;
-    
-    if (selectedWorker === workerId) {
-      // Скрываем секции с анимацией
-      setShowDetailedMetrics(false);
-      setShowSystemMonitor(false);
-      setShowClientSelection(false);
-      
-      setTimeout(() => {
-        setSelectedWorker(null);
-      }, 300);
-    } else {
-      setSelectedWorker(workerId);
-      
-      // Показываем секции с задержкой для плавности
-      setTimeout(() => setShowDetailedMetrics(true), 100);
-      setTimeout(() => setShowSystemMonitor(true), 300);
-      setTimeout(() => setShowClientSelection(true), 500);
-    }
-  }, [selectedWorker]);
+  const handleWorkerSelect = useCallback(
+    (workerId: string) => {
+      const isNewSelection = selectedWorker !== workerId;
+
+      if (selectedWorker === workerId) {
+        // Скрываем секции с анимацией
+        setShowDetailedMetrics(false);
+        setShowSystemMonitor(false);
+        setShowClientSelection(false);
+
+        setTimeout(() => {
+          setSelectedWorker(null);
+        }, 300);
+      } else {
+        setSelectedWorker(workerId);
+
+        // Показываем секции с задержкой для плавности
+        setTimeout(() => setShowDetailedMetrics(true), 100);
+        setTimeout(() => setShowSystemMonitor(true), 300);
+        setTimeout(() => setShowClientSelection(true), 500);
+      }
+    },
+    [selectedWorker],
+  );
 
   // Memoize time range change handler
   const handleTimeRangeChange = useCallback(
@@ -804,20 +848,23 @@ const WorkerMetrics: React.FC<WorkerMetricsProps> = ({ clients }) => {
   );
 
   // Отримуємо реальні метрики з API
-  const fetchMetricsForClient = useCallback(async (clientId: string): Promise<WorkerMetricsData[]> => {
-    try {
-      const metrics = await fetchClientMetrics(clientId);
-      if (metrics.length === 0) {
-        // Якщо API не повертає дані, повертаємо порожній масив
-        console.warn(`No metrics data available for client ${clientId}`);
+  const fetchMetricsForClient = useCallback(
+    async (clientId: string): Promise<WorkerMetricsData[]> => {
+      try {
+        const metrics = await fetchClientMetrics(clientId);
+        if (metrics.length === 0) {
+          // Якщо API не повертає дані, повертаємо порожній масив
+          console.warn(`No metrics data available for client ${clientId}`);
+          return [];
+        }
+        return metrics;
+      } catch (error) {
+        console.error(`Failed to fetch metrics for client ${clientId}:`, error);
         return [];
       }
-      return metrics;
-    } catch (error) {
-      console.error(`Failed to fetch metrics for client ${clientId}:`, error);
-      return [];
-    }
-  }, []);
+    },
+    [],
+  );
 
   // Ініціалізуємо стан анімацій при зміні selectedWorker
   useEffect(() => {
@@ -825,14 +872,14 @@ const WorkerMetrics: React.FC<WorkerMetricsProps> = ({ clients }) => {
       setShowDetailedMetrics(false);
       setShowSystemMonitor(false);
       setShowClientSelection(false);
-      
+
       // Показуємо секції поступово
       const timeouts = [
         setTimeout(() => setShowDetailedMetrics(true), 100),
         setTimeout(() => setShowSystemMonitor(true), 300),
         setTimeout(() => setShowClientSelection(true), 500),
       ];
-      
+
       return () => timeouts.forEach(clearTimeout);
     } else {
       setShowDetailedMetrics(false);
@@ -845,7 +892,7 @@ const WorkerMetrics: React.FC<WorkerMetricsProps> = ({ clients }) => {
   useEffect(() => {
     const updateMetrics = async () => {
       const newMetricsData: Record<string, WorkerMetricsData[]> = {};
-      
+
       // Паралельно отримуємо метрики для всіх клієнтів
       const metricsPromises = allClients.map(async (client) => {
         const metrics = await fetchMetricsForClient(client.client_id);
@@ -860,14 +907,14 @@ const WorkerMetrics: React.FC<WorkerMetricsProps> = ({ clients }) => {
 
         setMetricsData(newMetricsData);
       } catch (error) {
-        console.error('Failed to fetch metrics for clients:', error);
+        console.error("Failed to fetch metrics for clients:", error);
         // У випадку помилки залишаємо поточні дані
       }
     };
 
     if (allClients.length > 0) {
       updateMetrics();
-      
+
       // Оновлюємо метрики кожні 30 секунд
       const interval = setInterval(updateMetrics, 30000);
       return () => clearInterval(interval);
@@ -882,9 +929,7 @@ const WorkerMetrics: React.FC<WorkerMetricsProps> = ({ clients }) => {
           <h1 className="text-2xl font-bold text-secondary-900">
             {t("metrics.title")}
           </h1>
-          <p className="text-secondary-600">
-            {t("metrics.subtitle")}
-          </p>
+          <p className="text-secondary-600">{t("metrics.subtitle")}</p>
         </div>
         <div className="flex items-center space-x-4">
           <select
@@ -922,7 +967,11 @@ const WorkerMetrics: React.FC<WorkerMetricsProps> = ({ clients }) => {
           <div className="flex items-center">
             <div className="p-3 rounded-lg bg-blue-100 text-blue-600">
               <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M6 6V5a3 3 0 013-3h2a3 3 0 013 3v1h2a2 2 0 012 2v3.57A22.952 22.952 0 0110 13a22.95 22.95 0 01-8-1.43V8a2 2 0 012-2h2zm2-1a1 1 0 011-1h2a1 1 0 011 1v1H8V5zm1 5a1 1 0 011-1h.01a1 1 0 110 2H10a1 1 0 01-1-1z" clipRule="evenodd" />
+                <path
+                  fillRule="evenodd"
+                  d="M6 6V5a3 3 0 013-3h2a3 3 0 013 3v1h2a2 2 0 012 2v3.57A22.952 22.952 0 0110 13a22.95 22.95 0 01-8-1.43V8a2 2 0 012-2h2zm2-1a1 1 0 011-1h2a1 1 0 011 1v1H8V5zm1 5a1 1 0 011-1h.01a1 1 0 110 2H10a1 1 0 01-1-1z"
+                  clipRule="evenodd"
+                />
                 <path d="M2 13.692V16a2 2 0 002 2h12a2 2 0 002-2v-2.308A24.974 24.974 0 0110 15c-2.796 0-5.487-.46-8-1.308z" />
               </svg>
             </div>
@@ -957,7 +1006,11 @@ const WorkerMetrics: React.FC<WorkerMetricsProps> = ({ clients }) => {
           <div className="flex items-center">
             <div className="p-3 rounded-lg bg-purple-100 text-purple-600">
               <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V8zm0 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1v-2z" clipRule="evenodd" />
+                <path
+                  fillRule="evenodd"
+                  d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V8zm0 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1v-2z"
+                  clipRule="evenodd"
+                />
               </svg>
             </div>
             <div className="ml-4">
@@ -965,7 +1018,10 @@ const WorkerMetrics: React.FC<WorkerMetricsProps> = ({ clients }) => {
                 {t("metrics.activeBotServers")}
               </p>
               <p className="text-2xl font-bold text-secondary-900">
-                {bots.filter((bot) => bot.connection_status === "connected").length}
+                {
+                  bots.filter((bot) => bot.connection_status === "connected")
+                    .length
+                }
               </p>
             </div>
           </div>
@@ -982,7 +1038,7 @@ const WorkerMetrics: React.FC<WorkerMetricsProps> = ({ clients }) => {
         {regularWorkers.length > 0 ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
             {regularWorkers.map((worker, index) => (
-              <div 
+              <div
                 key={`regular-${worker.client_id}`}
                 className="card-entrance"
                 style={{ animationDelay: `${index * 0.1}s` }}
@@ -1015,7 +1071,7 @@ const WorkerMetrics: React.FC<WorkerMetricsProps> = ({ clients }) => {
         {apiWorkers.length > 0 ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
             {apiWorkers.map((worker, index) => (
-              <div 
+              <div
                 key={`api-${worker.client_id}`}
                 className="card-entrance"
                 style={{ animationDelay: `${index * 0.1}s` }}
@@ -1031,24 +1087,28 @@ const WorkerMetrics: React.FC<WorkerMetricsProps> = ({ clients }) => {
           </div>
         ) : (
           <div className="bg-white rounded-xl shadow-sm p-8 text-center">
-                          <p className="text-secondary-500">{t("metrics.noApiWorkers")}</p>
+            <p className="text-secondary-500">{t("metrics.noApiWorkers")}</p>
           </div>
         )}
       </div>
 
       {/* Detailed charts for selected client */}
       {selectedWorker && metricsData[selectedWorker] && (
-        <div className={`metrics-section-enter ${showDetailedMetrics ? 'opacity-100' : 'opacity-0'}`}>
+        <div
+          className={`metrics-section-enter ${showDetailedMetrics ? "opacity-100" : "opacity-0"}`}
+        >
           <h2 className="text-xl font-semibold text-secondary-900 mb-6 flex items-center">
             <span className="bg-gradient-to-r from-primary-600 to-primary-800 bg-clip-text text-transparent">
               📊 Детальні метрики:
             </span>
             <span className="ml-2 px-3 py-1 bg-primary-100 text-primary-800 rounded-full text-sm font-medium">
-              {allClients.find((c) => c.client_id === selectedWorker)?.client_name ||
-                selectedWorker}
+              {allClients.find((c) => c.client_id === selectedWorker)
+                ?.client_name || selectedWorker}
             </span>
           </h2>
-          <div className={`metrics-charts-enter ${showDetailedMetrics ? 'opacity-100' : 'opacity-0'}`}>
+          <div
+            className={`metrics-charts-enter ${showDetailedMetrics ? "opacity-100" : "opacity-0"}`}
+          >
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
               <div className="metrics-chart-item">
                 <MetricChart
@@ -1104,7 +1164,7 @@ const WorkerMetrics: React.FC<WorkerMetricsProps> = ({ clients }) => {
           </h2>
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
             {bots.map((bot, index) => (
-              <div 
+              <div
                 key={`bot-${bot.client_id}`}
                 className="card-entrance"
                 style={{ animationDelay: `${index * 0.1}s` }}
@@ -1131,7 +1191,7 @@ const WorkerMetrics: React.FC<WorkerMetricsProps> = ({ clients }) => {
           </h2>
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
             {streamHubs.map((hub, index) => (
-              <div 
+              <div
                 key={`hub-${hub.client_id}`}
                 className="card-entrance"
                 style={{ animationDelay: `${index * 0.1}s` }}
@@ -1153,7 +1213,9 @@ const WorkerMetrics: React.FC<WorkerMetricsProps> = ({ clients }) => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="metrics-system-monitor">
             <SystemResourceMonitor
-              selectedClient={allClients.find(c => c.client_id === selectedWorker)}
+              selectedClient={allClients.find(
+                (c) => c.client_id === selectedWorker,
+              )}
             />
           </div>
           {/* Placeholder for additional system info */}
@@ -1169,23 +1231,33 @@ const WorkerMetrics: React.FC<WorkerMetricsProps> = ({ clients }) => {
                   <div className="flex items-center justify-between p-3 bg-secondary-50 rounded-lg">
                     <span>Тип клієнта:</span>
                     <span className="font-medium text-secondary-900 px-2 py-1 bg-white rounded shadow-sm">
-                      {allClients.find(c => c.client_id === selectedWorker)?.client_type}
+                      {
+                        allClients.find((c) => c.client_id === selectedWorker)
+                          ?.client_type
+                      }
                     </span>
                   </div>
                   <div className="flex items-center justify-between p-3 bg-secondary-50 rounded-lg">
                     <span>Статус з'єднання:</span>
-                    <span className={`font-medium px-2 py-1 rounded shadow-sm ${
-                      allClients.find(c => c.client_id === selectedWorker)?.connection_status === 'connected'
-                        ? 'bg-success-100 text-success-800'
-                        : 'bg-error-100 text-error-800'
-                    }`}>
-                      {allClients.find(c => c.client_id === selectedWorker)?.connection_status}
+                    <span
+                      className={`font-medium px-2 py-1 rounded shadow-sm ${
+                        allClients.find((c) => c.client_id === selectedWorker)
+                          ?.connection_status === "connected"
+                          ? "bg-success-100 text-success-800"
+                          : "bg-error-100 text-error-800"
+                      }`}
+                    >
+                      {
+                        allClients.find((c) => c.client_id === selectedWorker)
+                          ?.connection_status
+                      }
                     </span>
                   </div>
                   <div className="flex items-center justify-between p-3 bg-secondary-50 rounded-lg">
                     <span>Активні завдання:</span>
                     <span className="font-medium text-secondary-900 px-2 py-1 bg-white rounded shadow-sm">
-                      {allClients.find(c => c.client_id === selectedWorker)?.active_tasks_count || 0}
+                      {allClients.find((c) => c.client_id === selectedWorker)
+                        ?.active_tasks_count || 0}
                     </span>
                   </div>
                 </div>
@@ -1214,9 +1286,9 @@ const WorkerMetrics: React.FC<WorkerMetricsProps> = ({ clients }) => {
                       ? "border-primary-500 bg-primary-50 selected"
                       : "border-secondary-200 hover:border-primary-300 hover:bg-primary-50"
                   }`}
-                  style={{ 
+                  style={{
                     animationDelay: `${index * 0.05}s`,
-                    animation: 'cascadeIn 0.5s ease-out forwards'
+                    animation: "cascadeIn 0.5s ease-out forwards",
                   }}
                 >
                   <div className="flex items-center justify-between">
@@ -1228,12 +1300,12 @@ const WorkerMetrics: React.FC<WorkerMetricsProps> = ({ clients }) => {
                         {client.client_type === "worker_api"
                           ? "🔧 API Worker"
                           : client.client_type === "worker"
-                          ? "⚙️ Worker"
-                          : client.client_type === "bot"
-                          ? "🤖 Bot"
-                          : client.client_type === "stream_hub"
-                          ? "🌊 Stream Hub"
-                          : client.client_type}
+                            ? "⚙️ Worker"
+                            : client.client_type === "bot"
+                              ? "🤖 Bot"
+                              : client.client_type === "stream_hub"
+                                ? "🌊 Stream Hub"
+                                : client.client_type}
                       </p>
                       <div className="flex items-center space-x-2">
                         <div
@@ -1243,19 +1315,31 @@ const WorkerMetrics: React.FC<WorkerMetricsProps> = ({ clients }) => {
                               : "bg-error-500"
                           }`}
                         />
-                        <span className={`text-xs font-medium ${
-                          client.connection_status === "connected"
-                            ? "text-success-700"
-                            : "text-error-700"
-                        }`}>
-                          {client.connection_status === "connected" ? "Підключено" : "Відключено"}
+                        <span
+                          className={`text-xs font-medium ${
+                            client.connection_status === "connected"
+                              ? "text-success-700"
+                              : "text-error-700"
+                          }`}
+                        >
+                          {client.connection_status === "connected"
+                            ? "Підключено"
+                            : "Відключено"}
                         </span>
                       </div>
                     </div>
                     {selectedWorker === client.client_id && (
                       <div className="ml-3 text-primary-500">
-                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                        <svg
+                          className="w-5 h-5"
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                            clipRule="evenodd"
+                          />
                         </svg>
                       </div>
                     )}
