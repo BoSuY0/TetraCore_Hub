@@ -9,6 +9,7 @@ import os
 from typing import Optional, List
 from enum import Enum
 from dataclasses import dataclass
+import socket
 
 
 class Environment(str, Enum):
@@ -25,6 +26,41 @@ class LogLevel(str, Enum):
     WARNING = "WARNING"
     ERROR = "ERROR"
     CRITICAL = "CRITICAL"
+
+
+def detect_heroku_app_name() -> Optional[str]:
+    """Визначає назву Heroku додатку з різних джерел"""
+    # 1. Пряма змінна HEROKU_APP_NAME
+    app_name = os.getenv("HEROKU_APP_NAME")
+    if app_name:
+        return app_name
+
+    # 2. З Heroku Labs metadata (якщо увімкнено)
+    app_name = os.getenv("HEROKU_APP_ID")
+    if app_name:
+        return app_name
+
+    # 3. З домену якщо є
+    dyno = os.getenv("DYNO")
+    if dyno:
+        # На Heroku можна спробувати отримати hostname
+        try:
+            hostname = socket.gethostname()
+            # Heroku hostnames часто мають формат: <app-name>.<random-id>
+            if hostname and '.' in hostname:
+                potential_name = hostname.split('.')[0]
+                # Перевірка чи це схоже на app name (не dyno id)
+                if not potential_name.startswith('web.') and not potential_name.startswith('worker.'):
+                    return potential_name
+        except:
+            pass
+
+    return None
+
+
+def is_heroku_environment() -> bool:
+    """Перевіряє чи код запущено на Heroku"""
+    return bool(os.getenv("DYNO") or os.getenv("PORT") and os.getenv("HOME") == "/app")
 
 
 @dataclass
@@ -104,10 +140,16 @@ class Settings:
         self.auth_token = os.getenv("AUTH_TOKEN", self.auth_token)
 
         # Автоматичне визначення Heroku середовища
-        if os.getenv("DYNO") or os.getenv("HEROKU_APP_NAME"):
+        if is_heroku_environment():
             self.environment = Environment.PRODUCTION
             self.redis_enabled = True  # На Heroku зазвичай використовуємо Redis
             self.debug = False
+
+            # Спробуємо визначити app name якщо його немає
+            if not os.getenv("HEROKU_APP_NAME"):
+                detected_name = detect_heroku_app_name()
+                if detected_name:
+                    os.environ["HEROKU_APP_NAME"] = detected_name
 
         env_name = os.getenv("ENVIRONMENT", self.environment.value)
         try:
@@ -127,13 +169,17 @@ class Settings:
     def _setup_cors_origins(self):
         """Налаштування CORS origins залежно від середовища"""
         origins = []
-        
+
         # Heroku URL
-        heroku_app_name = os.getenv("HEROKU_APP_NAME")
-        if heroku_app_name:
-            heroku_url = f"https://{heroku_app_name}.herokuapp.com"
-            origins.extend([heroku_url])
-        
+        if is_heroku_environment():
+            heroku_app_name = detect_heroku_app_name()
+            if heroku_app_name:
+                heroku_url = f"https://{heroku_app_name}.herokuapp.com"
+                origins.extend([heroku_url])
+            else:
+                # Якщо це Heroku але не можемо визначити app name
+                origins.extend(["*"])
+
         # Локальні URL для розробки
         if self.environment == Environment.DEVELOPMENT:
             origins.extend([
@@ -142,16 +188,16 @@ class Settings:
                 "http://localhost:8000",
                 "http://127.0.0.1:8000"
             ])
-        
+
         # Додаткові origins з змінних середовища
         extra_origins = os.getenv("ALLOWED_ORIGINS")
         if extra_origins:
             origins.extend([origin.strip() for origin in extra_origins.split(",")])
-        
+
         # Якщо нічого не налаштовано, дозволяємо все для розробки
         if not origins and self.environment == Environment.DEVELOPMENT:
             origins = ["*"]
-        
+
         self.allowed_origins = origins
 
     def is_production(self) -> bool:
@@ -187,24 +233,32 @@ class Settings:
 
     def get_app_url(self) -> str:
         """Отримання URL додатку (Heroku або локальний)"""
-        heroku_app_name = os.getenv("HEROKU_APP_NAME")
-        if heroku_app_name:
-            return f"https://{heroku_app_name}.herokuapp.com"
-        
+        # Перевіряємо чи це Heroku
+        if is_heroku_environment():
+            heroku_app_name = detect_heroku_app_name()
+            if heroku_app_name:
+                return f"https://{heroku_app_name}.herokuapp.com"
+            else:
+                # Fallback - повертаємо placeholder який потрібно буде замінити
+                return "https://YOUR-APP-NAME.herokuapp.com"
+
         # Для локальної розробки
-        protocol = "https" if self.is_production() else "http"
-        return f"{protocol}://{self.host}:{self.port}"
+        if self.environment == Environment.DEVELOPMENT:
+            return f"http://localhost:{self.port}"
+
+        # Для production без Heroku
+        return f"http://localhost:{self.port}"
 
     def get_frontend_url(self) -> str:
         """Отримання URL frontend"""
         # На Heroku frontend та backend на одному домені
-        if os.getenv("HEROKU_APP_NAME"):
+        if is_heroku_environment():
             return self.get_app_url()
-        
+
         # Для локальної розробки frontend на порту 3000
-        if self.is_development():
+        if self.environment == Environment.DEVELOPMENT:
             return "http://localhost:3000"
-        
+
         return self.get_app_url()
 
     def get_backend_url(self) -> str:

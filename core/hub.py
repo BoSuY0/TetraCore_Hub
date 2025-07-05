@@ -21,7 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import structlog
 
-from config import Settings, get_settings
+from config import Settings, get_settings, detect_heroku_app_name, is_heroku_environment
 from models.messages import (
     BaseMessage, MessageType, parse_message, create_message
 )
@@ -63,7 +63,7 @@ class StreamHub:
         self.total_connections = 0
         self.total_tasks_processed = 0
         self.total_errors = 0
-        
+
         # Задачі
         self.self_client_task: Optional[asyncio.Task] = None
 
@@ -147,15 +147,21 @@ class StreamHub:
         )
 
         # CORS middleware
-        self.logger.info("Setting up CORS", 
+        self.logger.info("Setting up CORS",
                         allowed_origins=self.settings.allowed_origins,
                         environment=self.settings.environment.value)
+
+        # Детальне логування URL конфігурації
         self.logger.info("URL Configuration",
                         backend_url=self.settings.get_backend_url(),
                         frontend_url=self.settings.get_frontend_url(),
                         dashboard_url=self.settings.get_dashboard_url(),
                         websocket_url=self.settings.get_websocket_url(),
-                        heroku_app_name=os.getenv("HEROKU_APP_NAME"))
+                        is_heroku=is_heroku_environment(),
+                        detected_heroku_app_name=detect_heroku_app_name(),
+                        heroku_app_name_env=os.getenv("HEROKU_APP_NAME"),
+                        host=self.settings.host,
+                        port=self.settings.port)
         self.app.add_middleware(
             CORSMiddleware,
             allow_origins=self.settings.allowed_origins,
@@ -318,24 +324,24 @@ class StreamHub:
             # Очікування повідомлення реєстрації
             self.logger.info("Waiting for client registration message")
             data = await websocket.receive_json()
-            self.logger.info("Received registration data", data_keys=list(data.keys()), 
+            self.logger.info("Received registration data", data_keys=list(data.keys()),
                            message_type=data.get("message_type"))
-            
+
             # Парсинг повідомлення
             try:
                 message = parse_message(data)
-                self.logger.info("Message parsed successfully", 
+                self.logger.info("Message parsed successfully",
                                message_type=message.message_type,
                                client_type=getattr(message, 'client_type', 'unknown'),
                                client_id=getattr(message, 'client_id', 'unknown'))
             except Exception as parse_error:
-                self.logger.error("Failed to parse registration message", 
+                self.logger.error("Failed to parse registration message",
                                 error=str(parse_error), raw_data=data)
                 await self._send_error(websocket, "PARSE_ERROR", f"Failed to parse message: {str(parse_error)}")
                 return None
 
             if message.message_type != MessageType.CLIENT_REGISTRATION:
-                self.logger.warning("Invalid message type for registration", 
+                self.logger.warning("Invalid message type for registration",
                                   expected="client_registration",
                                   received=message.message_type)
                 await self._send_error(websocket, "INVALID_REGISTRATION",
@@ -344,21 +350,21 @@ class StreamHub:
 
             # Перевірка аутентифікації
             auth_result = self._authenticate_client(message)
-            self.logger.info("Authentication check", 
+            self.logger.info("Authentication check",
                            auth_required=bool(self.settings.auth_token),
                            auth_result=auth_result,
                            client_token=bool(getattr(message, 'auth_token', None)))
-            
+
             if not auth_result:
-                self.logger.warning("Authentication failed for client", 
+                self.logger.warning("Authentication failed for client",
                                   client_id=getattr(message, 'client_id', 'unknown'))
                 await self._send_error(websocket, "AUTH_FAILED", "Authentication failed")
                 return None
 
             # Створення клієнта
-            self.logger.info("Creating client", client_type=message.client_type, 
+            self.logger.info("Creating client", client_type=message.client_type,
                            client_id=message.client_id, client_name=message.client_name)
-            
+
             if message.client_type == ClientType.BOT:
                 client = Client.create_bot(
                     client_id=message.client_id,
@@ -423,10 +429,10 @@ class StreamHub:
                 config=self._get_client_config(client)
             )
 
-            self.logger.info("Sending registration acknowledgment", 
+            self.logger.info("Sending registration acknowledgment",
                            client_id=client.info.client_id,
                            session_id=client.info.session_id)
-            
+
             # Використовуємо model_dump з mode='json' для правильної серіалізації datetime
             ack_data = ack_message.model_dump(mode='json')
             await websocket.send_json(ack_data)
@@ -506,10 +512,10 @@ class StreamHub:
 
         # Створення завдання з безпечним отриманням атрибутів
         from models.task import TaskType
-        
+
         task_type_str = getattr(message, 'task_type', 'custom')
         task_type = TaskType.CUSTOM if isinstance(task_type_str, str) else task_type_str
-        
+
         task = Task.create(
             task_type=task_type,
             data=getattr(message, 'task_data', {}),
@@ -857,7 +863,7 @@ class StreamHub:
                 if hasattr(self, 'self_client') and self.self_client:
                     # Оновлюємо час останньої активності
                     self.self_client.info.stats.last_activity = datetime.utcnow()
-                    
+
                 # Оновлюємо кожні 30 секунд
                 await asyncio.sleep(30)
         except asyncio.CancelledError:
