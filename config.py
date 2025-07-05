@@ -103,6 +103,12 @@ class Settings:
         self.debug = os.getenv("DEBUG", str(self.debug)).lower() in ("true", "1", "yes")
         self.auth_token = os.getenv("AUTH_TOKEN", self.auth_token)
 
+        # Автоматичне визначення Heroku середовища
+        if os.getenv("DYNO") or os.getenv("HEROKU_APP_NAME"):
+            self.environment = Environment.PRODUCTION
+            self.redis_enabled = True  # На Heroku зазвичай використовуємо Redis
+            self.debug = False
+
         env_name = os.getenv("ENVIRONMENT", self.environment.value)
         try:
             self.environment = Environment(env_name)
@@ -114,6 +120,39 @@ class Settings:
             self.log_level = LogLevel(log_level_name)
         except ValueError:
             pass
+
+        # Динамічні CORS налаштування
+        self._setup_cors_origins()
+
+    def _setup_cors_origins(self):
+        """Налаштування CORS origins залежно від середовища"""
+        origins = []
+        
+        # Heroku URL
+        heroku_app_name = os.getenv("HEROKU_APP_NAME")
+        if heroku_app_name:
+            heroku_url = f"https://{heroku_app_name}.herokuapp.com"
+            origins.extend([heroku_url])
+        
+        # Локальні URL для розробки
+        if self.environment == Environment.DEVELOPMENT:
+            origins.extend([
+                "http://localhost:3000",
+                "http://127.0.0.1:3000",
+                "http://localhost:8000",
+                "http://127.0.0.1:8000"
+            ])
+        
+        # Додаткові origins з змінних середовища
+        extra_origins = os.getenv("ALLOWED_ORIGINS")
+        if extra_origins:
+            origins.extend([origin.strip() for origin in extra_origins.split(",")])
+        
+        # Якщо нічого не налаштовано, дозволяємо все для розробки
+        if not origins and self.environment == Environment.DEVELOPMENT:
+            origins = ["*"]
+        
+        self.allowed_origins = origins
 
     def is_production(self) -> bool:
         """Перевірка чи це продакшн середовище"""
@@ -146,6 +185,43 @@ class Settings:
             "max_connections": self.max_connections,
         }
 
+    def get_app_url(self) -> str:
+        """Отримання URL додатку (Heroku або локальний)"""
+        heroku_app_name = os.getenv("HEROKU_APP_NAME")
+        if heroku_app_name:
+            return f"https://{heroku_app_name}.herokuapp.com"
+        
+        # Для локальної розробки
+        protocol = "https" if self.is_production() else "http"
+        return f"{protocol}://{self.host}:{self.port}"
+
+    def get_frontend_url(self) -> str:
+        """Отримання URL frontend"""
+        # На Heroku frontend та backend на одному домені
+        if os.getenv("HEROKU_APP_NAME"):
+            return self.get_app_url()
+        
+        # Для локальної розробки frontend на порту 3000
+        if self.is_development():
+            return "http://localhost:3000"
+        
+        return self.get_app_url()
+
+    def get_backend_url(self) -> str:
+        """Отримання URL backend"""
+        return self.get_app_url()
+
+    def get_dashboard_url(self) -> str:
+        """Отримання URL dashboard"""
+        return f"{self.get_app_url()}/dashboard"
+
+    def get_websocket_url(self) -> str:
+        """Отримання WebSocket URL"""
+        app_url = self.get_app_url()
+        protocol = "wss" if app_url.startswith("https") else "ws"
+        domain = app_url.replace("https://", "").replace("http://", "")
+        return f"{protocol}://{domain}/ws"
+
 
 # Глобальний екземпляр налаштувань
 settings = Settings()
@@ -171,12 +247,12 @@ DEVELOPMENT_OVERRIDES = {
     "log_level": LogLevel.DEBUG,
     "redis_enabled": False,  # Для локальної розробки Redis не обов'язковий
     "redis_url": "redis://localhost:6379",
-    "enable_metrics": True,
+    "enable_metrics": True
 }
 
 PRODUCTION_OVERRIDES = {
     "debug": False,
-    "log_level": LogLevel.INFO,
+    "log_level": LogLevel.WARNING,  # Змінено з INFO на WARNING для зменшення логів
     "enable_metrics": True,
     "enable_compression": True,
     "redis_enabled": True,  # Redis увімкнений в продакшені

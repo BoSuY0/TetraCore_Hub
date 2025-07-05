@@ -40,34 +40,45 @@ class StreamHubLauncher:
 
     def print_banner(self, mode="dev"):
         """Виводить банер запуску"""
+        from config import get_settings
+        settings = get_settings()
+        
+        backend_url = settings.get_backend_url()
+        frontend_url = settings.get_frontend_url()
+        dashboard_url = settings.get_dashboard_url()
+        websocket_url = settings.get_websocket_url()
+        
         banners = {
-            "dev": """
+            "dev": f"""
 ╔══════════════════════════════════════════════════════════════╗
 ║                    Development Mode                          ║
 ║                                                              ║
-║  🔧 Backend: http://localhost:8000                          ║
-║  🎨 Frontend: http://localhost:3000                         ║
-║  📊 Dashboard: http://localhost:8000/dashboard              ║
+║  🔧 Backend: {backend_url:<45} ║
+║  🎨 Frontend: {frontend_url:<44} ║
+║  📊 Dashboard: {dashboard_url:<43} ║
+║  🔌 WebSocket: {websocket_url:<43} ║
 ║                                                              ║
 ║  Hot Reload: ✅  |  Debug Mode: ✅                         ║
 ╚══════════════════════════════════════════════════════════════╝
             """,
-            "fast": """
+            "fast": f"""
 ╔══════════════════════════════════════════════════════════════╗
 ║                       Fast Mode                              ║
 ║                                                              ║
-║  ⚡ Backend Only: http://localhost:8000                     ║
-║  📊 Dashboard: http://localhost:8000/dashboard              ║
+║  ⚡ Backend: {backend_url:<47} ║
+║  📊 Dashboard: {dashboard_url:<43} ║
+║  🔌 WebSocket: {websocket_url:<43} ║
 ║                                                              ║
 ║  Quick Start: ✅  |  No Frontend Dev Server                ║
 ╚══════════════════════════════════════════════════════════════╝
             """,
-            "prod": """
+            "prod": f"""
 ╔══════════════════════════════════════════════════════════════╗
 ║                    Production Mode                           ║
 ║                                                              ║
-║  🏭 Server: http://localhost:8000                           ║
-║  📊 Dashboard: http://localhost:8000/dashboard              ║
+║  🏭 Server: {backend_url:<49} ║
+║  📊 Dashboard: {dashboard_url:<43} ║
+║  🔌 WebSocket: {websocket_url:<43} ║
 ║                                                              ║
 ║  Optimized Build: ✅  |  Production Ready: ✅              ║
 ╚══════════════════════════════════════════════════════════════╝
@@ -409,7 +420,7 @@ class StreamHubLauncher:
             "prod": {
                 "ENVIRONMENT": "production",
                 "DEBUG": "false",
-                "LOG_LEVEL": "INFO",
+                "LOG_LEVEL": "WARNING",  # Змінено з INFO на WARNING для зменшення логів
                 "HOT_RELOAD": "false",
                 "HOST": "0.0.0.0",
             }

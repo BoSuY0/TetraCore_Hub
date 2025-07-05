@@ -100,25 +100,24 @@ class ClientManager:
             self.clients[client_id] = client
             self.clients_by_type[client.info.client_type].add(client_id)
 
-            # Індексація по можливостях (для воркерів)
+            # Додавання можливостей воркера до індексу
             if client.info.is_worker() and client.info.capabilities:
-                for capability in client.info.capabilities.supported_task_types:
+                for capability in client.info.capabilities.supported_actions:
                     self.clients_by_capability[capability].add(client_id)
 
-            # Оновлення статистики
+            # Статистика
             self.total_connections += 1
-            current_count = len(self.clients)
-            if current_count > self.peak_connections:
-                self.peak_connections = current_count
+            self.peak_connections = max(self.peak_connections, len(self.clients))
 
-            # Виклик callback
+            # Event handler
             if self.on_client_connected:
                 await self.on_client_connected(client)
 
-            self.logger.info("Client added successfully",
-                           client_id=client_id,
-                           client_type=client.info.client_type.value,
-                           total_clients=len(self.clients))
+            # Зменшуємо рівень логування для зменшення шуму в продакшн
+            self.logger.debug("Client added successfully",
+                             client_id=client_id,
+                             client_type=client.info.client_type.value,
+                             total_clients=len(self.clients))
 
             return True
 
@@ -156,10 +155,11 @@ class ClientManager:
             if self.on_client_disconnected:
                 await self.on_client_disconnected(client)
 
-            self.logger.info("Client removed successfully",
-                           client_id=client_id,
-                           client_type=client.info.client_type.value,
-                           total_clients=len(self.clients))
+            # Зменшуємо рівень логування для зменшення шуму в продакшн
+            self.logger.debug("Client removed successfully",
+                             client_id=client_id,
+                             client_type=client.info.client_type.value,
+                             total_clients=len(self.clients))
 
             return True
 

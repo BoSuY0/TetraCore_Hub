@@ -14,6 +14,7 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from contextlib import asynccontextmanager
+import os
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -146,18 +147,27 @@ class StreamHub:
         )
 
         # CORS middleware
+        self.logger.info("Setting up CORS", 
+                        allowed_origins=self.settings.allowed_origins,
+                        environment=self.settings.environment.value)
+        self.logger.info("URL Configuration",
+                        backend_url=self.settings.get_backend_url(),
+                        frontend_url=self.settings.get_frontend_url(),
+                        dashboard_url=self.settings.get_dashboard_url(),
+                        websocket_url=self.settings.get_websocket_url(),
+                        heroku_app_name=os.getenv("HEROKU_APP_NAME"))
         self.app.add_middleware(
             CORSMiddleware,
             allow_origins=self.settings.allowed_origins,
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
+            expose_headers=["*"]
         )
 
         # Templates removed - using React SPA instead
 
         # Підключення статичних файлів (якщо директорія існує)
-        import os
         if os.path.exists("static"):
             self.app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -177,6 +187,12 @@ class StreamHub:
         except ImportError as e:
             self.logger.warning("Auth router not available", error=str(e))
 
+        @self.app.options("/{path:path}")
+        async def options_handler(path: str):
+            """Обробка CORS preflight запитів"""
+            from fastapi.responses import Response
+            return Response(status_code=200)
+
         @self.app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
             await self.handle_websocket_connection(websocket)
@@ -185,6 +201,18 @@ class StreamHub:
         async def health_check():
             """Перевірка здоров'я системи"""
             return await self.get_health_status()
+
+        @self.app.get("/config")
+        async def get_app_config():
+            """Отримання конфігурації додатку для frontend"""
+            return {
+                "backend_url": self.settings.get_backend_url(),
+                "frontend_url": self.settings.get_frontend_url(),
+                "dashboard_url": self.settings.get_dashboard_url(),
+                "websocket_url": self.settings.get_websocket_url(),
+                "environment": self.settings.environment.value,
+                "version": "1.0.0"
+            }
 
         @self.app.get("/metrics")
         async def get_metrics():
@@ -229,7 +257,6 @@ class StreamHub:
         async def serve_react_app():
             """Сервіс React додатку"""
             from fastapi.responses import FileResponse
-            import os
             if os.path.exists('static/index.html'):
                 return FileResponse('static/index.html')
             else:
@@ -239,7 +266,6 @@ class StreamHub:
         async def serve_react_routes(path: str):
             """Сервіс React роутів (SPA fallback)"""
             from fastapi.responses import FileResponse
-            import os
 
             # Якщо це API роут, не обробляємо тут (виключили dashboard/ для React Router)
             if path.startswith(('api/', 'dashboard/api/', 'health', 'metrics', 'clients', 'tasks', 'ws')):
@@ -405,9 +431,10 @@ class StreamHub:
             ack_data = ack_message.model_dump(mode='json')
             await websocket.send_json(ack_data)
 
-            self.logger.info("Client registered successfully",
-                           client_id=client.info.client_id,
-                           client_type=client.info.client_type.value)
+            # Зменшуємо рівень логування для зменшення шуму в продакшн
+            self.logger.debug("Client registered successfully",
+                             client_id=client.info.client_id,
+                             client_type=client.info.client_type.value)
 
             return client
 
@@ -500,9 +527,10 @@ class StreamHub:
 
         if success:
             self.total_tasks_processed += 1
-            self.logger.info("Task submitted successfully",
-                           task_id=task.task_id,
-                           client_id=client.info.client_id)
+            # Зменшуємо рівень логування для зменшення шуму в продакшн
+            self.logger.debug("Task submitted successfully",
+                             task_id=task.task_id,
+                             client_id=client.info.client_id)
         else:
             await self._send_error(client.websocket, "TASK_REJECTED",
                                  "Task queue is full or task rejected")
@@ -604,18 +632,20 @@ class StreamHub:
     # Event handlers
     async def _on_client_connected(self, client: Client):
         """Обробник підключення клієнта"""
-        self.logger.info("Client connected",
-                        client_id=client.info.client_id,
-                        client_type=client.info.client_type.value)
+        # Зменшуємо рівень логування для зменшення шуму в продакшн
+        self.logger.debug("Client connected",
+                         client_id=client.info.client_id,
+                         client_type=client.info.client_type.value)
 
         # Оновлення метрик
         self.metrics_collector.increment_counter("clients_connected")
 
     async def _on_client_disconnected(self, client: Client):
         """Обробник відключення клієнта"""
-        self.logger.info("Client disconnected",
-                        client_id=client.info.client_id,
-                        client_type=client.info.client_type.value)
+        # Зменшуємо рівень логування для зменшення шуму в продакшн
+        self.logger.debug("Client disconnected",
+                         client_id=client.info.client_id,
+                         client_type=client.info.client_type.value)
 
         # Переназначення активних завдань воркера
         if client.info.is_worker() and client.active_tasks:
@@ -623,16 +653,18 @@ class StreamHub:
 
     async def _on_task_assigned(self, task: Task, worker_id: str):
         """Обробник призначення завдання"""
-        self.logger.info("Task assigned",
-                        task_id=task.task_id,
-                        worker_id=worker_id)
+        # Зменшуємо рівень логування для зменшення шуму в продакшн
+        self.logger.debug("Task assigned",
+                         task_id=task.task_id,
+                         worker_id=worker_id)
 
     async def _on_task_completed(self, task: Task):
         """Обробник завершення завдання"""
-        self.logger.info("Task completed",
-                        task_id=task.task_id,
-                        status=task.context.current_status.value,
-                        execution_time=task.context.get_execution_time())
+        # Зменшуємо рівень логування для зменшення шуму в продакшн
+        self.logger.debug("Task completed",
+                         task_id=task.task_id,
+                         status=task.context.current_status.value,
+                         execution_time=task.context.get_execution_time())
 
     async def _on_task_failed(self, task: Task, error: str):
         """Обробник помилки завдання"""
