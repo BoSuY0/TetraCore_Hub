@@ -45,7 +45,7 @@ const initialState: StatusState = {
   isLoading: false,
   error: null,
   lastUpdated: null,
-  connectionStatus: "disconnected",
+  connectionStatus: "connecting",
 };
 
 function statusReducer(state: StatusState, action: StatusAction): StatusState {
@@ -186,6 +186,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
   const refreshData = async () => {
     dispatch({ type: "SET_LOADING", payload: true });
+    dispatch({ type: "SET_CONNECTION_STATUS", payload: "connecting" });
 
     try {
       const [health, metrics, clients, taskStats] = await Promise.all([
@@ -201,6 +202,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       if (taskStats) dispatch({ type: "SET_TASK_STATS", payload: taskStats });
 
       dispatch({ type: "SET_ERROR", payload: null });
+      dispatch({ type: "SET_CONNECTION_STATUS", payload: "connected" });
     } catch (error) {
       dispatch({
         type: "SET_ERROR",
@@ -290,8 +292,10 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
     return () => clearInterval(interval);
   }, [refreshInterval]);
 
-  // Connect WebSocket on mount
+  // Connect WebSocket on mount (optional, not required for status)
   useEffect(() => {
+    // WebSocket is optional for real-time updates
+    // Status is determined by API availability
     connectWebSocket();
     return () => disconnectWebSocket();
   }, []);
