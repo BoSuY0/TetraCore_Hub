@@ -368,6 +368,10 @@ class StreamHub:
                     client_name=message.client_name,
                     remote_address=websocket.client.host if websocket.client else "unknown"
                 )
+                self.logger.info("🤖 Bot client registered successfully",
+                               client_id=message.client_id,
+                               client_name=message.client_name,
+                               remote_address=websocket.client.host if websocket.client else "unknown")
             elif message.client_type == ClientType.WORKER:
                 capabilities = WorkerCapabilities(
                     supported_task_types=getattr(message, 'capabilities', []) or [],
@@ -379,6 +383,10 @@ class StreamHub:
                     capabilities=capabilities,
                     remote_address=websocket.client.host if websocket.client else "unknown"
                 )
+                self.logger.info("⚙️ Worker client registered successfully",
+                               client_id=message.client_id,
+                               client_name=message.client_name,
+                               remote_address=websocket.client.host if websocket.client else "unknown")
             elif message.client_type == ClientType.WORKER_API:
                 capabilities = WorkerCapabilities(
                     supported_task_types=getattr(message, 'capabilities', []) or [],
@@ -390,18 +398,30 @@ class StreamHub:
                     capabilities=capabilities,
                     remote_address=websocket.client.host if websocket.client else "unknown"
                 )
+                self.logger.info("✅ API Worker registered successfully",
+                               client_id=message.client_id,
+                               client_name=message.client_name,
+                               remote_address=websocket.client.host if websocket.client else "unknown")
             elif message.client_type == ClientType.MONITOR:
                 client = Client.create_monitor(
                     client_id=message.client_id,
                     client_name=message.client_name,
                     remote_address=websocket.client.host if websocket.client else "unknown"
                 )
+                self.logger.info("📊 Monitor client registered successfully",
+                               client_id=message.client_id,
+                               client_name=message.client_name,
+                               remote_address=websocket.client.host if websocket.client else "unknown")
             elif message.client_type == ClientType.STREAM_HUB:
                 client = Client.create_stream_hub(
                     client_id=message.client_id,
                     client_name=message.client_name,
                     remote_address=websocket.client.host if websocket.client else "unknown"
                 )
+                self.logger.info("🌐 StreamHub client registered successfully",
+                               client_id=message.client_id,
+                               client_name=message.client_name,
+                               remote_address=websocket.client.host if websocket.client else "unknown")
             elif message.client_type == ClientType.ADMIN:
                 client = Client.create_admin(
                     client_id=message.client_id,
@@ -434,10 +454,11 @@ class StreamHub:
             ack_data = ack_message.model_dump(mode='json')
             await websocket.send_json(ack_data)
 
-            # Зменшуємо рівень логування для зменшення шуму в продакшн
-            self.logger.debug("Client registered successfully",
+            # Фінальне логування успішної реєстрації
+            self.logger.info("✅ Client successfully connected to StreamHub",
                              client_id=client.info.client_id,
-                             client_type=client.info.client_type.value)
+                             client_type=client.info.client_type.value,
+                             session_id=client.info.session_id)
 
             return client
 

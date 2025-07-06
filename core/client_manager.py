@@ -109,6 +109,14 @@ class ClientManager:
             self.total_connections += 1
             self.peak_connections = max(self.peak_connections, len(self.clients))
 
+            # Логування успішного додавання
+            self.logger.info(f"✅ Client added to manager",
+                           client_id=client_id,
+                           client_type=client.info.client_type.value,
+                           client_name=client.info.client_name,
+                           total_clients=len(self.clients),
+                           clients_of_this_type=len(self.clients_by_type[client.info.client_type]))
+
             # Event handler
             if self.on_client_connected:
                 await self.on_client_connected(client)
