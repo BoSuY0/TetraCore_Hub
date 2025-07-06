@@ -1,6 +1,9 @@
 // Configuration for API endpoints
 // Using relative URLs to avoid CORS issues - requests will go to the same domain as frontend
 
+// Check if we're in production environment
+const isProduction = process.env.NODE_ENV === "production";
+
 // Get the base URL for API calls
 export const getApiBaseUrl = (): string => {
   // Always use relative URLs - this ensures same-origin requests
