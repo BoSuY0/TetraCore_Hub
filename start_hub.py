@@ -42,12 +42,12 @@ class StreamHubLauncher:
         """Виводить банер запуску"""
         from config import get_settings
         settings = get_settings()
-        
+
         backend_url = settings.get_backend_url()
         frontend_url = settings.get_frontend_url()
         dashboard_url = settings.get_dashboard_url()
         websocket_url = settings.get_websocket_url()
-        
+
         banners = {
             "dev": f"""
 ╔══════════════════════════════════════════════════════════════╗
@@ -157,11 +157,11 @@ class StreamHubLauncher:
             # Перевіряємо чи існує зібраний frontend
             static_index = self.static_dir / "index.html"
             build_index = self.frontend_dir / "build" / "index.html"
-            
+
             # Якщо немає зібраного frontend - потрібна збірка
             if not static_index.exists() and not build_index.exists():
                 return True
-            
+
             # Знаходимо найновіший зібраний файл
             latest_built = None
             if static_index.exists():
@@ -170,39 +170,39 @@ class StreamHubLauncher:
                 build_time = build_index.stat().st_mtime
                 if latest_built is None or build_time > latest_built:
                     latest_built = build_time
-            
+
             if latest_built is None:
                 return True
-            
+
             # Перевіряємо дати модифікації вихідних файлів frontend
             src_dir = self.frontend_dir / "src"
             public_dir = self.frontend_dir / "public"
             package_json = self.frontend_dir / "package.json"
-            
+
             # Файли що можуть впливати на збірку
             check_paths = []
-            
+
             if src_dir.exists():
                 for src_file in src_dir.rglob("*"):
                     if src_file.is_file():
                         check_paths.append(src_file)
-            
+
             if public_dir.exists():
                 for pub_file in public_dir.rglob("*"):
                     if pub_file.is_file():
                         check_paths.append(pub_file)
-            
+
             if package_json.exists():
                 check_paths.append(package_json)
-            
+
             # Перевіряємо чи якийсь файл новіший за збірку
             for file_path in check_paths:
                 if file_path.stat().st_mtime > latest_built:
                     print(f"🔍 Знайдено оновлений файл: {file_path.name}")
                     return True
-            
+
             return False
-            
+
         except Exception as e:
             print(f"⚠️  Помилка перевірки дат файлів: {e}")
             return True  # У разі помилки краще перезібрати
@@ -308,11 +308,6 @@ class StreamHubLauncher:
         if not self.frontend_dir.exists():
             print("🟡 Frontend директорія не знайдена, пропускаємо збірку frontend")
             return True
-            
-        # В продакшені завжди намагаємося зібрати frontend
-        if not self.check_node_available():
-            print("⚠️  Node.js не знайдено, але спробуємо зібрати frontend...")
-            # Не повертаємо False, продовжуємо спробу
 
         # Перевіряємо чи frontend потребує перезбірки
         if not force:
@@ -322,6 +317,15 @@ class StreamHubLauncher:
                 return True
             else:
                 print("🔄 Frontend потребує перезбірки (файли оновлені)")
+
+        # Перевіряємо Node.js тільки якщо потрібна збірка
+        if not self.check_node_available():
+            # В production на Heroku frontend вже зібраний через heroku-postbuild
+            if self.static_dir.exists() and (self.static_dir / "index.html").exists():
+                print("✅ Frontend вже зібраний (Heroku postbuild)")
+                return True
+            print("⚠️  Node.js не знайдено, але спробуємо зібрати frontend...")
+            # Не повертаємо False, продовжуємо спробу
 
         print("🔨 Збираємо frontend...")
         try:
@@ -427,11 +431,11 @@ class StreamHubLauncher:
         }
 
         config = env_configs.get(mode, env_configs["dev"])
-        
+
         # Не перезаписуємо PORT якщо він вже встановлений (наприклад, Heroku)
         if "PORT" not in os.environ:
             config["PORT"] = "8000"
-            
+
         os.environ.update(config)
 
     def create_app(self) -> FastAPI:
@@ -475,7 +479,7 @@ class StreamHubLauncher:
     async def run_backend(self, quiet_mode=False):
         """Запускає backend сервер"""
         app = self.create_app()
-        
+
         port = int(os.environ.get("PORT", 8000))
         print(f"🌐 Запускаємо сервер на порту {port}")
 
@@ -509,7 +513,7 @@ class StreamHubLauncher:
 
         # Запускаємо FastAPI з reload
         app = self.create_app()
-        
+
         port = int(os.environ.get("PORT", 8000))
 
         config = uvicorn.Config(
@@ -558,9 +562,12 @@ class StreamHubLauncher:
         self.setup_logging(quiet_mode=not verbose)
         self.print_banner("prod")
 
-        # Збираємо frontend
-        if not self.build_frontend(force=force_build):
-            print("⚠️  Продовжуємо без frontend")
+        # Збираємо frontend тільки якщо немає збірки або примусова збірка
+        if force_build or not (self.static_dir.exists() and (self.static_dir / "index.html").exists()):
+            if not self.build_frontend(force=force_build):
+                print("⚠️  Продовжуємо без frontend")
+        else:
+            print("✅ Використовуємо існуючу збірку frontend")
 
         try:
             port = int(os.environ.get("PORT", 8000))
