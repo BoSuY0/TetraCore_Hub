@@ -5,8 +5,8 @@
   "main": "start_hub.py",
   "scripts": {
     "heroku-prebuild": "echo 'Installing frontend dependencies...' && cd frontend && npm install --legacy-peer-deps",
-    "heroku-postbuild": "echo 'Building frontend...' && cd frontend && npm run build && echo 'Contents of build:' && ls -la build/ && echo 'Contents of build/static:' && ls -la build/static/ && cd .. && rm -rf static && cp -r frontend/build static && echo 'Contents of static after copy:' && ls -la static/ && echo 'Contents of static/static:' && ls -la static/static/ && echo 'Frontend built and deployed successfully'",
-    "build": "cd frontend && npm run build && cd .. && rm -rf static && cp -r frontend/build static",
+    "heroku-postbuild": "echo 'Building frontend...' && cd frontend && npm run build && cd .. && mkdir -p static && rm -rf static/* && cp -r frontend/build/* static/ && echo 'Frontend built and deployed successfully'",
+    "build": "cd frontend && npm run build && cd .. && mkdir -p static && rm -rf static/* && cp -r frontend/build/* static/",
     "dev": "python start_hub.py dev",
     "start": "python start_hub.py prod",
     "build-frontend": "python start_hub.py build",
