@@ -155,24 +155,14 @@ class StreamHubLauncher:
         """Перевіряє чи потрібна перезбірка frontend на основі дат модифікації"""
         try:
             # Перевіряємо чи існує зібраний frontend
-            static_index = self.static_dir / "index.html"
             build_index = self.frontend_dir / "build" / "index.html"
 
             # Якщо немає зібраного frontend - потрібна збірка
-            if not static_index.exists() and not build_index.exists():
+            if not build_index.exists():
                 return True
 
-            # Знаходимо найновіший зібраний файл
-            latest_built = None
-            if static_index.exists():
-                latest_built = static_index.stat().st_mtime
-            if build_index.exists():
-                build_time = build_index.stat().st_mtime
-                if latest_built is None or build_time > latest_built:
-                    latest_built = build_time
-
-            if latest_built is None:
-                return True
+            # Знаходимо час збірки
+            latest_built = build_index.stat().st_mtime
 
             # Перевіряємо дати модифікації вихідних файлів frontend
             src_dir = self.frontend_dir / "src"
@@ -321,7 +311,8 @@ class StreamHubLauncher:
         # Перевіряємо Node.js тільки якщо потрібна збірка
         if not self.check_node_available():
             # В production на Heroku frontend вже зібраний через heroku-postbuild
-            if self.static_dir.exists() and (self.static_dir / "index.html").exists():
+            build_index = self.frontend_dir / "build" / "index.html"
+            if build_index.exists():
                 print("✅ Frontend вже зібраний (Heroku postbuild)")
                 return True
             print("⚠️  Node.js не знайдено, але спробуємо зібрати frontend...")
@@ -338,9 +329,10 @@ class StreamHubLauncher:
                 return False
 
             # Очищуємо попередню збірку
-            if self.static_dir.exists():
+            build_dir = self.frontend_dir / "build"
+            if build_dir.exists():
                 print("🧹 Очищуємо попередню збірку...")
-                shutil.rmtree(self.static_dir)
+                shutil.rmtree(build_dir)
 
             # Збираємо frontend з оптимізаціями
             print("⚙️  Налаштовуємо змінні середовища для збірки...")
@@ -563,7 +555,8 @@ class StreamHubLauncher:
         self.print_banner("prod")
 
         # Збираємо frontend тільки якщо немає збірки або примусова збірка
-        if force_build or not (self.static_dir.exists() and (self.static_dir / "index.html").exists()):
+        build_index = self.frontend_dir / "build" / "index.html"
+        if force_build or not build_index.exists():
             if not self.build_frontend(force=force_build):
                 print("⚠️  Продовжуємо без frontend")
         else:

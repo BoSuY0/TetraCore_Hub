@@ -169,8 +169,8 @@ class StreamHub:
         # Templates removed - using React SPA instead
 
         # Підключення статичних файлів (якщо директорія існує)
-        if os.path.exists("static"):
-            self.app.mount("/static", StaticFiles(directory="static"), name="static")
+        if os.path.exists("frontend/build"):
+            self.app.mount("/static", StaticFiles(directory="frontend/build/static"), name="static")
 
         # Налаштування дашборду (перед загальними роутами)
         self._setup_dashboard()
@@ -258,8 +258,9 @@ class StreamHub:
         async def serve_react_app():
             """Сервіс React додатку"""
             from fastapi.responses import FileResponse
-            if os.path.exists('static/index.html'):
-                return FileResponse('static/index.html')
+            """Serve React app for root and dashboard routes"""
+            if os.path.exists('frontend/build/index.html'):
+                return FileResponse('frontend/build/index.html')
             else:
                 return {"message": "TetraCore StreamHub API", "status": "running", "frontend": "not built"}
 
@@ -278,8 +279,9 @@ class StreamHub:
                 return FileResponse(file_path)
 
             # Для всіх інших роутів (включно з dashboard/) повертаємо index.html (SPA роутинг)
-            if os.path.exists('static/index.html'):
-                return FileResponse('static/index.html')
+            """Serve React app for all unmatched routes (React Router support)"""
+            if os.path.exists('frontend/build/index.html'):
+                return FileResponse('frontend/build/index.html')
             else:
                 raise HTTPException(status_code=404, detail="Frontend not built")
 
