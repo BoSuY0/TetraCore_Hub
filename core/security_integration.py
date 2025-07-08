@@ -59,13 +59,8 @@ class SecurityIntegration:
         # 4. Security headers middleware (CSP, permissions policy, etc)
         app.middleware("http")(security_headers_middleware)
 
-        # 5. Trusted host middleware
-        allowed_hosts = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
-        if os.getenv("ENVIRONMENT") == "production":
-            app.add_middleware(
-                TrustedHostMiddleware,
-                allowed_hosts=allowed_hosts
-            )
+        # 5. Trusted host middleware - виправлено для Heroku
+        self._setup_trusted_host_middleware(app)
 
         # 6. CORS налаштування
         network_security.setup_cors(app)
@@ -95,11 +90,59 @@ class SecurityIntegration:
             app.include_router(security_headers_router)
             app.include_router(https_router)
 
-        logger.info("App security configured",
-                   allowed_hosts=allowed_hosts,
-                   cors_origins=network_security.cors_origins)
+        logger.info("App security configured")
 
         self.initialized = True
+
+    def _setup_trusted_host_middleware(self, app: FastAPI):
+        """Налаштування TrustedHostMiddleware з підтримкою Heroku"""
+        environment = os.getenv("ENVIRONMENT", "development")
+        
+        # Базові дозволені хости
+        allowed_hosts = []
+        
+        # Для development
+        if environment == "development":
+            allowed_hosts.extend([
+                "localhost",
+                "127.0.0.1",
+                "0.0.0.0",
+                "localhost:3000",
+                "localhost:8000",
+                "127.0.0.1:3000", 
+                "127.0.0.1:8000"
+            ])
+        
+        # Для Heroku production
+        if os.getenv("DYNO") or environment == "production":
+            # Додаємо домени Heroku
+            allowed_hosts.extend([
+                "hub.tetra-core.website",
+                "tetracore-hub-29fb6c8b7947.herokuapp.com",
+                "*.herokuapp.com",  # Для різних додатків Heroku
+                "*.tetra-core.website"  # Для subdomains
+            ])
+        
+        # Дозволені хости з змінних оточення
+        env_hosts = os.getenv("ALLOWED_HOSTS", "")
+        if env_hosts:
+            allowed_hosts.extend([host.strip() for host in env_hosts.split(",") if host.strip()])
+        
+        # Логування налаштувань
+        logger.info("TrustedHostMiddleware configuration", 
+                   environment=environment,
+                   allowed_hosts=allowed_hosts,
+                   is_heroku=bool(os.getenv("DYNO")))
+        
+        # Додавання middleware тільки якщо є обмеження хостів
+        if allowed_hosts and "*" not in allowed_hosts:
+            app.add_middleware(
+                TrustedHostMiddleware,
+                allowed_hosts=allowed_hosts
+            )
+            logger.info("TrustedHostMiddleware enabled", allowed_hosts=allowed_hosts)
+        else:
+            logger.info("TrustedHostMiddleware disabled - no host restrictions")
 
     def get_websocket_authenticator(self):
         """Повертає функцію для автентифікації WebSocket"""
