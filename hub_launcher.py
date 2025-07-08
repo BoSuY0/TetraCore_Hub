@@ -637,6 +637,7 @@ class StreamHubLauncher:
         try:
             app = self.create_app()
 
+            # Налаштування для роботи за проксі (Heroku)
             config = uvicorn.Config(
                 app,
                 host=host,
@@ -645,7 +646,10 @@ class StreamHubLauncher:
                 log_level=log_level,
                 access_log=False,
                 use_colors=True,
-                loop="asyncio"
+                loop="asyncio",
+                forwarded_allow_ips="*",  # Дозволяємо всі проксі для Heroku
+                proxy_headers=True,  # Використовуємо заголовки проксі
+                server_header=False  # Приховуємо заголовок сервера
             )
 
             server = uvicorn.Server(config)
