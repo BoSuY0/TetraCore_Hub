@@ -11,6 +11,7 @@ TetraCore StreamHub Main Class
 
 import asyncio
 import logging
+import json
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from contextlib import asynccontextmanager
@@ -33,6 +34,9 @@ from core.websocket_manager import WebSocketManager
 from core.health_monitor import HealthMonitor
 from core.metrics_collector import MetricsCollector
 from core.redis_manager import RedisManager
+from core.security_integration import security_integration, integrate_security
+from core.async_optimization import AsyncOptimizer
+# Celery task queue видалено - завдання тепер обробляються через tetra-core-api
 # Removed old dashboard imports - now using React SPA
 
 
@@ -46,6 +50,8 @@ class StreamHub:
 
         # Основні компоненти
         self.client_manager: Optional[ClientManager] = None
+        self.async_optimizer: Optional[AsyncOptimizer] = None
+        # task_queue_manager видалено - завдання тепер обробляються через tetra-core-api
         self.task_router: Optional[TaskRouter] = None
         self.redis_manager: Optional[RedisManager] = None
         self.websocket_manager: Optional[WebSocketManager] = None
@@ -80,6 +86,16 @@ class StreamHub:
             else:
                 self.logger.info("Redis disabled, skipping Redis initialization")
                 self.redis_manager = None
+
+            # Ініціалізація асинхронного оптимізатора
+            self.async_optimizer = AsyncOptimizer(
+                max_workers=self.settings.worker_pool_size,
+                max_tasks=self.settings.message_queue_size
+            )
+            await self.async_optimizer.initialize()
+
+            # Celery task queue видалено - завдання тепер обробляються через tetra-core-api
+            self.logger.info("Task processing delegated to tetra-core-api workers")
 
             # Ініціалізація менеджерів
             self.client_manager = ClientManager(self.settings)
@@ -146,14 +162,11 @@ class StreamHub:
             lifespan=lifespan
         )
 
-        # CORS middleware
-        self.app.add_middleware(
-            CORSMiddleware,
-            allow_origins=self.settings.allowed_origins,
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-            expose_headers=["*"]
+        # Integrate all security components
+        integrate_security(
+            self.app,
+            redis_client=self.redis_manager.client if self.redis_manager else None,
+            require_auth=self.settings.require_authentication
         )
 
         # Детальне логування URL конфігурації
@@ -181,12 +194,7 @@ class StreamHub:
     def _register_routes(self):
         """Реєстрація HTTP та WebSocket роутів"""
 
-        # Підключення auth router
-        try:
-            from web.auth import auth_router
-            self.app.include_router(auth_router)
-        except ImportError as e:
-            self.logger.warning("Auth router not available", error=str(e))
+        # Auth router is now included in security integration
 
         @self.app.options("/{path:path}")
         async def options_handler(path: str):
@@ -196,6 +204,7 @@ class StreamHub:
 
         @self.app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
+            """WebSocket endpoint with authentication"""
             await self.handle_websocket_connection(websocket)
 
         @self.app.get("/health")
@@ -287,18 +296,40 @@ class StreamHub:
 
     async def handle_websocket_connection(self, websocket: WebSocket):
         """Обробка WebSocket підключення"""
+        from core.websocket_security import ws_security_manager
+
         try:
+            # Authenticate WebSocket connection before accepting
+            token = websocket.query_params.get("token")
+            user_data = await ws_security_manager.authenticate_websocket(websocket, token)
+
+            if not user_data:
+                await websocket.close(code=1008, reason="Authentication failed")
+                return
+
+            # Accept connection after successful authentication
             await websocket.accept()
             self.total_connections += 1
 
-            self.logger.info("New WebSocket connection",
+            # Register connection with security manager
+            conn_info = await ws_security_manager.accept_connection(websocket, user_data)
+            if not conn_info:
+                await websocket.close(code=1008, reason="Connection rejected")
+                return
+
+            self.logger.info("New authenticated WebSocket connection",
+                           user_id=user_data["user_id"],
                            remote_addr=websocket.client.host if websocket.client else "unknown")
 
-            # Очікування реєстрації клієнта
-            client = await self._handle_client_registration(websocket)
+            # Очікування реєстрації клієнта з автентифікованими даними
+            client = await self._handle_client_registration(websocket, user_data)
             if not client:
+                await ws_security_manager.disconnect_client(conn_info.client_id)
                 await websocket.close(code=4001, reason="Registration failed")
                 return
+
+            # Store client_id for security tracking
+            client.security_client_id = conn_info.client_id
 
             # Додавання клієнта до менеджера
             await self.client_manager.add_client(client)
@@ -315,8 +346,8 @@ class StreamHub:
             if 'client' in locals() and client is not None:
                 await self.client_manager.remove_client(client.info.client_id)
 
-    async def _handle_client_registration(self, websocket: WebSocket) -> Optional[Client]:
-        """Обробка реєстрації клієнта"""
+    async def _handle_client_registration(self, websocket: WebSocket, user_data: Dict[str, Any]) -> Optional[Client]:
+        """Обробка реєстрації клієнта з автентифікованими даними"""
         try:
             # Очікування повідомлення реєстрації
             self.logger.info("Waiting for client registration message")
@@ -469,10 +500,30 @@ class StreamHub:
 
     async def _handle_client_messages(self, client: Client, websocket: WebSocket):
         """Обробка повідомлень від клієнта"""
+        from core.websocket_security import ws_security_manager
+
         try:
             while True:
-                data = await websocket.receive_json()
-                message = parse_message(data)
+                raw_data = await websocket.receive_text()
+
+                # Validate message using security manager
+                if hasattr(client, 'security_client_id'):
+                    validated_message = await ws_security_manager.validate_message(
+                        client.security_client_id,
+                        raw_data
+                    )
+
+                    if not validated_message:
+                        self.logger.warning("Invalid message received",
+                                          client_id=client.info.client_id)
+                        continue
+
+                    # Parse validated message data
+                    message = parse_message(validated_message.data)
+                else:
+                    # Fallback for legacy connections (should be removed in future)
+                    data = await self.async_optimizer.json_loads(raw_data)
+                    message = parse_message(data)
 
                 # Оновлення часу останньої активності
                 client.info.stats.last_activity = datetime.utcnow()
@@ -809,6 +860,9 @@ class StreamHub:
 
         if self.client_manager:
             await self.client_manager.shutdown()
+
+        if self.async_optimizer:
+            await self.async_optimizer.shutdown()
 
         if self.redis_manager:
             await self.redis_manager.shutdown()

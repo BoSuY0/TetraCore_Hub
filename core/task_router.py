@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Set, Callable, Any
 from collections import defaultdict
 import structlog
+import orjson
 
 from config import Settings
 from models.task import Task, TaskType, TaskStatus, TaskPriority, TaskQueue
@@ -66,13 +67,21 @@ class TaskRouter:
         self.client_manager = None
 
     async def initialize(self):
-        """Ініціалізація маршрутизатора"""
+        """Ініціалізація роутера"""
         try:
-            self.logger.info("Initializing TaskRouter")
+            # Ініціалізація Redis клієнта
+            try:
+                from core.redis_manager import RedisManager
+                redis_manager = RedisManager()
+                self.redis_client = await redis_manager.get_instance()
+                self.logger.info("Redis клієнт ініціалізовано для TaskRouter")
+            except Exception as e:
+                self.logger.warning(f"Не вдалося ініціалізувати Redis: {e}")
+                self.redis_client = None
 
-            # Запуск фонових задач
-            self.timeout_task = asyncio.create_task(self._timeout_monitor())
-            self.cleanup_task = asyncio.create_task(self._cleanup_loop())
+            # Запуск фонових завдань
+            self._timeout_task = asyncio.create_task(self._timeout_monitor())
+            self._cleanup_task = asyncio.create_task(self._cleanup_loop())
 
             self.is_running = True
             self.logger.info("TaskRouter initialized successfully")
@@ -259,6 +268,29 @@ class TaskRouter:
 
             # Видалення з активних завдань воркера
             self.worker_tasks[worker_id].discard(task_id)
+
+            # Збереження результату в Redis для API воркера або бота
+            if self.redis_client:
+                try:
+                    result_key = f"task_result:{task_id}"
+                    result_data = {
+                        "success": status == TaskStatus.COMPLETED,
+                        "result": result,
+                        "error": error_message,
+                        "status": status.value,
+                        "worker_id": worker_id,
+                        "execution_time": execution_time,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+                    # Зберігаємо результат на 5 хвилин
+                    await self.redis_client.set(
+                        result_key,
+                        orjson.dumps(result_data),
+                        ex=300
+                    )
+                    self.logger.debug(f"Результат завдання {task_id} збережено в Redis")
+                except Exception as e:
+                    self.logger.error(f"Не вдалося зберегти результат в Redis: {e}")
 
             # Відправка результату боту
             await self._send_result_to_client(task)

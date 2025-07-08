@@ -45,6 +45,7 @@ class Settings:
     app_version: str = "1.0.0"
     environment: Environment = Environment.DEVELOPMENT
     debug: bool = False
+    require_authentication: bool = True
 
     # Мережеві налаштування
     host: str = "0.0.0.0"
@@ -63,6 +64,22 @@ class Settings:
     redis_max_connections: int = 20
     redis_retry_on_timeout: bool = True
     redis_health_check_interval: int = 30
+
+    # Redis Sentinel налаштування
+    redis_sentinel_urls: List[str] = None  # ["host1:26379", "host2:26379"]
+    redis_sentinel_service_name: str = "tetracore-master"
+
+    # Redis Cluster налаштування
+    redis_cluster_nodes: List[str] = None  # ["host1:7000", "host2:7001"]
+
+    # Pipeline налаштування
+    redis_pipeline_enabled: bool = True
+    redis_pipeline_batch_size: int = 100
+    redis_pipeline_flush_interval: float = 0.1
+
+    # TTL налаштування (в секундах)
+    redis_default_ttl: int = 86400  # 24 години
+    redis_cleanup_interval: int = 3600  # 1 година
 
     # Pub/Sub канали
     redis_task_channel: str = "tetra:tasks"
@@ -108,10 +125,22 @@ class Settings:
         """Завантаження налаштувань зі змінних середовища"""
         self.redis_enabled = os.getenv("REDIS_ENABLED", str(self.redis_enabled)).lower() in ("true", "1", "yes")
         self.redis_url = os.getenv("REDIS_URL", self.redis_url)
+
+        # Завантаження Sentinel URLs
+        sentinel_urls = os.getenv("REDIS_SENTINEL_URLS")
+        if sentinel_urls:
+            self.redis_sentinel_urls = [url.strip() for url in sentinel_urls.split(",")]
+
+        # Завантаження Cluster nodes
+        cluster_nodes = os.getenv("REDIS_CLUSTER_NODES")
+        if cluster_nodes:
+            self.redis_cluster_nodes = [node.strip() for node in cluster_nodes.split(",")]
+
         self.port = int(os.getenv("PORT", self.port))
         self.host = os.getenv("HOST", self.host)
         self.debug = os.getenv("DEBUG", str(self.debug)).lower() in ("true", "1", "yes")
         self.auth_token = os.getenv("AUTH_TOKEN", self.auth_token)
+        self.require_authentication = os.getenv("REQUIRE_AUTHENTICATION", str(self.require_authentication)).lower() in ("true", "1", "yes")
 
         # Автоматичне визначення Heroku середовища
         if is_heroku_environment():
@@ -186,6 +215,12 @@ class Settings:
             "max_connections": self.redis_max_connections,
             "retry_on_timeout": self.redis_retry_on_timeout,
             "health_check_interval": self.redis_health_check_interval,
+            "sentinel_urls": self.redis_sentinel_urls,
+            "cluster_nodes": self.redis_cluster_nodes,
+            "pipeline_enabled": self.redis_pipeline_enabled,
+            "pipeline_batch_size": self.redis_pipeline_batch_size,
+            "pipeline_flush_interval": self.redis_pipeline_flush_interval,
+            "default_ttl": self.redis_default_ttl,
         }
 
     def get_websocket_config(self) -> dict:

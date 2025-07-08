@@ -1,0 +1,103 @@
+import pytest
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
+from fastapi.testclient import TestClient
+
+# Import the main FastAPI app and settings object to be used in tests
+from main import app
+from config import Settings
+
+
+@pytest.fixture(scope="session")
+def event_loop():
+    """Create an instance of the default event loop for the session."""
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    yield loop
+    loop.close()
+
+
+@pytest.fixture(scope="module")
+def test_client():
+    """
+    Create a FastAPI TestClient instance for hitting API endpoints.
+    """
+    with TestClient(app) as client:
+        yield client
+
+
+@pytest.fixture
+def mock_settings(monkeypatch):
+    """
+    Fixture to easily mock application settings in tests.
+    """
+    # Create a fresh Settings object for each test
+    settings = Settings()
+
+    # Use monkeypatch to replace the original get_settings function
+    # with one that returns our test-specific settings object.
+    # This is currently commented out as get_settings is not implemented.
+    # from main import get_settings
+    # monkeypatch.setattr("main.get_settings", lambda: settings)
+    
+    return settings
+
+
+class MockRedisManager:
+    """
+    A mock implementation of the RedisManager for testing purposes.
+    It simulates the async methods without actual Redis connection.
+    """
+    def __init__(self):
+        self._cache = {}
+        self.publish = AsyncMock()
+        self.subscribe = AsyncMock()
+
+    async def get(self, key):
+        return self._cache.get(key)
+
+    async def set(self, key, value, ttl=None):
+        self._cache[key] = value
+        return True
+
+    async def delete(self, key):
+        if key in self._cache:
+            del self._cache[key]
+        return True
+
+    async def hgetall(self, key):
+        return self._cache.get(key, {})
+
+    async def hset(self, name, key, value):
+        if name not in self._cache:
+            self._cache[name] = {}
+        self._cache[name][key] = value
+        return 1
+
+    async def exists(self, key):
+        return key in self._cache
+        
+    def get_redis_client(self):
+        # Return a mock client
+        return AsyncMock()
+
+    def clear(self):
+        self._cache.clear()
+
+
+@pytest.fixture
+def mock_redis_manager(monkeypatch):
+    """
+    Fixture that replaces the RedisManager with a mock version.
+    """
+    mock_instance = MockRedisManager()
+
+    # The patch target depends on where RedisManager is imported.
+    # Assuming it's in 'core.redis_manager.RedisManager'
+    # We might need to patch it in multiple places if it's imported directly elsewhere.
+    monkeypatch.setattr("core.redis_manager.RedisManager", lambda: mock_instance)
+    
+    # If there's a singleton getInstance pattern, we patch that.
+    if hasattr(mock_instance, 'get_instance'):
+        monkeypatch.setattr("core.redis_manager.RedisManager.get_instance", AsyncMock(return_value=mock_instance))
+        
+    return mock_instance 

@@ -1,0 +1,469 @@
+"""
+Authentication Manager for TetraCore Hub
+Безпечне управління автентифікацією з JWT токенами
+"""
+
+import os
+import secrets
+import json
+from datetime import datetime, timedelta, timezone
+from typing import Dict, Optional, List, Any
+from functools import wraps
+import hashlib
+import hmac
+
+import jwt
+from passlib.context import CryptContext
+from fastapi import HTTPException, Security, Depends, Request
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import structlog
+import redis
+from pydantic import BaseModel, Field, validator
+from core.async_optimization import AsyncOptimizer
+
+from core.secrets_manager import get_secrets_manager
+
+logger = structlog.get_logger()
+
+# Константи безпеки
+ACCESS_TOKEN_EXPIRE_MINUTES = 15
+REFRESH_TOKEN_EXPIRE_DAYS = 7
+ALGORITHM = "HS256"
+BCRYPT_ROUNDS = 12
+MAX_LOGIN_ATTEMPTS = 5
+LOGIN_ATTEMPT_WINDOW_MINUTES = 15
+SESSION_CLEANUP_INTERVAL = 3600  # 1 година
+
+# Конфігурація для паролів
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+security = HTTPBearer()
+
+
+class TokenPair(BaseModel):
+    """Пара токенів для автентифікації"""
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in: int = Field(default=ACCESS_TOKEN_EXPIRE_MINUTES * 60)
+
+
+class UserCredentials(BaseModel):
+    """Модель для облікових даних користувача"""
+    username: str = Field(..., min_length=3, max_length=50)
+    password: str = Field(..., min_length=8)
+
+    @validator('username')
+    def validate_username(cls, v):
+        if not v.replace('_', '').replace('-', '').isalnum():
+            raise ValueError('Username може містити тільки літери, цифри, _ та -')
+        return v.lower()
+
+
+class TokenData(BaseModel):
+    """Дані, що зберігаються в токені"""
+    user_id: str
+    username: str
+    role: str
+    permissions: List[str]
+    session_id: str
+    exp: datetime
+    iat: datetime
+    token_type: str = "access"
+
+
+class AuthManager:
+    """Менеджер автентифікації з підтримкою JWT токенів"""
+
+    def __init__(self, redis_client: Optional[redis.Redis] = None):
+        self.redis_client = redis_client
+        self.async_optimizer = AsyncOptimizer(max_workers=5)
+
+        # Отримуємо ключі через secrets_manager
+        secrets_mgr = get_secrets_manager()
+        try:
+            self.secret_key = secrets_mgr.get_jwt_key()
+        except ValueError:
+            # Генеруємо випадковий ключ якщо не задано
+            self.secret_key = secrets.token_urlsafe(32)
+            logger.warning("JWT_SECRET_KEY не встановлено. Використовується тимчасовий ключ.")
+            # Зберігаємо згенерований ключ
+            secrets_mgr.set_secret("JWT_SECRET_KEY", self.secret_key)
+
+        try:
+            self.refresh_secret = secrets_mgr.get_refresh_key()
+        except ValueError:
+            self.refresh_secret = secrets.token_urlsafe(32)
+            logger.warning("JWT_REFRESH_SECRET не встановлено. Використовується тимчасовий ключ.")
+            secrets_mgr.set_secret("JWT_REFRESH_SECRET", self.refresh_secret)
+
+        # Кеш для заблокованих токенів
+        self._blocked_tokens = set()
+
+        # Кеш для спроб входу
+        self._login_attempts = {}
+
+    def hash_password(self, password: str) -> str:
+        """Хешування пароля з використанням bcrypt"""
+        return pwd_context.hash(password)
+
+    def verify_password(self, plain_password: str, hashed_password: str) -> bool:
+        """Перевірка пароля"""
+        try:
+            return pwd_context.verify(plain_password, hashed_password)
+        except Exception as e:
+            logger.error("Password verification error", error=str(e))
+            return False
+
+    def generate_session_id(self) -> str:
+        """Генерація унікального ID сесії"""
+        return secrets.token_urlsafe(32)
+
+    def create_access_token(self, data: Dict, expires_delta: Optional[timedelta] = None) -> str:
+        """Створення access токена"""
+        to_encode = data.copy()
+        
+        # Security: Always generate new session ID, ignore external ones
+        if "session_id" in to_encode:
+            logger.warning("Attempted to set external session_id, generating new one")
+        to_encode["session_id"] = self.generate_session_id()
+        
+        # Додаємо стандартні claims
+        now = datetime.now(timezone.utc)
+        expire = now + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+        
+        to_encode.update({
+            "exp": expire,
+            "iat": now,
+            "nbf": now,  # Not before
+            "jti": secrets.token_urlsafe(16),  # JWT ID для унікальності
+            "token_type": "access"
+        })
+        
+        encoded_jwt = jwt.encode(to_encode, self.secret_key, algorithm=ALGORITHM)
+        return encoded_jwt
+
+    def create_refresh_token(self, data: Dict) -> str:
+        """Створення JWT refresh токена"""
+        to_encode = data.copy()
+
+        now = datetime.now(timezone.utc)
+        expire = now + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+
+        to_encode.update({
+            "exp": expire,
+            "iat": now,
+            "token_type": "refresh",
+            "jti": secrets.token_urlsafe(16)
+        })
+
+        encoded_jwt = jwt.encode(to_encode, self.refresh_secret, algorithm=ALGORITHM)
+        return encoded_jwt
+
+    async def create_token_pair(self, user_data: Dict) -> TokenPair:
+        """Створення пари токенів (access + refresh)"""
+        session_id = self.generate_session_id()
+
+        token_data = {
+            "user_id": user_data["id"],
+            "username": user_data["username"],
+            "role": user_data["role"],
+            "permissions": user_data.get("permissions", []),
+            "session_id": session_id
+        }
+
+        access_token = self.create_access_token(token_data)
+        refresh_token = self.create_refresh_token(token_data)
+
+        # Зберігаємо сесію в Redis якщо доступний
+        if self.redis_client:
+            session_key = f"session:{session_id}"
+            session_data = {
+                **user_data,
+                "session_id": session_id,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "last_activity": datetime.now(timezone.utc).isoformat()
+            }
+            session_data_json = await self.async_optimizer.json_dumps(session_data)
+            self.redis_client.setex(
+                session_key,
+                timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+                session_data_json
+            )
+
+        logger.info("Token pair created", user_id=user_data["id"], session_id=session_id)
+
+        return TokenPair(
+            access_token=access_token,
+            refresh_token=refresh_token
+        )
+
+    async def decode_token(self, token: str, token_type: str = "access") -> Dict:
+        """Декодування та валідація JWT токена"""
+        try:
+            secret = self.secret_key if token_type == "access" else self.refresh_secret
+            payload = jwt.decode(token, secret, algorithms=[ALGORITHM])
+
+            # Перевірка типу токена
+            if payload.get("token_type") != token_type:
+                raise jwt.InvalidTokenError(f"Invalid token type. Expected {token_type}")
+
+            # Перевірка чи токен не заблокований
+            jti = payload.get("jti")
+            if jti and jti in self._blocked_tokens:
+                raise jwt.InvalidTokenError("Token has been revoked")
+
+            # Перевірка сесії в Redis
+            if self.redis_client and "session_id" in payload:
+                session_key = f"session:{payload['session_id']}"
+                if not self.redis_client.exists(session_key):
+                    raise jwt.InvalidTokenError("Session not found")
+
+                # Оновлюємо час останньої активності
+                await self.update_session_activity(payload['session_id'])
+
+            return payload
+
+            # Перевірка JTI (якщо є)
+            jti = payload.get("jti")
+            if jti:
+                # Перевірка в пам'яті
+                if jti in self._blocked_tokens:
+                    raise jwt.InvalidTokenError("Token has been revoked")
+
+                # Перевірка в Redis
+                if self.redis_client and self.redis_client.exists(f"blocked_token:{jti}"):
+                    raise jwt.InvalidTokenError("Token has been revoked")
+
+            # Перевірка сесії в Redis
+            if self.redis_client and "session_id" in payload:
+                session_key = f"session:{payload['session_id']}"
+                if not self.redis_client.exists(session_key):
+                    raise jwt.InvalidTokenError("Session not found")
+
+                # Оновлюємо час останньої активності
+                await self.update_session_activity(payload['session_id'])
+
+            return payload
+
+        except jwt.ExpiredSignatureError:
+            raise HTTPException(status_code=401, detail="Token has expired")
+        except jwt.InvalidTokenError as e:
+            logger.warning("Invalid token", error=str(e))
+            raise HTTPException(status_code=401, detail="Invalid token")
+        except Exception as e:
+            logger.error("Token decode error", error=str(e))
+            raise HTTPException(status_code=401, detail="Could not validate credentials")
+
+    async def refresh_access_token(self, refresh_token: str) -> TokenPair:
+        """Оновлення access токена за допомогою refresh токена"""
+        payload = await self.decode_token(refresh_token, token_type="refresh")
+
+        # Створюємо новий access токен з тими ж даними
+        token_data = {
+            "user_id": payload["user_id"],
+            "username": payload["username"],
+            "role": payload["role"],
+            "permissions": payload["permissions"],
+            "session_id": payload["session_id"]
+        }
+
+        new_access_token = self.create_access_token(token_data)
+
+        logger.info("Access token refreshed", user_id=payload["user_id"])
+
+        return TokenPair(
+            access_token=new_access_token,
+            refresh_token=refresh_token  # Refresh токен залишається той самий
+        )
+
+    def revoke_token(self, token: str):
+        """Відкликання токена (додавання в чорний список)"""
+        try:
+            payload = jwt.decode(token, self.secret_key, algorithms=[ALGORITHM])
+            jti = payload.get("jti")
+            if jti:
+                self._blocked_tokens.add(jti)
+
+                # Зберігаємо в Redis з TTL = час життя токена
+                if self.redis_client:
+                    exp = payload.get("exp", 0)
+                    ttl = max(0, exp - datetime.now(timezone.utc).timestamp())
+                    if ttl > 0:
+                        self.redis_client.setex(f"blocked_token:{jti}", int(ttl), "1")
+
+                logger.info("Token revoked", jti=jti)
+        except Exception as e:
+            logger.error("Error revoking token", error=str(e))
+
+    def logout(self, session_id: str):
+        """Вихід користувача (видалення сесії)"""
+        if self.redis_client:
+            session_key = f"session:{session_id}"
+            self.redis_client.delete(session_key)
+
+        logger.info("User logged out", session_id=session_id)
+
+    def check_login_attempts(self, username: str, ip_address: str) -> bool:
+        """Перевірка кількості спроб входу"""
+        # Normalize inputs to prevent bypass
+        username = self._normalize_username(username)
+        ip_address = self._normalize_ip_address(ip_address)
+        
+        key = f"{username}:{ip_address}"
+        now = datetime.now(timezone.utc)
+
+        # Очищення старих спроб
+        if key in self._login_attempts:
+            self._login_attempts[key] = [
+                attempt for attempt in self._login_attempts[key]
+                if now - attempt < timedelta(minutes=LOGIN_ATTEMPT_WINDOW_MINUTES)
+            ]
+
+        attempts = self._login_attempts.get(key, [])
+        return len(attempts) < MAX_LOGIN_ATTEMPTS
+
+    def record_login_attempt(self, username: str, ip_address: str, success: bool):
+        """Запис спроби входу"""
+        # Normalize inputs
+        username = self._normalize_username(username)
+        ip_address = self._normalize_ip_address(ip_address)
+        
+        if success:
+            # Очищаємо спроби при успішному вході
+            key = f"{username}:{ip_address}"
+            if key in self._login_attempts:
+                del self._login_attempts[key]
+        else:
+            key = f"{username}:{ip_address}"
+            if key not in self._login_attempts:
+                self._login_attempts[key] = []
+            self._login_attempts[key].append(datetime.now(timezone.utc))
+
+    def _normalize_username(self, username: str) -> str:
+        """Normalize username to prevent bypass attempts"""
+        if not username:
+            return ""
+        # Convert to lowercase and strip whitespace
+        return username.lower().strip()
+    
+    def _normalize_ip_address(self, ip_address: str) -> str:
+        """Normalize IP address to prevent bypass attempts"""
+        if not ip_address:
+            return ""
+            
+        try:
+            # Parse IP address to normalize format
+            import ipaddress
+            ip_obj = ipaddress.ip_address(ip_address.strip())
+            return str(ip_obj)
+        except ValueError:
+            # If invalid IP, return as-is but stripped
+            return ip_address.strip()
+
+    async def update_session_activity(self, session_id: str):
+        """Оновлення часу останньої активності сесії"""
+        if self.redis_client:
+            session_key = f"session:{session_id}"
+            session_data = self.redis_client.get(session_key)
+            if session_data:
+                data = await self.async_optimizer.json_loads(session_data)
+                data["last_activity"] = datetime.now(timezone.utc).isoformat()
+                data_json = await self.async_optimizer.json_dumps(data)
+                self.redis_client.setex(
+                    session_key,
+                    timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+                    data_json
+                )
+
+    async def get_active_sessions(self, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Отримання активних сесій"""
+        sessions = []
+
+        if self.redis_client:
+            pattern = f"session:*"
+            for key in self.redis_client.scan_iter(match=pattern):
+                session_data = self.redis_client.get(key)
+                if session_data:
+                    data = await self.async_optimizer.json_loads(session_data)
+                    if user_id is None or data.get("user_id") == user_id:
+                        sessions.append(data)
+
+        return sessions
+
+    def validate_request_signature(self, request_data: str, signature: str, timestamp: str) -> bool:
+        """Валідація підпису запиту для додаткової безпеки"""
+        # Перевірка часової мітки (не старше 5 хвилин)
+        try:
+            request_time = datetime.fromisoformat(timestamp)
+            if datetime.now(timezone.utc) - request_time > timedelta(minutes=5):
+                return False
+        except:
+            return False
+
+        # Перевірка підпису
+        expected_signature = hmac.new(
+            self.secret_key.encode() if self.secret_key else b'',
+            f"{request_data}{timestamp}".encode(),
+            hashlib.sha256
+        ).hexdigest()
+
+        return hmac.compare_digest(signature, expected_signature)
+
+
+# Глобальний екземпляр менеджера - lazy initialization
+_auth_manager = None
+
+def get_auth_manager() -> AuthManager:
+    """Get or create the global auth manager instance"""
+    global _auth_manager
+    if _auth_manager is None:
+        _auth_manager = AuthManager()
+    return _auth_manager
+
+# For backward compatibility
+auth_manager = None  # Will be set by imports that need it
+
+
+# Dependency для FastAPI
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Security(security)) -> Dict:
+    """Отримання поточного користувача з токена"""
+    token = credentials.credentials
+    payload = await get_auth_manager().decode_token(token)
+
+    return {
+        "user_id": payload["user_id"],
+        "username": payload["username"],
+        "role": payload["role"],
+        "permissions": payload["permissions"],
+        "session_id": payload["session_id"]
+    }
+
+
+def require_permission(permission: str):
+    """Декоратор для перевірки дозволів"""
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, user: Dict = Depends(get_current_user), **kwargs):
+            if permission not in user.get("permissions", []):
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Permission '{permission}' required"
+                )
+            return await func(*args, user=user, **kwargs)
+        return wrapper
+    return decorator
+
+
+def require_role(role: str):
+    """Декоратор для перевірки ролі"""
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, user: Dict = Depends(get_current_user), **kwargs):
+            if user.get("role") != role:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Role '{role}' required"
+                )
+            return await func(*args, user=user, **kwargs)
+        return wrapper
+    return decorator

@@ -14,6 +14,7 @@ import structlog
 
 from config import Settings
 from models.client import Client, ClientType, ClientInfo, WorkerCapabilities, ConnectionStatus, WorkerStatus
+from core.async_optimization import AsyncOptimizer, TaskPriority
 
 
 class ClientManager:
@@ -28,6 +29,9 @@ class ClientManager:
         self.clients: Dict[str, Client] = {}
         self.clients_by_type: Dict[ClientType, Set[str]] = defaultdict(set)
         self.clients_by_capability: Dict[str, Set[str]] = defaultdict(set)
+
+        # Асинхронний оптимізатор
+        self.async_optimizer = AsyncOptimizer(max_workers=10)
 
         # Статистика
         self.total_connections = 0
@@ -45,9 +49,12 @@ class ClientManager:
         self.cleanup_task: Optional[asyncio.Task] = None
 
     async def initialize(self):
-        """Ініціалізація менеджера"""
+        """Ініціалізація менеджера клієнтів"""
         try:
             self.logger.info("Initializing ClientManager")
+
+            # Ініціалізація асинхронного оптимізатора
+            await self.async_optimizer.initialize()
 
             # Запуск задачі очищення
             self.cleanup_task = asyncio.create_task(self._cleanup_loop())
@@ -76,6 +83,10 @@ class ClientManager:
         # Відключення всіх клієнтів
         for client in list(self.clients.values()):
             await self.remove_client(client.info.client_id)
+
+        # Зупинка асинхронного оптимізатора
+        if self.async_optimizer:
+            await self.async_optimizer.shutdown()
 
         self.logger.info("ClientManager shutdown complete")
 
@@ -358,7 +369,22 @@ class ClientManager:
         """Фонова задача очищення"""
         while self.is_running:
             try:
-                await self._cleanup_unhealthy_clients()
+                # Використовуємо фонову задачу для очищення
+                task_id = await self.async_optimizer.create_background_task(
+                    name="cleanup_unhealthy_clients",
+                    func=self._cleanup_unhealthy_clients,
+                    priority=TaskPriority.LOW
+                )
+
+                # Очікуємо результат
+                try:
+                    await self.async_optimizer.get_task_result(task_id, timeout=25)
+                except TimeoutError:
+                    self.logger.warning("Cleanup task timeout")
+                except ValueError as e:
+                    # Таск міг бути видалений або не створений
+                    self.logger.debug("Cleanup task not found", task_id=task_id, error=str(e))
+
                 await asyncio.sleep(30)  # Очищення кожні 30 секунд
 
             except asyncio.CancelledError:

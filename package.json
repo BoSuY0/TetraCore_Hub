@@ -2,16 +2,16 @@
   "name": "tetra-core-hub",
   "version": "1.0.0",
   "description": "TetraCore StreamHub - Integrated Backend and Frontend",
-  "main": "start_hub.py",
+  "main": "hub_launcher.py",
   "scripts": {
     "heroku-prebuild": "echo 'Installing frontend dependencies...' && cd frontend && npm install --legacy-peer-deps",
     "heroku-postbuild": "echo 'Building frontend...' && cd frontend && npm run build && echo 'Frontend built successfully'",
     "build": "cd frontend && npm run build",
-    "dev": "python start_hub.py dev",
-    "start": "python start_hub.py prod",
-    "build-frontend": "python start_hub.py build",
-    "dev-integrated": "python start_hub.py dev",
-    "dev-backend-only": "python start_hub.py fast"
+    "dev": "python hub_launcher.py dev",
+    "start": "python hub_launcher.py prod",
+    "build-frontend": "python hub_launcher.py build",
+    "dev-integrated": "python hub_launcher.py dev",
+    "dev-backend-only": "python hub_launcher.py fast"
   },
   "engines": {
     "node": ">=18.0.0",

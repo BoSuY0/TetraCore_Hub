@@ -1,1 +1,1 @@
-web: python start_hub.py prod --verbose
+web: python hub_launcher.py prod --verbose

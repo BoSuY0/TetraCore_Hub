@@ -8,17 +8,17 @@ TetraCore StreamHub Redis Manager
 
 import asyncio
 import json
-import logging
 from datetime import datetime
-from typing import Dict, List, Optional, Callable, Any, Set
+from typing import Dict, List, Optional, Callable, Any, Set, Union
 from contextlib import asynccontextmanager
 import structlog
 
 import redis.asyncio as redis
-from redis.asyncio import Redis
+from redis.asyncio import Redis, RedisCluster, Sentinel
 from redis.exceptions import RedisError, ConnectionError, TimeoutError
 
 from config import Settings
+from core.async_optimization import AsyncOptimizer
 
 
 class RedisManager:
@@ -30,8 +30,22 @@ class RedisManager:
         self.logger = structlog.get_logger(__name__)
 
         # Redis з'єднання
-        self.redis_client: Optional[Redis] = None
-        self.pubsub_client: Optional[Redis] = None
+        self.redis_client: Optional[Union[Redis, RedisCluster]] = None
+        self.pubsub_client: Optional[Union[Redis, RedisCluster]] = None
+
+        # Sentinel підтримка
+        self.sentinel: Optional[Sentinel] = None
+        self.sentinel_service_name: str = getattr(settings, 'redis_sentinel_service_name', "tetracore-master")
+
+        # Режим роботи Redis
+        self.redis_mode: str = "standalone"  # standalone, sentinel, cluster
+
+        # Pipeline для batch операцій
+        self.pipeline_enabled: bool = getattr(settings, 'redis_pipeline_enabled', True)
+        self.pipeline_batch_size: int = getattr(settings, 'redis_pipeline_batch_size', 100)
+        self.pipeline_flush_interval: float = getattr(settings, 'redis_pipeline_flush_interval', 0.1)  # секунди
+        self.pipeline_buffer: List[tuple] = []
+        self.pipeline_task: Optional[asyncio.Task] = None
 
         # Pub/Sub об'єкти
         self.pubsub = None
@@ -58,11 +72,21 @@ class RedisManager:
         self.message_cache: Dict[str, Dict[str, Any]] = {}
         self.max_cache_size = 1000
 
+        # TTL для ключів (за замовчуванням 24 години)
+        self.default_ttl: int = getattr(settings, 'redis_default_ttl', 86400)
+
+        # Асинхронний оптимізатор
+        self.async_optimizer = AsyncOptimizer(max_workers=5)
+
     async def initialize(self):
         """Ініціалізація Redis менеджера"""
         try:
             self.logger.info("Initializing Redis Manager",
-                           redis_url=self.settings.redis_url)
+                           redis_url=self.settings.redis_url,
+                           mode=self.redis_mode)
+
+            # Визначення режиму роботи
+            await self._detect_redis_mode()
 
             # Створення Redis клієнтів
             await self._create_redis_clients()
@@ -70,13 +94,21 @@ class RedisManager:
             # Перевірка з'єднання
             await self._test_connection()
 
+            # Ініціалізація асинхронного оптимізатора
+            await self.async_optimizer.initialize()
+
             # Запуск моніторингу
             self.health_check_task = asyncio.create_task(self._health_check_loop())
+
+            # Запуск pipeline якщо увімкнено
+            if self.pipeline_enabled:
+                self.pipeline_task = asyncio.create_task(self._pipeline_flush_loop())
 
             self.is_running = True
             self.is_connected = True
 
-            self.logger.info("Redis Manager initialized successfully")
+            self.logger.info("Redis Manager initialized successfully",
+                           mode=self.redis_mode)
 
         except Exception as e:
             self.logger.error("Failed to initialize Redis Manager", error=str(e))
@@ -90,13 +122,17 @@ class RedisManager:
         self.is_running = False
 
         # Зупинка задач
-        for task in [self.listen_task, self.health_check_task]:
+        for task in [self.listen_task, self.health_check_task, self.pipeline_task]:
             if task and not task.done():
                 task.cancel()
                 try:
                     await task
                 except asyncio.CancelledError:
                     pass
+
+        # Flush pipeline buffer
+        if self.pipeline_buffer:
+            await self._flush_pipeline()
 
         # Відписка від всіх каналів
         if self.pubsub:
@@ -109,42 +145,126 @@ class RedisManager:
         # Закриття з'єднань
         await self._close_connections()
 
+        # Зупинка асинхронного оптимізатора
+        if self.async_optimizer:
+            await self.async_optimizer.shutdown()
+
         self.logger.info("Redis Manager shutdown complete")
 
-    async def _create_redis_clients(self):
-        """Створення Redis клієнтів"""
+    async def _detect_redis_mode(self):
+        """Визначення режиму роботи Redis"""
         try:
-            # Основний клієнт для команд
-            self.redis_client = redis.from_url(
-                self.settings.redis_url,
-                max_connections=self.settings.redis_max_connections,
-                retry_on_timeout=self.settings.redis_retry_on_timeout,
-                decode_responses=True
-            )
+            # Перевірка наявності конфігурації Sentinel
+            if self.settings.redis_sentinel_urls:
+                self.redis_mode = "sentinel"
+                return
 
-            # Окремий клієнт для Pub/Sub
-            self.pubsub_client = redis.from_url(
-                self.settings.redis_url,
-                max_connections=10,
-                retry_on_timeout=self.settings.redis_retry_on_timeout,
-                decode_responses=True
-            )
+            # Перевірка наявності конфігурації Cluster
+            if self.settings.redis_cluster_nodes:
+                self.redis_mode = "cluster"
+                return
+
+            # За замовчуванням - standalone
+            self.redis_mode = "standalone"
+
+        except Exception as e:
+            self.logger.warning("Failed to detect Redis mode, using standalone", error=str(e))
+            self.redis_mode = "standalone"
+
+    async def _create_redis_clients(self):
+        """Створення Redis клієнтів залежно від режиму"""
+        try:
+            if self.redis_mode == "sentinel":
+                await self._create_sentinel_clients()
+            elif self.redis_mode == "cluster":
+                await self._create_cluster_clients()
+            else:
+                await self._create_standalone_clients()
 
             # Створення Pub/Sub об'єкта
-            self.pubsub = self.pubsub_client.pubsub()
+            if self.pubsub_client:
+                self.pubsub = self.pubsub_client.pubsub()
 
         except Exception as e:
             self.logger.error("Failed to create Redis clients", error=str(e))
             raise
 
+    async def _create_standalone_clients(self):
+        """Створення звичайних Redis клієнтів"""
+        # Основний клієнт для команд
+        self.redis_client = redis.from_url(
+            self.settings.redis_url,
+            max_connections=self.settings.redis_max_connections,
+            retry_on_timeout=self.settings.redis_retry_on_timeout,
+            decode_responses=True
+        )
+
+        # Окремий клієнт для Pub/Sub
+        self.pubsub_client = redis.from_url(
+            self.settings.redis_url,
+            max_connections=10,
+            retry_on_timeout=self.settings.redis_retry_on_timeout,
+            decode_responses=True
+        )
+
+    async def _create_sentinel_clients(self):
+        """Створення Redis клієнтів через Sentinel"""
+        sentinel_urls = self.settings.redis_sentinel_urls
+        if not sentinel_urls:
+            raise ValueError("Sentinel URLs not configured")
+
+        # Парсинг Sentinel URLs
+        sentinels = []
+        for url in sentinel_urls:
+            host, port = url.split(':')
+            sentinels.append((host, int(port)))
+
+        # Створення Sentinel
+        self.sentinel = Sentinel(sentinels, decode_responses=True)
+
+        # Отримання master та slave клієнтів
+        if self.sentinel:
+            self.redis_client = self.sentinel.master_for(
+                self.sentinel_service_name,
+                max_connections=self.settings.redis_max_connections,
+                retry_on_timeout=self.settings.redis_retry_on_timeout
+            )
+
+            # Pub/Sub через master
+            self.pubsub_client = self.sentinel.master_for(
+                self.sentinel_service_name,
+                max_connections=10,
+                retry_on_timeout=self.settings.redis_retry_on_timeout
+            )
+
+    async def _create_cluster_clients(self):
+        """Створення Redis Cluster клієнтів"""
+        cluster_nodes = self.settings.redis_cluster_nodes
+        if not cluster_nodes:
+            raise ValueError("Cluster nodes not configured")
+
+        # Створення Cluster клієнта
+        self.redis_client = RedisCluster(
+            startup_nodes=[{"host": node.split(':')[0], "port": int(node.split(':')[1])}
+                          for node in cluster_nodes],
+            decode_responses=True,
+            skip_full_coverage_check=True,
+            max_connections=self.settings.redis_max_connections
+        )
+
+        # Для Pub/Sub використовуємо той самий клієнт
+        self.pubsub_client = self.redis_client
+
     async def _test_connection(self):
         """Тестування з'єднання з Redis"""
         try:
             # Тест основного клієнта
-            await self.redis_client.ping()
+            if self.redis_client:
+                await self.redis_client.ping()
 
             # Тест Pub/Sub клієнта
-            await self.pubsub_client.ping()
+            if self.pubsub_client:
+                await self.pubsub_client.ping()
 
             self.logger.info("Redis connection test successful")
 
@@ -170,17 +290,25 @@ class RedisManager:
             self.logger.error("Error closing Redis connections", error=str(e))
 
     async def publish(self, channel: str, message: Dict[str, Any]) -> bool:
-        """Публікація повідомлення в канал"""
+        """Публікація повідомлення в канал з підтримкою pipeline"""
         try:
             if not self.is_connected or not self.redis_client:
                 self.logger.error("Redis not connected", channel=channel)
                 return False
 
             # Серіалізація повідомлення
-            message_data = json.dumps(message, default=str, ensure_ascii=False)
+            message_data = await self.async_optimizer.json_dumps(message, default=str, ensure_ascii=False)
 
-            # Публікація
-            result = await self.redis_client.publish(channel, message_data)
+            # Якщо pipeline увімкнено, додаємо до буфера
+            if self.pipeline_enabled:
+                self.pipeline_buffer.append(('publish', channel, message_data))
+
+                # Flush якщо досягнуто розмір batch
+                if len(self.pipeline_buffer) >= self.pipeline_batch_size:
+                    await self._flush_pipeline()
+            else:
+                # Звичайна публікація
+                await self.redis_client.publish(channel, message_data)
 
             # Кешування для надійності
             self._cache_message(channel, message)
@@ -189,7 +317,6 @@ class RedisManager:
 
             self.logger.debug("Message published",
                             channel=channel,
-                            subscribers=result,
                             message_id=message.get('message_id'))
 
             return True
@@ -210,7 +337,8 @@ class RedisManager:
                 return False
 
             # Підписка на канали
-            await self.pubsub.subscribe(*channels)
+            if self.pubsub:
+                await self.pubsub.subscribe(*channels)
 
             # Оновлення списку підписок
             self.subscriptions.update(channels)
@@ -331,7 +459,7 @@ class RedisManager:
             await self._test_connection()
 
             # Відновлення підписок
-            if self.subscriptions:
+            if self.subscriptions and self.pubsub:
                 await self.pubsub.subscribe(*list(self.subscriptions))
 
             self.is_connected = True
@@ -441,16 +569,22 @@ class RedisManager:
             return []
 
     async def set_key(self, key: str, value: Any, expire: int = None) -> bool:
-        """Встановлення значення ключа"""
+        """Встановлення значення ключа з TTL"""
         try:
             if not self.redis_client:
                 return False
 
             # Серіалізація значення
             if isinstance(value, (dict, list)):
-                value = json.dumps(value, default=str, ensure_ascii=False)
+                value = await self.async_optimizer.json_dumps(value, default=str, ensure_ascii=False)
 
-            # Встановлення значення
+            # Використання дефолтного TTL якщо не вказано
+            if expire is None:
+                expire = self.default_ttl
+            else:
+                expire = int(expire)
+
+            # Встановлення значення з TTL
             await self.redis_client.set(key, value, ex=expire)
 
             return True
@@ -474,7 +608,7 @@ class RedisManager:
 
             # Спроба десеріалізації JSON
             try:
-                return json.loads(value)
+                return await self.async_optimizer.json_loads(value)
             except json.JSONDecodeError:
                 return value
 
@@ -577,3 +711,97 @@ class RedisManager:
             self.settings.redis_health_channel
         ]
         return await self.subscribe(channels)
+
+    async def _flush_pipeline(self):
+        """Виконання накопичених pipeline операцій"""
+        if not self.pipeline_buffer or not self.redis_client:
+            return
+
+        try:
+            pipe = self.redis_client.pipeline()
+
+            for operation, *args in self.pipeline_buffer:
+                if operation == 'publish':
+                    pipe.publish(*args)
+                elif operation == 'set':
+                    pipe.set(*args)
+
+            results = await pipe.execute()
+
+            self.logger.debug("Pipeline flushed",
+                            operations=len(self.pipeline_buffer),
+                            results=len(results))
+
+            self.pipeline_buffer.clear()
+
+        except Exception as e:
+            self.logger.error("Failed to flush pipeline", error=str(e))
+            # Спроба виконати операції окремо
+            for operation, *args in self.pipeline_buffer:
+                try:
+                    if operation == 'publish':
+                        await self.redis_client.publish(*args)
+                    elif operation == 'set':
+                        await self.redis_client.set(*args)
+                except Exception as inner_e:
+                    self.logger.error("Failed to execute pipeline operation",
+                                    operation=operation,
+                                    error=str(inner_e))
+            self.pipeline_buffer.clear()
+
+    async def _pipeline_flush_loop(self):
+        """Періодичне виконання pipeline операцій"""
+        while self.is_running:
+            try:
+                await asyncio.sleep(self.pipeline_flush_interval)
+
+                if self.pipeline_buffer:
+                    await self._flush_pipeline()
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error("Error in pipeline flush loop", error=str(e))
+
+    async def get_memory_usage(self) -> Dict[str, Any]:
+        """Отримання інформації про використання пам'яті Redis"""
+        try:
+            if not self.redis_client:
+                return {}
+
+            info = await self.redis_client.info("memory")
+
+            return {
+                "used_memory": info.get("used_memory_human", "0"),
+                "used_memory_peak": info.get("used_memory_peak_human", "0"),
+                "used_memory_rss": info.get("used_memory_rss_human", "0"),
+                "mem_fragmentation_ratio": info.get("mem_fragmentation_ratio", 0),
+                "evicted_keys": info.get("evicted_keys", 0)
+            }
+
+        except Exception as e:
+            self.logger.error("Failed to get memory usage", error=str(e))
+            return {}
+
+    async def cleanup_old_keys(self, pattern: str = "*", days: int = 7):
+        """Видалення старих ключів за паттерном"""
+        try:
+            if not self.redis_client:
+                return 0
+
+            deleted = 0
+            async for key in self.redis_client.scan_iter(match=pattern):
+                ttl = await self.redis_client.ttl(key)
+                # Якщо ключ без TTL або TTL більше ніж days
+                if ttl == -1 or ttl > days * 86400:
+                    await self.redis_client.expire(key, days * 86400)
+                    deleted += 1
+
+            self.logger.info("Cleaned up old keys",
+                           pattern=pattern,
+                           deleted=deleted)
+            return deleted
+
+        except Exception as e:
+            self.logger.error("Failed to cleanup old keys", error=str(e))
+            return 0

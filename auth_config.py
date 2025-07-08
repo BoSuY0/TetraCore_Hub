@@ -7,19 +7,16 @@ import os
 from typing import List
 
 # Завантаження змінних з .env файлу
+# ВАЖЛИВО: Використовуйте python-dotenv для безпечного завантаження
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
-    # Якщо python-dotenv не встановлено, спробуємо завантажити .env вручну
-    env_path = os.path.join(os.path.dirname(__file__), '.env')
-    if os.path.exists(env_path):
-        with open(env_path, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#') and '=' in line:
-                    key, value = line.split('=', 1)
-                    os.environ[key] = value
+    import warnings
+    warnings.warn(
+        "python-dotenv не встановлено. Змінні середовища мають бути встановлені вручну.",
+        RuntimeWarning
+    )
 
 # Session Configuration
 SESSION_DURATION_HOURS = 24  # Тривалість сесії в годинах
@@ -32,8 +29,28 @@ REQUIRE_PHOTO = False     # Чи вимагати фото профілю
 # Налаштування для авторизації з логіном та паролем
 # Значення беруться з .env (див. .env.example)
 # Якщо не встановлені в .env, використовуються значення за замовчуванням для тестування
-ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")  # За замовчуванням: admin
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "password")  # За замовчуванням: password
+# ВАЖЛИВО: Ці значення МАЮТЬ бути встановлені через змінні середовища!
+# Ніколи не використовуйте значення за замовчуванням в продакшені
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
+
+# Перевірка наявності обов'язкових credentials
+if not ADMIN_USERNAME or not ADMIN_PASSWORD:
+    import warnings
+    warnings.warn(
+        "ADMIN_USERNAME та ADMIN_PASSWORD не встановлені! "
+        "Встановіть їх через змінні середовища або .env файл. "
+        "Див. .env.example для прикладу.",
+        RuntimeWarning
+    )
+    # Тимчасові значення ТІЛЬКИ для розробки
+    if os.getenv("ENVIRONMENT", "production").lower() == "development":
+        ADMIN_USERNAME = "dev_admin"
+        ADMIN_PASSWORD = "dev_password_change_me"
+    else:
+        raise ValueError(
+            "ADMIN_USERNAME та ADMIN_PASSWORD мають бути встановлені в продакшені!"
+        )
 
 
 # Role-based permissions
@@ -57,8 +74,21 @@ def get_user_permissions(user_id: int) -> List[str]:
 # Validation functions
 def validate_config() -> List[str]:
     """Валідація конфігурації авторизації"""
-    # Без авторизації через бота немає що перевіряти
-    return []
+    errors = []
 
-if __name__ == "__main__":
-    print_auth_status() 
+    # Перевірка наявності обов'язкових змінних
+    if not ADMIN_USERNAME:
+        errors.append("ADMIN_USERNAME not configured")
+    if not ADMIN_PASSWORD:
+        errors.append("ADMIN_PASSWORD not configured")
+
+    # Перевірка довжини credentials
+    if ADMIN_USERNAME and len(ADMIN_USERNAME) < 3:
+        errors.append("ADMIN_USERNAME must be at least 3 characters long")
+    if ADMIN_PASSWORD and len(ADMIN_PASSWORD) < 8:
+        errors.append("ADMIN_PASSWORD must be at least 8 characters long")
+
+    return errors
+
+# Модуль не призначений для standalone виконання
+# Використовуйте hub_launcher.py для запуску
