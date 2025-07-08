@@ -72,15 +72,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         throw new Error(errorData.detail || 'Authentication failed');
       }
       const data = await response.json();
-      if (data.success && data.session) {
+      if (data.success && data.user && data.tokens) {
+        // Створюємо користувача з правильними даними
+        const userWithSession = {
+          id: data.user.id,
+          username: data.user.username,
+          firstName: data.user.firstName,
+          lastName: data.user.lastName,
+          photoUrl: data.user.photoUrl,
+          role: data.user.role,
+          permissions: data.user.permissions,
+          sessionId: data.tokens.access_token, // Використовуємо access_token як sessionId
+          loginTime: new Date().toISOString(),
+        };
+        
         setAuth({
           isAuthenticated: true,
-          user: data.session.user,
-          sessionId: data.session.sessionId,
+          user: userWithSession,
+          sessionId: data.tokens.access_token,
           error: null,
           isLoading: false,
         });
-        localStorage.setItem('sessionId', data.session.sessionId);
+        
+        // Зберігаємо access_token як sessionId для WebSocket
+        localStorage.setItem('sessionId', data.tokens.access_token);
         return true;
       } else {
         throw new Error(data.message || 'Login failed');
@@ -148,13 +163,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
     setAuth((prev) => ({ ...prev, isLoading: true }));
     try {
-      console.log('📤 Sending validation request for sessionId:', sessionId.substring(0, 8) + '...');
+      console.log('📤 Sending validation request for token:', sessionId.substring(0, 8) + '...');
       const response = await fetch('/api/auth/validate', {
         method: 'POST',
         headers: {
           "Content-Type": "application/json",
+          "Authorization": `Bearer ${sessionId}`,
         },
-        body: JSON.stringify({ sessionId }),
       });
 
       if (!response.ok) {
@@ -190,10 +205,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         "✅ Session validation successful for user:",
         data.user?.username,
       );
+      
+      // Створюємо користувача з правильними даними
+      const userWithSession = {
+        id: data.user.user_id,
+        username: data.user.username,
+        firstName: data.user.username,
+        lastName: undefined,
+        photoUrl: undefined,
+        role: data.user.role,
+        permissions: data.user.permissions,
+        sessionId: sessionId,
+        loginTime: new Date().toISOString(),
+      };
+      
       // Оновлення стану при валідній сесії
       setAuth({
         isAuthenticated: true,
-        user: data.user,
+        user: userWithSession,
         sessionId,
         error: null,
         isLoading: false,

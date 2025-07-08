@@ -8,6 +8,7 @@ import {
   DashboardData,
 } from "../types/api";
 import config, { buildUrl, buildWsUrl } from "../config";
+import { useAuth } from './AuthContext';
 
 interface StatusState {
   health: StreamHubHealth | null;
@@ -133,6 +134,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 }) => {
   const [state, dispatch] = useReducer(statusReducer, initialState);
   const [socket, setSocket] = React.useState<WebSocket | null>(null);
+  const { auth } = useAuth();
 
   // API calls
   const fetchHealth = async (): Promise<StreamHubHealth | null> => {
@@ -219,9 +221,22 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
     dispatch({ type: "SET_CONNECTION_STATUS", payload: "connecting" });
 
-    const ws = new WebSocket(buildWsUrl("/ws"));
+    // Отримуємо токен із localStorage
+    const sessionId = localStorage.getItem('sessionId');
+    if (!sessionId) {
+      console.warn('No session ID found, skipping WebSocket connection');
+      dispatch({ type: "SET_CONNECTION_STATUS", payload: "disconnected" });
+      return;
+    }
+
+    // Будуємо URL з токеном
+    const wsUrl = `${buildWsUrl("/ws")}?token=${encodeURIComponent(sessionId)}`;
+    console.log('Connecting to WebSocket with token:', sessionId.substring(0, 8) + '...');
+
+    const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
+      console.log('WebSocket connected successfully');
       dispatch({ type: "SET_CONNECTION_STATUS", payload: "connected" });
 
       // Send registration message
@@ -260,14 +275,17 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
+      console.log('WebSocket closed:', event.code, event.reason);
       dispatch({ type: "SET_CONNECTION_STATUS", payload: "disconnected" });
       setSocket(null);
 
-      // Attempt to reconnect after 5 seconds
-      setTimeout(() => {
-        if (!socket) connectWebSocket();
-      }, 10000);
+      // Attempt to reconnect after 5 seconds if we have a valid session
+      if (auth.isAuthenticated) {
+        setTimeout(() => {
+          if (!socket) connectWebSocket();
+        }, 5000);
+      }
     };
 
     ws.onerror = (error) => {
@@ -292,13 +310,15 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
     return () => clearInterval(interval);
   }, [refreshInterval]);
 
-  // Connect WebSocket on mount (optional, not required for status)
+  // Connect WebSocket when authenticated
   useEffect(() => {
-    // WebSocket is optional for real-time updates
-    // Status is determined by API availability
-    connectWebSocket();
+    if (auth.isAuthenticated) {
+      connectWebSocket();
+    } else {
+      disconnectWebSocket();
+    }
     return () => disconnectWebSocket();
-  }, []);
+  }, [auth.isAuthenticated]);
 
   const value: StatusContextType = {
     state,

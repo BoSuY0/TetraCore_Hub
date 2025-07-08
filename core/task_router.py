@@ -71,10 +71,13 @@ class TaskRouter:
         try:
             # Ініціалізація Redis клієнта
             try:
-                from core.redis_manager import RedisManager
-                redis_manager = RedisManager()
-                self.redis_client = await redis_manager.get_instance()
-                self.logger.info("Redis клієнт ініціалізовано для TaskRouter")
+                # Використовуємо існуючий redis_manager або створюємо новий
+                if self.redis_manager:
+                    self.redis_client = self.redis_manager.redis_client
+                    self.logger.info("Redis клієнт отримано з існуючого redis_manager")
+                else:
+                    self.logger.info("Redis manager не доступний, пропускаємо ініціалізацію Redis")
+                    self.redis_client = None
             except Exception as e:
                 self.logger.warning(f"Не вдалося ініціалізувати Redis: {e}")
                 self.redis_client = None
