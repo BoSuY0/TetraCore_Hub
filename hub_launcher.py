@@ -613,18 +613,11 @@ class StreamHubLauncher:
             print("🛑 Зупинка StreamHub...")
             await hub.shutdown()
 
+        # Встановлюємо lifespan перед створенням app
+        hub.lifespan = lifespan
+
         # Отримуємо FastAPI додаток від StreamHub
         app = hub.get_app()
-
-        # Встановлюємо lifespan
-        # Для новіших версій FastAPI використовуємо router.lifespan_context
-        if hasattr(app.router, 'lifespan_context'):
-            app.router.lifespan_context = lifespan
-        else:
-            # Для старіших версій
-            app = FastAPI(lifespan=lifespan)
-            # Копіюємо роути з оригінального app
-            app.mount("/", hub.get_app())
 
         return app
 
