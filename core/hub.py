@@ -19,7 +19,7 @@ import os
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
+
 from fastapi.staticfiles import StaticFiles
 import structlog
 
@@ -163,12 +163,7 @@ class StreamHub:
             lifespan=lifespan
         )
 
-        # Налаштування middleware для Heroku
-        # Дозволяємо всі хости для Heroku (проксі)
-        self.app.add_middleware(
-            TrustedHostMiddleware,
-            allowed_hosts=["*"]  # На Heroku це безпечно, бо є зовнішній проксі
-        )
+
 
         # Налаштування CORS
         self.app.add_middleware(
