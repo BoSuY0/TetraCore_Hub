@@ -553,7 +553,7 @@ class StreamHubLauncher:
         default_env = {
             "ENVIRONMENT": "development",
             "HOST": "0.0.0.0",
-            "PORT": "8000",
+            "PORT": os.environ.get("PORT", "8000"),
             "FRONTEND_URL": "http://localhost:3000",
             "BACKEND_URL": "http://localhost:8000",
             "REDIS_URL": "redis://localhost:6379/0",
@@ -628,8 +628,12 @@ class StreamHubLauncher:
 
         return app
 
-    async def run_backend(self, host="0.0.0.0", port=8000, reload=False, log_level="info"):
+    async def run_backend(self, host="0.0.0.0", port=None, reload=False, log_level="info"):
         """Запускає backend сервер"""
+        # Використовуємо PORT з оточення для Heroku
+        if port is None:
+            port = int(os.environ.get("PORT", "8000"))
+
         try:
             app = self.create_app()
 
@@ -676,7 +680,7 @@ class StreamHubLauncher:
             # Development режим - сервуємо frontend через proxy
             await self.run_backend(
                 host="0.0.0.0",
-                port=8000,
+                port=int(os.environ.get("PORT", "8000")),
                 reload=True,
                 log_level=log_level
             )
@@ -706,7 +710,7 @@ class StreamHubLauncher:
             print("\n⚡ Швидкий запуск backend...\n")
             await self.run_backend(
                 host="0.0.0.0",
-                port=8000,
+                port=int(os.environ.get("PORT", "8000")),
                 reload=False,
                 log_level=log_level
             )
@@ -737,7 +741,7 @@ class StreamHubLauncher:
             print("\n🚀 Запуск production серверу...\n")
             await self.run_backend(
                 host="0.0.0.0",
-                port=8000,
+                port=int(os.environ.get("PORT", "8000")),
                 reload=False,
                 log_level=log_level
             )
