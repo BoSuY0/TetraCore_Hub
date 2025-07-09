@@ -9,19 +9,22 @@ TetraCore StreamHub Main Class
 - Збір метрик та статистики
 """
 
+# Standard library
 import asyncio
 import logging
 import json
 from datetime import datetime
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, cast
 from contextlib import asynccontextmanager
 import os
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+# Third-party libraries
+import fastapi  # type: ignore  # noqa: F401 (used for typing and sub-modules)
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException  # type: ignore
+from fastapi.middleware.cors import CORSMiddleware  # type: ignore
+from fastapi.staticfiles import StaticFiles  # type: ignore
 
-from fastapi.staticfiles import StaticFiles
-import structlog
+import structlog  # type: ignore
 
 from config import Settings, get_settings, is_heroku_environment
 from models.messages import (
@@ -44,7 +47,7 @@ from core.async_optimization import AsyncOptimizer
 class StreamHub:
     """Головний клас StreamHub"""
 
-    def __init__(self, settings: Settings = None):
+    def __init__(self, settings: Optional[Settings] = None):
         """Ініціалізація StreamHub"""
         self.settings = settings or get_settings()
         self.logger = structlog.get_logger(__name__)
@@ -106,8 +109,10 @@ class StreamHub:
             self.metrics_collector = MetricsCollector(self.settings)
 
             # Встановлення зв'язків між компонентами
-            self.task_router.set_client_manager(self.client_manager)
-            self.health_monitor.client_manager = self.client_manager
+            if self.task_router and self.client_manager:
+                self.task_router.set_client_manager(self.client_manager)
+            if self.health_monitor and self.client_manager:
+                self.health_monitor.client_manager = self.client_manager
 
             # Ініціалізація компонентів
             await self.client_manager.initialize()
@@ -135,16 +140,19 @@ class StreamHub:
         """Налаштування обробників подій"""
 
         # Обробники подій клієнтів
-        self.client_manager.on_client_connected = self._on_client_connected
-        self.client_manager.on_client_disconnected = self._on_client_disconnected
+        if self.client_manager:
+            self.client_manager.on_client_connected = self._on_client_connected
+            self.client_manager.on_client_disconnected = self._on_client_disconnected
 
         # Обробники подій завдань
-        self.task_router.on_task_assigned = self._on_task_assigned
-        self.task_router.on_task_completed = self._on_task_completed
-        self.task_router.on_task_failed = self._on_task_failed
+        if self.task_router:
+            self.task_router.on_task_assigned = self._on_task_assigned
+            self.task_router.on_task_completed = self._on_task_completed
+            self.task_router.on_task_failed = self._on_task_failed
 
         # Обробники подій здоров'я
-        self.health_monitor.on_client_unhealthy = self._on_client_unhealthy
+        if self.health_monitor:
+            self.health_monitor.on_client_unhealthy = self._on_client_unhealthy
 
         # Обробники Redis подій (якщо Redis увімкнено)
         if self.redis_manager:
@@ -163,7 +171,8 @@ class StreamHub:
             lifespan=lifespan
         )
 
-
+        # Статична перевірка: self.app тепер гарантовано не None
+        assert self.app is not None
 
         # Налаштування CORS
         self.app.add_middleware(
@@ -175,11 +184,11 @@ class StreamHub:
             expose_headers=["*"]
         )
 
-        # Integrate all security components
         integrate_security(
             self.app,
-            redis_client=self.redis_manager.client if self.redis_manager else None,
-            require_auth=self.settings.require_authentication
+            # type: ignore[attr-defined] – атрибут client додається під час ініціалізації RedisManager
+            redis_client=cast(Any, self.redis_manager).client if self.redis_manager else None,
+            require_auth=self.settings.require_authentication,
         )
 
         # Детальне логування URL конфігурації
@@ -209,23 +218,23 @@ class StreamHub:
 
         # Auth router is now included in security integration
 
-        @self.app.options("/{path:path}")
+        @self.app.options("/{path:path}")  # type: ignore[attr-defined]
         async def options_handler(path: str):
             """Обробка CORS preflight запитів"""
-            from fastapi.responses import Response
+            from fastapi.responses import Response  # type: ignore
             return Response(status_code=200)
 
-        @self.app.websocket("/ws")
+        @self.app.websocket("/ws")  # type: ignore[attr-defined]
         async def websocket_endpoint(websocket: WebSocket):
             """WebSocket endpoint with authentication"""
             await self.handle_websocket_connection(websocket)
 
-        @self.app.get("/health")
+        @self.app.get("/health")  # type: ignore[attr-defined]
         async def health_check():
             """Перевірка здоров'я системи"""
             return await self.get_health_status()
 
-        @self.app.get("/config")
+        @self.app.get("/config")  # type: ignore[attr-defined]
         async def get_app_config():
             """Отримання конфігурації додатку для frontend"""
             return {
@@ -237,12 +246,12 @@ class StreamHub:
                 "version": "1.0.0"
             }
 
-        @self.app.get("/metrics")
+        @self.app.get("/metrics")  # type: ignore[attr-defined]
         async def get_metrics():
             """Отримання метрик системи"""
             return await self.get_system_metrics()
 
-        @self.app.get("/clients")
+        @self.app.get("/clients")  # type: ignore[attr-defined]
         async def get_clients():
             """Отримання списку підключених клієнтів"""
             if not self.client_manager or not self.client_manager.is_healthy():
@@ -256,7 +265,7 @@ class StreamHub:
                 "total_count": self.client_manager.get_client_count()
             }
 
-        @self.app.get("/tasks")
+        @self.app.get("/tasks")  # type: ignore[attr-defined]
         async def get_tasks():
             """Отримання інформації про завдання"""
             if not self.task_router:
@@ -264,7 +273,7 @@ class StreamHub:
 
             return await self.task_router.get_queue_stats()
 
-        @self.app.post("/tasks/{task_id}/cancel")
+        @self.app.post("/tasks/{task_id}/cancel")  # type: ignore[attr-defined]
         async def cancel_task(task_id: str):
             """Скасування завдання"""
             if not self.task_router:
@@ -276,20 +285,20 @@ class StreamHub:
 
             return {"message": "Task cancelled successfully"}
 
-        @self.app.get("/")
+        @self.app.get("/")  # type: ignore[attr-defined]
         async def serve_react_app():
             """Сервіс React додатку"""
-            from fastapi.responses import FileResponse
+            from fastapi.responses import FileResponse  # type: ignore
             """Serve React app for root and dashboard routes"""
             if os.path.exists('frontend/build/index.html'):
                 return FileResponse('frontend/build/index.html')
             else:
                 return {"message": "TetraCore StreamHub API", "status": "running", "frontend": "not built"}
 
-        @self.app.get("/{path:path}")
+        @self.app.get("/{path:path}")  # type: ignore[attr-defined]
         async def serve_react_routes(path: str):
             """Сервіс React роутів (SPA fallback)"""
-            from fastapi.responses import FileResponse
+            from fastapi.responses import FileResponse  # type: ignore
 
             # Якщо це API роут, не обробляємо тут (виключили dashboard/ для React Router)
             if path.startswith(('api/', 'dashboard/api/', 'health', 'metrics', 'clients', 'tasks', 'ws')):
@@ -345,7 +354,8 @@ class StreamHub:
             client.security_client_id = conn_info.client_id
 
             # Додавання клієнта до менеджера
-            await self.client_manager.add_client(client)
+            if self.client_manager:
+                await self.client_manager.add_client(client)
 
             # Обробка повідомлень від клієнта
             await self._handle_client_messages(client, websocket)
@@ -356,7 +366,7 @@ class StreamHub:
             self.logger.error("WebSocket connection error", error=str(e))
             self.total_errors += 1
         finally:
-            if 'client' in locals() and client is not None:
+            if 'client' in locals() and client is not None and self.client_manager:
                 await self.client_manager.remove_client(client.info.client_id)
 
     async def _handle_client_registration(self, websocket: WebSocket, user_data: Dict[str, Any]) -> Optional[Client]:
@@ -535,7 +545,11 @@ class StreamHub:
                     message = parse_message(validated_message.data)
                 else:
                     # Fallback for legacy connections (should be removed in future)
-                    data = await self.async_optimizer.json_loads(raw_data)
+                    if self.async_optimizer:
+                        data = await self.async_optimizer.json_loads(raw_data)
+                    else:
+                        # Фолбек на стандартний json.loads у малоймовірному випадку, коли async_optimizer не ініціалізовано
+                        data = json.loads(raw_data)
                     message = parse_message(data)
 
                 # Оновлення часу останньої активності
@@ -611,7 +625,9 @@ class StreamHub:
         task.context.correlation_id = getattr(message, 'correlation_id', None)
 
         # Додавання завдання до маршрутизатора
-        success = await self.task_router.submit_task(task)
+        success = False
+        if self.task_router:
+            success = await self.task_router.submit_task(task)
 
         if success:
             self.total_tasks_processed += 1
@@ -631,14 +647,15 @@ class StreamHub:
             return
 
         # Обробка результату через маршрутизатор з безпечним отриманням атрибутів
-        await self.task_router.handle_task_result(
-            task_id=getattr(message, 'task_id', ''),
-            worker_id=client.info.client_id,
-            status=getattr(message, 'status', TaskStatus.FAILED),
-            result=getattr(message, 'result', None),
-            error_message=getattr(message, 'error_message', None),
-            execution_time=getattr(message, 'execution_time', None)
-        )
+        if self.task_router:
+            await self.task_router.handle_task_result(
+                task_id=getattr(message, 'task_id', ''),
+                worker_id=client.info.client_id,
+                status=getattr(message, 'status', TaskStatus.FAILED),
+                result=getattr(message, 'result', {}) or {},
+                error_message=getattr(message, 'error_message', '') or '',
+                execution_time=getattr(message, 'execution_time', 0) or 0,
+            )
 
     async def _handle_ping(self, client: Client, message: BaseMessage):
         """Обробка ping запиту"""
@@ -651,8 +668,9 @@ class StreamHub:
             correlation_id=message.correlation_id
         )
 
-        await client.websocket.send_json(pong_message.model_dump(mode='json'))
-        client.pong()
+        if client.websocket:
+            await client.websocket.send_json(pong_message.model_dump(mode='json'))
+            client.pong()
 
     async def _handle_health_check(self, client: Client, message: BaseMessage):
         """Обробка перевірки здоров'я"""
@@ -673,13 +691,16 @@ class StreamHub:
             **health_status
         )
 
-        await client.websocket.send_json(response.model_dump(mode='json'))
+        if client.websocket:
+            await client.websocket.send_json(response.model_dump(mode='json'))
 
     async def _handle_metrics_request(self, client: Client, message: BaseMessage):
         """Обробка запиту метрик"""
-        metrics = await self.metrics_collector.get_metrics(
-            metric_types=getattr(message, 'metric_types', [])
-        )
+        metrics = {}
+        if self.metrics_collector:
+            metrics = await self.metrics_collector.get_metrics(
+                metric_types=getattr(message, 'metric_types', [])
+            )
 
         response = create_message(
             MessageType.METRICS_RESPONSE,
@@ -687,7 +708,8 @@ class StreamHub:
             metrics=metrics
         )
 
-        await client.websocket.send_json(response.model_dump(mode='json'))
+        if client.websocket:
+            await client.websocket.send_json(response.model_dump(mode='json'))
 
     async def _send_error(self, websocket: WebSocket, error_code: str, error_message: str):
         """Відправка повідомлення про помилку"""
@@ -704,9 +726,21 @@ class StreamHub:
 
     def _authenticate_client(self, message: BaseMessage) -> bool:
         """Аутентифікація клієнта"""
-        if not self.settings.auth_token:
-            return True  # Аутентифікація вимкнена
+        # 1. Dashboard / monitor клієнти вже проходять JWT-аутентифікацію під час
+        #    встановлення WebSocket-зʼєднання, тому їм не потрібен додатковий
+        #    static auth_token. Дозволяємо реєстрацію, щоб уникнути помилки
+        #    «AUTH_FAILED» та циклів reconnection на фронтенді.
+        from models.client import ClientType  # Локальний імпорт, щоб уникнути циклічних залежностей
 
+        if message.client_type == ClientType.MONITOR:
+            return True
+
+        # 2. Якщо глобальний static AUTH_TOKEN не налаштований – додаткова
+        #    перевірка не потрібна.
+        if not self.settings.auth_token:
+            return True
+
+        # 3. Для усіх інших клієнтів вимагаємо збіг із налаштованим AUTH_TOKEN.
         return getattr(message, 'auth_token', None) == self.settings.auth_token
 
     def _get_client_config(self, client: Client) -> Dict[str, Any]:
@@ -726,7 +760,8 @@ class StreamHub:
                          client_type=client.info.client_type.value)
 
         # Оновлення метрик
-        self.metrics_collector.increment_counter("clients_connected")
+        if self.metrics_collector:
+            self.metrics_collector.increment_counter("clients_connected")
 
     async def _on_client_disconnected(self, client: Client):
         """Обробник відключення клієнта"""
@@ -737,7 +772,8 @@ class StreamHub:
 
         # Переназначення активних завдань воркера
         if client.info.is_worker() and client.active_tasks:
-            await self.task_router.reassign_worker_tasks(client.info.client_id)
+            if self.task_router:
+                await self.task_router.reassign_worker_tasks(client.info.client_id)
 
     async def _on_task_assigned(self, task: Task, worker_id: str):
         """Обробник призначення завдання"""
@@ -765,7 +801,8 @@ class StreamHub:
         self.logger.warning("Client unhealthy", client_id=client_id)
 
         # Переназначення завдань від нездорового воркера
-        await self.task_router.reassign_worker_tasks(client_id)
+        if self.task_router:
+            await self.task_router.reassign_worker_tasks(client_id)
 
     async def _on_redis_message(self, channel: str, message: Dict[str, Any]):
         """Обробник повідомлень Redis"""
@@ -825,7 +862,7 @@ class StreamHub:
 
         return raw_metrics
 
-    async def broadcast_message(self, message: BaseMessage, target_clients: List[ClientType] = None):
+    async def broadcast_message(self, message: BaseMessage, target_clients: Optional[List[ClientType]] = None):
         """Широкомовна розсилка повідомлення"""
         if not self.client_manager:
             return
@@ -929,7 +966,8 @@ class StreamHub:
             self.self_client.info.stats.last_activity = datetime.utcnow()
 
             # Додавання до менеджера клієнтів
-            await self.client_manager.add_client(self.self_client)
+            if self.client_manager:
+                await self.client_manager.add_client(self.self_client)
 
             # Запуск задачі для підтримки активності
             self.self_client_task = asyncio.create_task(self._maintain_self_client_activity())
