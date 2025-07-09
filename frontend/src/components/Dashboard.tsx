@@ -27,6 +27,7 @@ import {
   NetworkIcon,
 } from "./Icons";
 import "../animations.css";
+import ConsoleLogs from "./ConsoleLogs";
 
 // Інтерфейси для типізації
 interface SystemMetrics {
@@ -692,6 +693,7 @@ export const Dashboard: React.FC = () => {
   const { t } = useI18n();
   const { state } = useStatus();
   const [timeRange, setTimeRange] = useState<"1h" | "6h" | "24h" | "7d">("24h");
+  const [currentView, setCurrentView] = useState<string>("dashboard");
 
   // Обчислення статистики клієнтів
   const clientStats: ClientStats = useMemo(() => {
@@ -887,54 +889,58 @@ export const Dashboard: React.FC = () => {
         </div>
 
         {/* Основний контент */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Ліва колонка - статистика */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Статистика клієнтів */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatCard
-                title="Всі воркери"
-                value={clientStats.workers + clientStats.apiWorkers}
-                icon={<CpuIcon size="md" />}
-                color="bg-blue-100 text-blue-600"
-                description="Загальна кількість"
-              />
+        {currentView === "console" ? (
+          <ConsoleLogs />
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* Ліва колонка - статистика */}
+            <div className="lg:col-span-2 space-y-6">
+              {/* Статистика клієнтів */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <StatCard
+                  title="Всі воркери"
+                  value={clientStats.workers + clientStats.apiWorkers}
+                  icon={<CpuIcon size="md" />}
+                  color="bg-blue-100 text-blue-600"
+                  description="Загальна кількість"
+                />
 
-              <StatCard
-                title="Воркери"
-                value={clientStats.workers}
-                icon={<ProcessingIcon size="md" />}
-                color="bg-emerald-100 text-emerald-600"
-                description="Стандартні воркери"
-              />
+                <StatCard
+                  title="Воркери"
+                  value={clientStats.workers}
+                  icon={<ProcessingIcon size="md" />}
+                  color="bg-emerald-100 text-emerald-600"
+                  description="Стандартні воркери"
+                />
 
-              <StatCard
-                title="API-воркери"
-                value={clientStats.apiWorkers}
-                icon={<AlertIcon size="md" />}
-                color="bg-amber-100 text-amber-600"
-                description="API обробники"
-              />
+                <StatCard
+                  title="API-воркери"
+                  value={clientStats.apiWorkers}
+                  icon={<AlertIcon size="md" />}
+                  color="bg-amber-100 text-amber-600"
+                  description="API обробники"
+                />
 
-              <StatCard
-                title="Активні сервери Бота"
-                value={clientStats.bots}
-                icon={<UsersIcon size="md" />}
-                color="bg-purple-100 text-purple-600"
-                description="Підключені боти"
-              />
+                <StatCard
+                  title="Активні сервери Бота"
+                  value={clientStats.bots}
+                  icon={<UsersIcon size="md" />}
+                  color="bg-purple-100 text-purple-600"
+                  description="Підключені боти"
+                />
+              </div>
+
+              {/* Системне здоров'я */}
+              <SystemHealthWidget />
             </div>
 
-            {/* Системне здоров'я */}
-            <SystemHealthWidget />
+            {/* Права колонка - активність та дії */}
+            <div className="space-y-6">
+              <RealTimeActivity />
+              <QuickActions />
+            </div>
           </div>
-
-          {/* Права колонка - активність та дії */}
-          <div className="space-y-6">
-            <RealTimeActivity />
-            <QuickActions />
-          </div>
-        </div>
+        )}
 
         {/* Нижня секція - стан системи */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">

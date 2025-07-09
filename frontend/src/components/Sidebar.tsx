@@ -7,6 +7,7 @@ import {
   MetricsIcon,
   SettingsIcon,
   CloseIcon,
+  ErrorIcon,
 } from "./Icons";
 
 interface SidebarProps {
@@ -43,6 +44,11 @@ const getMenuItems = (t: (key: string) => string) => [
     id: "settings",
     name: t("navigation.settings"),
     icon: SettingsIcon,
+  },
+  {
+    id: "console",
+    name: "Console",
+    icon: ErrorIcon,
   },
 ];
 
