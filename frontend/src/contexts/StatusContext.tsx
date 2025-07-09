@@ -184,7 +184,10 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
   const [socket, setSocket] = React.useState<WebSocket | null>(null);
   const [reconnectTimeout, setReconnectTimeout] = React.useState<NodeJS.Timeout | null>(null);
   const [heartbeatInterval, setHeartbeatInterval] = React.useState<NodeJS.Timeout | null>(null);
-  const [connectionTimeout, setConnectionTimeout] = React.useState<NodeJS.Timeout | null>(null);
+  // Using a ref instead of state for the connection timeout ensures we always have
+  // the latest timeout ID inside asynchronous WebSocket callbacks without relying
+  // on React’s asynchronous state updates.
+  const connectionTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
   const { auth } = useAuth();
   
   const maxReconnectAttempts = 5;
@@ -424,6 +427,9 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       socket.close(1000, 'Connection timeout');
       setSocket(null);
     }
+
+    // Reset the stored timeout reference (it has already fired)
+    connectionTimeoutRef.current = null;
   };
 
   // Enhanced heartbeat mechanism
@@ -670,7 +676,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
     // Встановлюємо таймаут з'єднання
     const timeoutId = setTimeout(handleConnectionTimeout, connectionTimeoutMs);
-    setConnectionTimeout(timeoutId);
+    connectionTimeoutRef.current = timeoutId;
 
     dispatch({ type: "UPDATE_RECONNECT_INFO", payload: { lastAttemptAt: new Date() } });
 
@@ -680,9 +686,9 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       console.log('✅ WebSocket connected successfully');
       
       // Очищаємо таймаут з'єднання
-      if (connectionTimeout) {
-        clearTimeout(connectionTimeout);
-        setConnectionTimeout(null);
+      if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
+        connectionTimeoutRef.current = null;
       }
       
       dispatch({ type: "SET_CONNECTION_STATUS", payload: "connected" });
@@ -837,9 +843,9 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       console.log('🔌 WebSocket closed:', event.code, event.reason);
       
       // Очищаємо таймаут з'єднання
-      if (connectionTimeout) {
-        clearTimeout(connectionTimeout);
-        setConnectionTimeout(null);
+      if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
+        connectionTimeoutRef.current = null;
       }
       
       // Зупиняємо heartbeat
@@ -919,9 +925,9 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       console.error("❌ WebSocket error event:", error);
       
       // Очищаємо таймаут з'єднання
-      if (connectionTimeout) {
-        clearTimeout(connectionTimeout);
-        setConnectionTimeout(null);
+      if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
+        connectionTimeoutRef.current = null;
       }
       
       const wsError: WebSocketError = {
@@ -954,9 +960,9 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       setReconnectTimeout(null);
     }
     
-    if (connectionTimeout) {
-      clearTimeout(connectionTimeout);
-      setConnectionTimeout(null);
+    if (connectionTimeoutRef.current) {
+      clearTimeout(connectionTimeoutRef.current);
+      connectionTimeoutRef.current = null;
     }
     
     stopHeartbeat();
