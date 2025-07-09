@@ -7,10 +7,10 @@ TetraCore StreamHub Web Dashboard Routes
 
 import random
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Request, HTTPException
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
-import structlog
+from fastapi import APIRouter, Request, HTTPException  # type: ignore
+from fastapi.responses import HTMLResponse  # type: ignore
+from fastapi.templating import Jinja2Templates  # type: ignore
+import structlog  # type: ignore
 
 logger = structlog.get_logger(__name__)
 

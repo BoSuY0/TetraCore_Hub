@@ -21,9 +21,9 @@ from typing import Optional
 # Додаємо поточну директорію до Python path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from fastapi import FastAPI
-import structlog
-import uvicorn
+from fastapi import FastAPI  # type: ignore
+import structlog  # type: ignore
+import uvicorn  # type: ignore
 
 from core.hub import StreamHub
 from config import get_settings
@@ -129,11 +129,11 @@ if __name__ == "__main__":
     # Запускаємо сервер
     uvicorn.run(
         "main:app",
-        host=settings.HOST,
-        port=settings.PORT,
-        reload=settings.DEBUG,
-        log_level="info" if settings.DEBUG else "warning",
-        access_log=settings.DEBUG,
+        host=settings.host,
+        port=settings.port,
+        reload=settings.debug,
+        log_level="info" if settings.debug else "warning",
+        access_log=settings.debug,
         use_colors=True,
         loop="asyncio"
     )
