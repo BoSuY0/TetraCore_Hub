@@ -105,7 +105,7 @@ const ConsoleLogs: React.FC = () => {
 
         // Call original
         (originalConsole as any)[method](...args);
-      } as (...args: unknown[]) => void;
+      };
     });
 
     return () => {
