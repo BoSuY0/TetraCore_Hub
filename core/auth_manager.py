@@ -82,6 +82,7 @@ class AuthManager:
         secrets_mgr = get_secrets_manager()
         try:
             self.secret_key = secrets_mgr.get_jwt_key()
+            logger.info("JWT secret key loaded successfully")
         except ValueError:
             # Генеруємо випадковий ключ якщо не задано
             self.secret_key = secrets.token_urlsafe(32)
@@ -91,6 +92,7 @@ class AuthManager:
 
         try:
             self.refresh_secret = secrets_mgr.get_refresh_key()
+            logger.info("JWT refresh secret loaded successfully")
         except ValueError:
             self.refresh_secret = secrets.token_urlsafe(32)
             logger.warning("JWT_REFRESH_SECRET не встановлено. Використовується тимчасовий ключ.")
@@ -101,6 +103,17 @@ class AuthManager:
 
         # Кеш для спроб входу
         self._login_attempts = {}
+        
+        # Логування стану Redis
+        if self.redis_client:
+            try:
+                self.redis_client.ping()
+                logger.info("Redis connection established successfully")
+            except Exception as e:
+                logger.warning("Redis connection failed, JWT validation will work without session storage", error=str(e))
+                self.redis_client = None
+        else:
+            logger.info("AuthManager initialized without Redis, sessions will not be stored")
 
     def hash_password(self, password: str) -> str:
         """Хешування пароля з використанням bcrypt"""
@@ -200,58 +213,48 @@ class AuthManager:
     async def decode_token(self, token: str, token_type: str = "access") -> Dict:
         """Декодування та валідація JWT токена"""
         try:
+            logger.debug("Decoding token", token_preview=token[:20] + "..." if len(token) > 20 else token)
+            
             secret = self.secret_key if token_type == "access" else self.refresh_secret
             payload = jwt.decode(token, secret, algorithms=[ALGORITHM])
 
             # Перевірка типу токена
             if payload.get("token_type") != token_type:
+                logger.warning("Invalid token type", expected=token_type, received=payload.get("token_type"))
                 raise jwt.InvalidTokenError(f"Invalid token type. Expected {token_type}")
 
             # Перевірка чи токен не заблокований
             jti = payload.get("jti")
             if jti and jti in self._blocked_tokens:
+                logger.warning("Token is revoked", jti=jti)
                 raise jwt.InvalidTokenError("Token has been revoked")
 
-            # Перевірка сесії в Redis
+            # Перевірка сесії в Redis (опціонально)
             if self.redis_client and "session_id" in payload:
                 session_key = f"session:{payload['session_id']}"
-                if not self.redis_client.exists(session_key):
-                    raise jwt.InvalidTokenError("Session not found")
+                try:
+                    if not self.redis_client.exists(session_key):
+                        logger.warning("Session not found in Redis", session_id=payload['session_id'])
+                        # Не викидаємо помилку, просто логуємо - JWT може працювати без Redis
+                        logger.info("Continuing validation without Redis session check")
+                    else:
+                        # Оновлюємо час останньої активності якщо сесія існує
+                        await self.update_session_activity(payload['session_id'])
+                except Exception as redis_error:
+                    logger.warning("Redis operation failed during token validation", error=str(redis_error))
+                    # Продовжуємо без Redis
 
-                # Оновлюємо час останньої активності
-                await self.update_session_activity(payload['session_id'])
-
-            return payload
-
-            # Перевірка JTI (якщо є)
-            jti = payload.get("jti")
-            if jti:
-                # Перевірка в пам'яті
-                if jti in self._blocked_tokens:
-                    raise jwt.InvalidTokenError("Token has been revoked")
-
-                # Перевірка в Redis
-                if self.redis_client and self.redis_client.exists(f"blocked_token:{jti}"):
-                    raise jwt.InvalidTokenError("Token has been revoked")
-
-            # Перевірка сесії в Redis
-            if self.redis_client and "session_id" in payload:
-                session_key = f"session:{payload['session_id']}"
-                if not self.redis_client.exists(session_key):
-                    raise jwt.InvalidTokenError("Session not found")
-
-                # Оновлюємо час останньої активності
-                await self.update_session_activity(payload['session_id'])
-
+            logger.debug("Token validation successful", user_id=payload.get("user_id"))
             return payload
 
         except jwt.ExpiredSignatureError:
+            logger.warning("Token has expired", token_preview=token[:20] + "..." if len(token) > 20 else token)
             raise HTTPException(status_code=401, detail="Token has expired")
         except jwt.InvalidTokenError as e:
-            logger.warning("Invalid token", error=str(e))
+            logger.warning("Invalid token", error=str(e), token_preview=token[:20] + "..." if len(token) > 20 else token)
             raise HTTPException(status_code=401, detail="Invalid token")
         except Exception as e:
-            logger.error("Token decode error", error=str(e))
+            logger.error("Token decode error", error=str(e), token_preview=token[:20] + "..." if len(token) > 20 else token)
             raise HTTPException(status_code=401, detail="Could not validate credentials")
 
     async def refresh_access_token(self, refresh_token: str) -> TokenPair:

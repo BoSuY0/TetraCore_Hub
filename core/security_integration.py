@@ -255,7 +255,9 @@ async def require_auth_middleware(request: Request, call_next):
     public_paths = [
         "/api/auth/login",
         "/api/auth/refresh",
-        "/api/health",
+        "/health",  # Виправлено: endpoint реально на /health, а не /api/health
+        "/metrics",  # Додано metrics endpoint
+        "/config",   # Додано config endpoint для frontend
         "/docs",
         "/openapi.json",
         "/favicon.ico"
@@ -271,12 +273,12 @@ async def require_auth_middleware(request: Request, call_next):
     if request.url.path.startswith("/static/") or request.url.path == "/":
         return await call_next(request)
 
-    # Перевірка чи шлях публічний
-    if any(request.url.path.startswith(path) for path in public_paths):
+    # Перевірка чи шлях публічний - змінено на точне співпадіння для коротких шляхів
+    if request.url.path in public_paths or any(request.url.path.startswith(path) for path in public_paths if len(path) > 10):
         return await call_next(request)
 
     # WebSocket має свою автентифікацію
-    if request.url.path.startswith("/ws/"):
+    if request.url.path.startswith("/ws"):  # Виправлено: видалено зайвий слеш
         return await call_next(request)
 
     # Dashboard та auth API мають свою обробку автентифікації

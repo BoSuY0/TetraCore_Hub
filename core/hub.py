@@ -84,9 +84,12 @@ class StreamHub:
 
             # Ініціалізація Redis (якщо увімкнено)
             if self.settings.redis_enabled:
-                self.logger.info("Redis enabled, initializing Redis manager...")
+                self.logger.info("Redis enabled, initializing Redis manager...", 
+                                redis_url=self.settings._safe_redis_url(),
+                                tls_enabled=getattr(self.settings, 'redis_tls_enabled', False))
                 self.redis_manager = RedisManager(self.settings)
                 await self.redis_manager.initialize()
+                self.logger.info("✅ Redis manager initialized successfully")
             else:
                 self.logger.info("Redis disabled, skipping Redis initialization")
                 self.redis_manager = None
@@ -268,10 +271,44 @@ class StreamHub:
         @self.app.get("/tasks")  # type: ignore[attr-defined]
         async def get_tasks():
             """Отримання інформації про завдання"""
-            if not self.task_router:
-                raise HTTPException(status_code=503, detail="StreamHub not initialized")
+            try:
+                if not self.task_router:
+                    # Повертаємо порожні статистики якщо TaskRouter недоступний
+                    return {
+                        "total_tasks": 0,
+                        "pending_tasks": 0,
+                        "processing_tasks": 0,
+                        "completed_tasks": 0,
+                        "failed_tasks": 0,
+                        "average_processing_time": 0,
+                        "queue_sizes": {
+                            "critical": 0,
+                            "high": 0,
+                            "normal": 0,
+                            "low": 0
+                        },
+                        "worker_distribution": {}
+                    }
 
-            return await self.task_router.get_queue_stats()
+                return await self.task_router.get_queue_stats()
+            except Exception as e:
+                self.logger.error("Error getting task stats", error=str(e))
+                # Повертаємо порожні статистики при помилці
+                return {
+                    "total_tasks": 0,
+                    "pending_tasks": 0,
+                    "processing_tasks": 0,
+                    "completed_tasks": 0,
+                    "failed_tasks": 0,
+                    "average_processing_time": 0,
+                    "queue_sizes": {
+                        "critical": 0,
+                        "high": 0,
+                        "normal": 0,
+                        "low": 0
+                    },
+                    "worker_distribution": {}
+                }
 
         @self.app.post("/tasks/{task_id}/cancel")  # type: ignore[attr-defined]
         async def cancel_task(task_id: str):
@@ -323,9 +360,16 @@ class StreamHub:
         try:
             # Authenticate WebSocket connection before accepting
             token = websocket.query_params.get("token")
+            self.logger.info("WebSocket connection attempt", 
+                           remote_addr=websocket.client.host if websocket.client else "unknown",
+                           has_token=bool(token),
+                           token_preview=token[:20] + "..." if token and len(token) > 20 else "no_token")
+            
             user_data = await ws_security_manager.authenticate_websocket(websocket, token)
 
             if not user_data:
+                self.logger.warning("WebSocket authentication failed",
+                                  remote_addr=websocket.client.host if websocket.client else "unknown")
                 await websocket.close(code=1008, reason="Authentication failed")
                 return
 
@@ -336,6 +380,8 @@ class StreamHub:
             # Register connection with security manager
             conn_info = await ws_security_manager.accept_connection(websocket, user_data)
             if not conn_info:
+                self.logger.warning("WebSocket connection rejected by security manager",
+                                  user_id=user_data["user_id"])
                 await websocket.close(code=1008, reason="Connection rejected")
                 return
 
@@ -363,7 +409,8 @@ class StreamHub:
         except WebSocketDisconnect:
             self.logger.info("WebSocket connection closed")
         except Exception as e:
-            self.logger.error("WebSocket connection error", error=str(e))
+            self.logger.error("WebSocket connection error", error=str(e), 
+                            remote_addr=websocket.client.host if websocket.client else "unknown")
             self.total_errors += 1
         finally:
             if 'client' in locals() and client is not None and self.client_manager:

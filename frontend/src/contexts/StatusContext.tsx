@@ -8,7 +8,7 @@ import {
   DashboardData,
 } from "../types/api";
 import config, { buildUrl, buildWsUrl } from "../config";
-import { useAuth } from './AuthContext';
+import { useAuth } from "./AuthContext";
 
 interface StatusState {
   health: StreamHubHealth | null;
@@ -25,7 +25,13 @@ interface StatusState {
 }
 
 interface WebSocketError {
-  type: 'connection' | 'authentication' | 'registration' | 'network' | 'timeout' | 'unknown';
+  type:
+    | "connection"
+    | "authentication"
+    | "registration"
+    | "network"
+    | "timeout"
+    | "unknown";
   code: number;
   reason: string;
   message: string;
@@ -182,201 +188,203 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 }) => {
   const [state, dispatch] = useReducer(statusReducer, initialState);
   const [socket, setSocket] = React.useState<WebSocket | null>(null);
-  const [reconnectTimeout, setReconnectTimeout] = React.useState<NodeJS.Timeout | null>(null);
-  const [heartbeatInterval, setHeartbeatInterval] = React.useState<NodeJS.Timeout | null>(null);
+  const [reconnectTimeout, setReconnectTimeout] =
+    React.useState<NodeJS.Timeout | null>(null);
+  const [heartbeatInterval, setHeartbeatInterval] =
+    React.useState<NodeJS.Timeout | null>(null);
   // Using a ref instead of state for the connection timeout ensures we always have
   // the latest timeout ID inside asynchronous WebSocket callbacks without relying
   // on React’s asynchronous state updates.
   const connectionTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
   const { auth } = useAuth();
-  
+
   const maxReconnectAttempts = 5;
   const reconnectDelay = 5000;
-  const connectionTimeoutMs = 10000; // 10 seconds
-  const heartbeatIntervalMs = 30000; // 30 seconds
+  const connectionTimeoutMs = 30000; // Збільшено до 30 секунд
+  const heartbeatIntervalMs = 30000;
 
   // Enhanced error classification
   const classifyWebSocketError = (event: CloseEvent): WebSocketError => {
     const timestamp = new Date();
-    
+
     // Класифікуємо помилки за кодом
     switch (event.code) {
       case 1000:
         return {
-          type: 'connection',
+          type: "connection",
           code: event.code,
-          reason: event.reason || 'Normal closure',
-          message: 'З\'єднання закрито нормально',
+          reason: event.reason || "Normal closure",
+          message: "З'єднання закрито нормально",
           timestamp,
           isRetryable: false,
         };
-      
+
       case 1001:
         return {
-          type: 'connection',
+          type: "connection",
           code: event.code,
-          reason: event.reason || 'Going away',
-          message: 'Сервер або клієнт залишає з\'єднання',
+          reason: event.reason || "Going away",
+          message: "Сервер або клієнт залишає з'єднання",
           timestamp,
           isRetryable: true,
         };
-      
+
       case 1002:
         return {
-          type: 'connection',
+          type: "connection",
           code: event.code,
-          reason: event.reason || 'Protocol error',
-          message: 'Помилка протоколу WebSocket',
+          reason: event.reason || "Protocol error",
+          message: "Помилка протоколу WebSocket",
           timestamp,
           isRetryable: false,
         };
-      
+
       case 1003:
         return {
-          type: 'connection',
+          type: "connection",
           code: event.code,
-          reason: event.reason || 'Unsupported data',
-          message: 'Отримано непідтримуваний тип даних',
+          reason: event.reason || "Unsupported data",
+          message: "Отримано непідтримуваний тип даних",
           timestamp,
           isRetryable: false,
         };
-      
+
       case 1006:
         return {
-          type: 'network',
+          type: "network",
           code: event.code,
-          reason: event.reason || 'Abnormal closure',
-          message: 'Аномальне закриття з\'єднання (можливо, проблеми з мережею)',
+          reason: event.reason || "Abnormal closure",
+          message: "Аномальне закриття з'єднання (можливо, проблеми з мережею)",
           timestamp,
           isRetryable: true,
         };
-      
+
       case 1007:
         return {
-          type: 'connection',
+          type: "connection",
           code: event.code,
-          reason: event.reason || 'Invalid frame payload data',
-          message: 'Некоректні дані в кадрі',
+          reason: event.reason || "Invalid frame payload data",
+          message: "Некоректні дані в кадрі",
           timestamp,
           isRetryable: false,
         };
-      
+
       case 1008:
         return {
-          type: 'authentication',
+          type: "authentication",
           code: event.code,
-          reason: event.reason || 'Policy violation',
-          message: 'Помилка автентифікації або порушення політики',
+          reason: event.reason || "Policy violation",
+          message: "Помилка автентифікації або порушення політики",
           timestamp,
           isRetryable: false,
         };
-      
+
       case 1009:
         return {
-          type: 'connection',
+          type: "connection",
           code: event.code,
-          reason: event.reason || 'Message too big',
-          message: 'Повідомлення занадто велике',
+          reason: event.reason || "Message too big",
+          message: "Повідомлення занадто велике",
           timestamp,
           isRetryable: true,
         };
-      
+
       case 1011:
         return {
-          type: 'connection',
+          type: "connection",
           code: event.code,
-          reason: event.reason || 'Internal server error',
-          message: 'Внутрішня помилка сервера',
+          reason: event.reason || "Internal server error",
+          message: "Внутрішня помилка сервера",
           timestamp,
           isRetryable: true,
         };
-      
+
       case 1012:
         return {
-          type: 'connection',
+          type: "connection",
           code: event.code,
-          reason: event.reason || 'Service restart',
-          message: 'Сервіс перезапускається',
+          reason: event.reason || "Service restart",
+          message: "Сервіс перезапускається",
           timestamp,
           isRetryable: true,
         };
-      
+
       case 1013:
         return {
-          type: 'connection',
+          type: "connection",
           code: event.code,
-          reason: event.reason || 'Try again later',
-          message: 'Спробуйте пізніше - сервер тимчасово недоступний',
+          reason: event.reason || "Try again later",
+          message: "Спробуйте пізніше - сервер тимчасово недоступний",
           timestamp,
           isRetryable: true,
         };
-      
+
       case 1014:
         return {
-          type: 'connection',
+          type: "connection",
           code: event.code,
-          reason: event.reason || 'Bad gateway',
-          message: 'Помилка шлюзу',
+          reason: event.reason || "Bad gateway",
+          message: "Помилка шлюзу",
           timestamp,
           isRetryable: true,
         };
-      
+
       case 1015:
         return {
-          type: 'connection',
+          type: "connection",
           code: event.code,
-          reason: event.reason || 'TLS handshake',
-          message: 'Помилка TLS handshake',
+          reason: event.reason || "TLS handshake",
+          message: "Помилка TLS handshake",
           timestamp,
           isRetryable: true,
         };
-      
+
       // Кастомні коди помилок
       case 4000:
         return {
-          type: 'authentication',
+          type: "authentication",
           code: event.code,
-          reason: event.reason || 'Authentication required',
-          message: 'Необхідна автентифікація',
+          reason: event.reason || "Authentication required",
+          message: "Необхідна автентифікація",
           timestamp,
           isRetryable: false,
         };
-      
+
       case 4001:
         return {
-          type: 'registration',
+          type: "registration",
           code: event.code,
-          reason: event.reason || 'Registration failed',
-          message: 'Помилка реєстрації клієнта',
+          reason: event.reason || "Registration failed",
+          message: "Помилка реєстрації клієнта",
           timestamp,
           isRetryable: true,
         };
-      
+
       case 4002:
         return {
-          type: 'authentication',
+          type: "authentication",
           code: event.code,
-          reason: event.reason || 'Invalid token',
-          message: 'Недійсний токен автентифікації',
+          reason: event.reason || "Invalid token",
+          message: "Недійсний токен автентифікації",
           timestamp,
           isRetryable: false,
         };
-      
+
       case 4003:
         return {
-          type: 'authentication',
+          type: "authentication",
           code: event.code,
-          reason: event.reason || 'Token expired',
-          message: 'Токен автентифікації застарів',
+          reason: event.reason || "Token expired",
+          message: "Токен автентифікації застарів",
           timestamp,
           isRetryable: false,
         };
-      
+
       default:
         return {
-          type: 'unknown',
+          type: "unknown",
           code: event.code,
-          reason: event.reason || 'Unknown error',
+          reason: event.reason || "Unknown error",
           message: `Невідома помилка з кодом ${event.code}`,
           timestamp,
           isRetryable: event.code >= 1000 && event.code < 4000,
@@ -387,18 +395,18 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
   // Create system alert for WebSocket errors
   const createWebSocketAlert = (error: WebSocketError): SystemAlert => {
     const severityMap = {
-      'connection': 'warning' as const,
-      'authentication': 'error' as const,
-      'registration': 'warning' as const,
-      'network': 'info' as const,
-      'timeout': 'warning' as const,
-      'unknown': 'error' as const,
+      connection: "warning" as const,
+      authentication: "error" as const,
+      registration: "warning" as const,
+      network: "info" as const,
+      timeout: "warning" as const,
+      unknown: "error" as const,
     };
 
     return {
       id: `ws-error-${error.timestamp.getTime()}`,
       type: severityMap[error.type],
-      title: `WebSocket ${error.type === 'authentication' ? 'Автентифікація' : 'З\'єднання'}`,
+      title: `WebSocket ${error.type === "authentication" ? "Автентифікація" : "З'єднання"}`,
       message: error.message,
       timestamp: error.timestamp.toISOString(),
       acknowledged: false,
@@ -408,23 +416,26 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
   // Enhanced connection timeout handler
   const handleConnectionTimeout = () => {
-    console.error('⏰ WebSocket connection timeout');
-    
+    console.error("⏰ WebSocket connection timeout");
+
     const timeoutError: WebSocketError = {
-      type: 'timeout',
+      type: "timeout",
       code: 0,
-      reason: 'Connection timeout',
-      message: 'Таймаут підключення до WebSocket',
+      reason: "Connection timeout",
+      message: "Таймаут підключення до WebSocket",
       timestamp: new Date(),
       isRetryable: true,
     };
 
     dispatch({ type: "SET_WEBSOCKET_ERROR", payload: timeoutError });
     dispatch({ type: "SET_CONNECTION_STATUS", payload: "error" });
-    dispatch({ type: "ADD_ALERT", payload: createWebSocketAlert(timeoutError) });
+    dispatch({
+      type: "ADD_ALERT",
+      payload: createWebSocketAlert(timeoutError),
+    });
 
     if (socket) {
-      socket.close(1000, 'Connection timeout');
+      socket.close(1000, "Connection timeout");
       setSocket(null);
     }
 
@@ -436,17 +447,19 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
   const startHeartbeat = (ws: WebSocket) => {
     const interval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
-        console.log('💓 Sending heartbeat ping...');
-        ws.send(JSON.stringify({
-          message_type: "ping",
-          timestamp: new Date().toISOString()
-        }));
+        console.log("💓 Sending heartbeat ping...");
+        ws.send(
+          JSON.stringify({
+            message_type: "ping",
+            timestamp: new Date().toISOString(),
+          }),
+        );
       } else {
-        console.warn('💔 WebSocket not open, stopping heartbeat');
+        console.warn("💔 WebSocket not open, stopping heartbeat");
         clearInterval(interval);
       }
     }, heartbeatIntervalMs);
-    
+
     setHeartbeatInterval(interval);
   };
 
@@ -460,22 +473,22 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
   // API calls
   const fetchHealth = async (): Promise<StreamHubHealth | null> => {
     try {
-      const sessionId = localStorage.getItem('sessionId');
+      const sessionId = localStorage.getItem("sessionId");
       const headers: HeadersInit = {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       };
-      
+
       if (sessionId) {
         headers.Authorization = `Bearer ${sessionId}`;
       }
-      
+
       const response = await fetch(buildUrl("/health"), {
         headers,
       });
       if (!response.ok) {
         if (response.status === 401) {
           // Redirect to login on authentication failure
-          window.location.href = '/';
+          window.location.href = "/";
           return null;
         }
         throw new Error("Health check failed");
@@ -489,22 +502,22 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
   const fetchMetrics = async (): Promise<StreamHubMetrics | null> => {
     try {
-      const sessionId = localStorage.getItem('sessionId');
+      const sessionId = localStorage.getItem("sessionId");
       const headers: HeadersInit = {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       };
-      
+
       if (sessionId) {
         headers.Authorization = `Bearer ${sessionId}`;
       }
-      
+
       const response = await fetch(buildUrl("/metrics"), {
         headers,
       });
       if (!response.ok) {
         if (response.status === 401) {
           // Redirect to login on authentication failure
-          window.location.href = '/';
+          window.location.href = "/";
           return null;
         }
         throw new Error("Metrics fetch failed");
@@ -518,22 +531,22 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
   const fetchClients = async (): Promise<Client[]> => {
     try {
-      const sessionId = localStorage.getItem('sessionId');
+      const sessionId = localStorage.getItem("sessionId");
       const headers: HeadersInit = {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       };
-      
+
       if (sessionId) {
         headers.Authorization = `Bearer ${sessionId}`;
       }
-      
+
       const response = await fetch(buildUrl("/clients"), {
         headers,
       });
       if (!response.ok) {
         if (response.status === 401) {
           // Redirect to login on authentication failure
-          window.location.href = '/';
+          window.location.href = "/";
           return [];
         }
         // Return empty array if service unavailable (no clients connected)
@@ -550,22 +563,22 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
   const fetchTaskStats = async (): Promise<TaskQueueStats | null> => {
     try {
-      const sessionId = localStorage.getItem('sessionId');
+      const sessionId = localStorage.getItem("sessionId");
       const headers: HeadersInit = {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       };
-      
+
       if (sessionId) {
         headers.Authorization = `Bearer ${sessionId}`;
       }
-      
+
       const response = await fetch(buildUrl("/tasks"), {
         headers,
       });
       if (!response.ok) {
         if (response.status === 401) {
           // Redirect to login on authentication failure
-          window.location.href = '/';
+          window.location.href = "/";
           return null;
         }
         throw new Error("Task stats fetch failed");
@@ -615,35 +628,35 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
   const connectWebSocket = () => {
     if (socket) {
-      console.log('WebSocket already exists, skipping connection');
+      console.log("WebSocket already exists, skipping connection");
       return;
     }
 
     // Перевіряємо, чи користувач все ще автентифікований
     if (!auth.isAuthenticated) {
-      console.warn('🔒 User not authenticated, skipping WebSocket connection');
+      console.warn("🔒 User not authenticated, skipping WebSocket connection");
       dispatch({ type: "SET_CONNECTION_STATUS", payload: "disconnected" });
       dispatch({ type: "RESET_RECONNECT_INFO" });
       return;
     }
 
-    console.log('🔌 Initiating WebSocket connection...');
+    console.log("🔌 Initiating WebSocket connection...");
     dispatch({ type: "SET_CONNECTION_STATUS", payload: "connecting" });
     dispatch({ type: "SET_WEBSOCKET_ERROR", payload: null });
 
     // Отримуємо токен із localStorage
-    const sessionId = localStorage.getItem('sessionId');
+    const sessionId = localStorage.getItem("sessionId");
     if (!sessionId) {
-      console.warn('❌ No session ID found, skipping WebSocket connection');
+      console.warn("❌ No session ID found, skipping WebSocket connection");
       const authError: WebSocketError = {
-        type: 'authentication',
+        type: "authentication",
         code: 4000,
-        reason: 'No session ID',
-        message: 'Відсутній ідентифікатор сесії',
+        reason: "No session ID",
+        message: "Відсутній ідентифікатор сесії",
         timestamp: new Date(),
         isRetryable: false,
       };
-      
+
       dispatch({ type: "SET_WEBSOCKET_ERROR", payload: authError });
       dispatch({ type: "SET_CONNECTION_STATUS", payload: "disconnected" });
       dispatch({ type: "ADD_ALERT", payload: createWebSocketAlert(authError) });
@@ -653,16 +666,16 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
     // Перевіряємо, чи sessionId відповідає sessionId із auth стану
     if (auth.sessionId && sessionId !== auth.sessionId) {
-      console.warn('⚠️ Session ID mismatch, skipping WebSocket connection');
+      console.warn("⚠️ Session ID mismatch, skipping WebSocket connection");
       const authError: WebSocketError = {
-        type: 'authentication',
+        type: "authentication",
         code: 4002,
-        reason: 'Session ID mismatch',
-        message: 'Невідповідність ідентифікатора сесії',
+        reason: "Session ID mismatch",
+        message: "Невідповідність ідентифікатора сесії",
         timestamp: new Date(),
         isRetryable: false,
       };
-      
+
       dispatch({ type: "SET_WEBSOCKET_ERROR", payload: authError });
       dispatch({ type: "SET_CONNECTION_STATUS", payload: "disconnected" });
       dispatch({ type: "ADD_ALERT", payload: createWebSocketAlert(authError) });
@@ -672,29 +685,35 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
     // Будуємо URL з токеном
     const wsUrl = `${buildWsUrl("/ws")}?token=${encodeURIComponent(sessionId)}`;
-    console.log('🔌 Connecting to WebSocket with token:', sessionId.substring(0, 8) + '...');
+    console.log(
+      "🔌 Connecting to WebSocket:",
+      wsUrl.replace(/token=[^&]+/, "token=***"),
+    );
 
     // Встановлюємо таймаут з'єднання
     const timeoutId = setTimeout(handleConnectionTimeout, connectionTimeoutMs);
     connectionTimeoutRef.current = timeoutId;
 
-    dispatch({ type: "UPDATE_RECONNECT_INFO", payload: { lastAttemptAt: new Date() } });
+    dispatch({
+      type: "UPDATE_RECONNECT_INFO",
+      payload: { lastAttemptAt: new Date() },
+    });
 
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
-      console.log('✅ WebSocket connected successfully');
-      
+      console.log("✅ WebSocket connected successfully");
+
       // Очищаємо таймаут з'єднання
       if (connectionTimeoutRef.current) {
         clearTimeout(connectionTimeoutRef.current);
         connectionTimeoutRef.current = null;
       }
-      
+
       dispatch({ type: "SET_CONNECTION_STATUS", payload: "connected" });
       dispatch({ type: "SET_WEBSOCKET_ERROR", payload: null });
       dispatch({ type: "RESET_RECONNECT_INFO" });
-      
+
       // Запускаємо heartbeat
       startHeartbeat(ws);
 
@@ -710,38 +729,49 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
         client_info: {
           userAgent: navigator.userAgent,
           timestamp: new Date().toISOString(),
-        }
+        },
       };
 
       try {
         ws.send(JSON.stringify(registrationMessage));
-        console.log('📝 Registration message sent successfully');
+        console.log("📝 Registration message sent successfully");
       } catch (error) {
-        console.error('❌ Failed to send registration message:', error);
+        console.error("❌ Failed to send registration message:", error);
         const regError: WebSocketError = {
-          type: 'registration',
+          type: "registration",
           code: 4001,
-          reason: 'Failed to send registration',
-          message: 'Не вдалося відправити повідомлення реєстрації',
+          reason: "Failed to send registration",
+          message: "Не вдалося відправити повідомлення реєстрації",
           timestamp: new Date(),
           isRetryable: true,
         };
-        
+
         dispatch({ type: "SET_WEBSOCKET_ERROR", payload: regError });
-        dispatch({ type: "ADD_ALERT", payload: createWebSocketAlert(regError) });
+        dispatch({
+          type: "ADD_ALERT",
+          payload: createWebSocketAlert(regError),
+        });
       }
     };
 
     ws.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data);
-        console.log('📨 Received WebSocket message:', message.message_type);
+        console.log("📨 Received WebSocket message:", message);
+
+        // Перевіряємо чи є message_type
+        if (!message.message_type) {
+          console.log("📨 Received message without message_type:", message);
+          return; // Просто ігноруємо такі повідомлення
+        }
+
+        console.log("📨 Processing message type:", message.message_type);
 
         // Handle different message types
         switch (message.message_type) {
           case "registration_ack":
-            console.log('✅ Client registration acknowledged', message);
-            
+            console.log("✅ Client registration acknowledged", message);
+
             // Створюємо alert про успішне підключення
             const successAlert: SystemAlert = {
               id: `ws-success-${Date.now()}`,
@@ -754,26 +784,29 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
             };
             dispatch({ type: "ADD_ALERT", payload: successAlert });
             break;
-            
+
           case "registration_error":
-            console.error('❌ Client registration failed', message);
+            console.error("❌ Client registration failed", message);
             const regError: WebSocketError = {
-              type: 'registration',
+              type: "registration",
               code: 4001,
-              reason: message.error || 'Registration failed',
-              message: `Помилка реєстрації: ${message.error || 'Невідома помилка'}`,
+              reason: message.error || "Registration failed",
+              message: `Помилка реєстрації: ${message.error || "Невідома помилка"}`,
               timestamp: new Date(),
               isRetryable: true,
             };
-            
+
             dispatch({ type: "SET_WEBSOCKET_ERROR", payload: regError });
-            dispatch({ type: "ADD_ALERT", payload: createWebSocketAlert(regError) });
+            dispatch({
+              type: "ADD_ALERT",
+              payload: createWebSocketAlert(regError),
+            });
             break;
-            
+
           case "stats_update":
             dispatch({ type: "UPDATE_LAST_UPDATED" });
             break;
-            
+
           case "system_notification":
             const alert: SystemAlert = {
               id: Date.now().toString(),
@@ -786,76 +819,88 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
             };
             dispatch({ type: "ADD_ALERT", payload: alert });
             break;
-            
+
           case "error":
-            console.error('❌ WebSocket error from server:', message);
+            console.error("❌ WebSocket error from server:", message);
             const serverError: WebSocketError = {
-              type: 'connection',
+              type: "connection",
               code: message.error_code || 0,
-              reason: message.error || 'Server error',
-              message: `Помилка сервера: ${message.error || 'Невідома помилка'}`,
+              reason: message.error || "Server error",
+              message: `Помилка сервера: ${message.error || "Невідома помилка"}`,
               timestamp: new Date(),
-              isRetryable: message.error_code !== 4000 && message.error_code !== 4002,
+              isRetryable:
+                message.error_code !== 4000 && message.error_code !== 4002,
             };
-            
+
             dispatch({ type: "SET_WEBSOCKET_ERROR", payload: serverError });
-            dispatch({ type: "ADD_ALERT", payload: createWebSocketAlert(serverError) });
+            dispatch({
+              type: "ADD_ALERT",
+              payload: createWebSocketAlert(serverError),
+            });
             break;
-            
+
           case "ping":
             // Respond to ping with pong
             try {
-              ws.send(JSON.stringify({
-                message_type: "pong",
-                correlation_id: message.correlation_id,
-                timestamp: new Date().toISOString()
-              }));
-              console.log('🏓 Responded to ping with pong');
+              ws.send(
+                JSON.stringify({
+                  message_type: "pong",
+                  correlation_id: message.correlation_id,
+                  timestamp: new Date().toISOString(),
+                }),
+              );
+              console.log("🏓 Responded to ping with pong");
             } catch (error) {
-              console.error('❌ Failed to send pong response:', error);
+              console.error("❌ Failed to send pong response:", error);
             }
             break;
-            
+
           case "pong":
-            console.log('🏓 Received pong response');
+            console.log("🏓 Received pong response");
             break;
-            
+
           default:
-            console.log('📨 Received unknown message type:', message.message_type);
+            console.log(
+              "📨 Received unknown message type:",
+              message.message_type,
+            );
         }
       } catch (error) {
         console.error("❌ Error parsing WebSocket message:", error);
         const parseError: WebSocketError = {
-          type: 'connection',
+          type: "connection",
           code: 0,
-          reason: 'Message parse error',
-          message: 'Помилка парсингу повідомлення WebSocket',
+          reason: "Message parse error",
+          message: "Помилка парсингу повідомлення WebSocket",
           timestamp: new Date(),
           isRetryable: false,
         };
-        
+
         dispatch({ type: "SET_WEBSOCKET_ERROR", payload: parseError });
-        dispatch({ type: "ADD_ALERT", payload: createWebSocketAlert(parseError) });
+        dispatch({
+          type: "ADD_ALERT",
+          payload: createWebSocketAlert(parseError),
+        });
       }
     };
 
     ws.onclose = (event) => {
-      console.log('🔌 WebSocket closed:', event.code, event.reason);
-      
+      console.log("🔌 WebSocket closed:", event.code, event.reason);
+
       // Очищаємо таймаут з'єднання
       if (connectionTimeoutRef.current) {
         clearTimeout(connectionTimeoutRef.current);
         connectionTimeoutRef.current = null;
       }
-      
+
       // Зупиняємо heartbeat
       stopHeartbeat();
-      
+
       const error = classifyWebSocketError(event);
       dispatch({ type: "SET_WEBSOCKET_ERROR", payload: error });
       dispatch({ type: "SET_CONNECTION_STATUS", payload: "disconnected" });
       dispatch({ type: "ADD_ALERT", payload: createWebSocketAlert(error) });
-      
+
       setSocket(null);
 
       // Детальне логування
@@ -868,77 +913,101 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       `);
 
       // Attempt to reconnect with exponential backoff
-      const shouldReconnect = auth.isAuthenticated && 
-                            localStorage.getItem('sessionId') && 
-                            state.reconnectInfo.attempts < state.reconnectInfo.maxAttempts &&
-                            error.isRetryable;
+      const shouldReconnect =
+        auth.isAuthenticated &&
+        localStorage.getItem("sessionId") &&
+        state.reconnectInfo.attempts < state.reconnectInfo.maxAttempts &&
+        error.isRetryable;
 
       if (shouldReconnect) {
         const nextAttempt = state.reconnectInfo.attempts + 1;
-        const delay = Math.min(reconnectDelay * Math.pow(2, state.reconnectInfo.attempts), 30000); // Max 30 seconds
-        
-        console.log(`⏰ Scheduling WebSocket reconnection attempt ${nextAttempt}/${state.reconnectInfo.maxAttempts} in ${delay}ms...`);
-        
-        dispatch({ type: "UPDATE_RECONNECT_INFO", payload: { 
-          attempts: nextAttempt, 
-          nextAttemptIn: delay,
-          totalFailures: state.reconnectInfo.totalFailures + 1,
-        } });
-        
+        const delay = Math.min(
+          reconnectDelay * Math.pow(2, state.reconnectInfo.attempts),
+          30000,
+        ); // Max 30 seconds
+
+        console.log(
+          `⏰ Scheduling WebSocket reconnection attempt ${nextAttempt}/${state.reconnectInfo.maxAttempts} in ${delay}ms...`,
+        );
+
+        dispatch({
+          type: "UPDATE_RECONNECT_INFO",
+          payload: {
+            attempts: nextAttempt,
+            nextAttemptIn: delay,
+            totalFailures: state.reconnectInfo.totalFailures + 1,
+          },
+        });
+
         const timeoutId = setTimeout(() => {
           // Перевіряємо ще раз перед переконнектуванням
-          if (!socket && auth.isAuthenticated && localStorage.getItem('sessionId')) {
-            console.log(`🔄 Attempting WebSocket reconnection (${nextAttempt}/${state.reconnectInfo.maxAttempts})...`);
+          if (
+            !socket &&
+            auth.isAuthenticated &&
+            localStorage.getItem("sessionId")
+          ) {
+            console.log(
+              `🔄 Attempting WebSocket reconnection (${nextAttempt}/${state.reconnectInfo.maxAttempts})...`,
+            );
             connectWebSocket();
           } else {
-            console.log('🚫 Skipping WebSocket reconnection - conditions no longer met');
+            console.log(
+              "🚫 Skipping WebSocket reconnection - conditions no longer met",
+            );
           }
           setReconnectTimeout(null);
         }, delay);
-        
+
         setReconnectTimeout(timeoutId);
       } else {
         if (state.reconnectInfo.attempts >= state.reconnectInfo.maxAttempts) {
-          console.error('❌ Maximum reconnection attempts reached, giving up');
+          console.error("❌ Maximum reconnection attempts reached, giving up");
           dispatch({ type: "SET_CONNECTION_STATUS", payload: "error" });
-          
+
           const maxAttemptsError: WebSocketError = {
-            type: 'connection',
+            type: "connection",
             code: 0,
-            reason: 'Max reconnection attempts reached',
-            message: 'Досягнуто максимальної кількості спроб підключення',
+            reason: "Max reconnection attempts reached",
+            message: "Досягнуто максимальної кількості спроб підключення",
             timestamp: new Date(),
             isRetryable: false,
           };
-          
+
           dispatch({ type: "SET_WEBSOCKET_ERROR", payload: maxAttemptsError });
-          dispatch({ type: "ADD_ALERT", payload: createWebSocketAlert(maxAttemptsError) });
+          dispatch({
+            type: "ADD_ALERT",
+            payload: createWebSocketAlert(maxAttemptsError),
+          });
         } else if (!error.isRetryable) {
-          console.log(`🚫 Not scheduling WebSocket reconnection - error not retryable (${error.type})`);
+          console.log(
+            `🚫 Not scheduling WebSocket reconnection - error not retryable (${error.type})`,
+          );
         } else {
-          console.log('🚫 Not scheduling WebSocket reconnection - user not authenticated');
+          console.log(
+            "🚫 Not scheduling WebSocket reconnection - user not authenticated",
+          );
         }
       }
     };
 
     ws.onerror = (error) => {
       console.error("❌ WebSocket error event:", error);
-      
+
       // Очищаємо таймаут з'єднання
       if (connectionTimeoutRef.current) {
         clearTimeout(connectionTimeoutRef.current);
         connectionTimeoutRef.current = null;
       }
-      
+
       const wsError: WebSocketError = {
-        type: 'connection',
+        type: "connection",
         code: 0,
-        reason: 'WebSocket error event',
-        message: 'Помилка WebSocket з\'єднання',
+        reason: "WebSocket error event",
+        message: "Помилка WebSocket з'єднання",
         timestamp: new Date(),
         isRetryable: true,
       };
-      
+
       dispatch({ type: "SET_WEBSOCKET_ERROR", payload: wsError });
       dispatch({ type: "SET_CONNECTION_STATUS", payload: "error" });
       dispatch({ type: "ADD_ALERT", payload: createWebSocketAlert(wsError) });
@@ -949,24 +1018,24 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
   const disconnectWebSocket = () => {
     if (socket) {
-      console.log('🔌 Disconnecting WebSocket...');
-      socket.close(1000, 'User disconnection');
+      console.log("🔌 Disconnecting WebSocket...");
+      socket.close(1000, "User disconnection");
       setSocket(null);
     }
-    
+
     // Clear all timeouts and intervals
     if (reconnectTimeout) {
       clearTimeout(reconnectTimeout);
       setReconnectTimeout(null);
     }
-    
+
     if (connectionTimeoutRef.current) {
       clearTimeout(connectionTimeoutRef.current);
       connectionTimeoutRef.current = null;
     }
-    
+
     stopHeartbeat();
-    
+
     // Reset reconnect info
     dispatch({ type: "RESET_RECONNECT_INFO" });
     dispatch({ type: "SET_WEBSOCKET_ERROR", payload: null });
@@ -975,11 +1044,11 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
   // Auto-refresh data
   useEffect(() => {
     if (auth.isAuthenticated) {
-      console.log('📊 Starting data refresh interval');
+      console.log("📊 Starting data refresh interval");
       refreshData();
       const interval = setInterval(refreshData, refreshInterval);
       return () => {
-        console.log('📊 Stopping data refresh interval');
+        console.log("📊 Stopping data refresh interval");
         clearInterval(interval);
       };
     }
@@ -987,11 +1056,11 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
   // Connect WebSocket when authenticated
   useEffect(() => {
-    if (auth.isAuthenticated && localStorage.getItem('sessionId')) {
-      console.log('🔐 User authenticated, connecting WebSocket');
+    if (auth.isAuthenticated && localStorage.getItem("sessionId")) {
+      console.log("🔐 User authenticated, connecting WebSocket");
       connectWebSocket();
     } else {
-      console.log('🔒 User not authenticated, disconnecting WebSocket');
+      console.log("🔒 User not authenticated, disconnecting WebSocket");
       disconnectWebSocket();
     }
     return () => {

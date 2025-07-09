@@ -191,20 +191,35 @@ class RedisManager:
 
     async def _create_standalone_clients(self):
         """Створення звичайних Redis клієнтів"""
+        # Підготовка URL з TLS параметрами для Upstash
+        redis_url = self.settings.redis_url
+        
+        # Додавання SSL параметрів до URL якщо потрібно
+        if getattr(self.settings, 'redis_tls_enabled', False):
+            # Для Upstash змінюємо протокол на rediss:// для TLS
+            if redis_url.startswith('redis://'):
+                redis_url = redis_url.replace('redis://', 'rediss://')
+        
+        # Базові параметри з'єднання
+        connection_kwargs = {
+            'max_connections': self.settings.redis_max_connections,
+            'retry_on_timeout': self.settings.redis_retry_on_timeout,
+            'decode_responses': True
+        }
+        
         # Основний клієнт для команд
         self.redis_client = redis.from_url(
-            self.settings.redis_url,
-            max_connections=self.settings.redis_max_connections,
-            retry_on_timeout=self.settings.redis_retry_on_timeout,
-            decode_responses=True
+            redis_url,
+            **connection_kwargs
         )
 
         # Окремий клієнт для Pub/Sub
+        pubsub_kwargs = connection_kwargs.copy()
+        pubsub_kwargs['max_connections'] = 10
+        
         self.pubsub_client = redis.from_url(
-            self.settings.redis_url,
-            max_connections=10,
-            retry_on_timeout=self.settings.redis_retry_on_timeout,
-            decode_responses=True
+            redis_url,
+            **pubsub_kwargs
         )
 
     async def _create_sentinel_clients(self):
@@ -266,10 +281,12 @@ class RedisManager:
             if self.pubsub_client:
                 await self.pubsub_client.ping()
 
-            self.logger.info("Redis connection test successful")
+            self.logger.info("✅ Redis connection successful", 
+                           redis_host="merry-mammal-56796.upstash.io",
+                           tls_enabled=getattr(self.settings, 'redis_tls_enabled', False))
 
         except Exception as e:
-            self.logger.error("Redis connection test failed", error=str(e))
+            self.logger.error("❌ Redis connection test failed", error=str(e))
             raise
 
     async def _close_connections(self):

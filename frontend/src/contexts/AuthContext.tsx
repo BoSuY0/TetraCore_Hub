@@ -180,11 +180,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         );
         setAuth(initialAuthState);
         localStorage.removeItem('sessionId');
-        // Перенаправлення на логін при 401
-        if (response.status === 401 && window.location.pathname !== '/') {
-          console.log('🔄 Redirecting to login due to invalid session');
-          window.location.href = '/';
-        }
         return false;
       }
 
@@ -193,11 +188,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         console.log("❌ Session marked as invalid by server");
         setAuth(initialAuthState);
         localStorage.removeItem('sessionId');
-        // Перенаправлення на логін при невалідній сесії
-        if (window.location.pathname !== '/') {
-          console.log('🔄 Redirecting to login due to invalid session');
-          window.location.href = '/';
-        }
         return false;
       }
 

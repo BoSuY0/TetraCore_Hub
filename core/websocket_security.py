@@ -86,34 +86,33 @@ class WebSocketSecurityManager:
         self.rate_limiters: Dict[str, List[float]] = {}
         self._cleanup_task = None
 
-    async def authenticate_websocket(self, websocket: WebSocket, token: Optional[str] = None) -> Optional[Dict]:
+    async def authenticate_websocket(self, websocket: WebSocket, token: Optional[str]) -> Optional[Dict]:
         """Автентифікація WebSocket з'єднання"""
+        if not token:
+            logger.warning("WebSocket authentication failed: no token provided")
+            return None
+
         try:
-            if not token:
-                # Спробуємо отримати токен з query параметрів
-                query_params = parse_qs(websocket.scope.get("query_string", b"").decode())
-                token_list = query_params.get("token", [])
-                if token_list:
-                    token = token_list[0]
+            # Валідація JWT токена
+            auth_mgr = get_auth_manager()
+            payload = await auth_mgr.decode_token(token)
+            
+            logger.info("WebSocket authentication successful", 
+                       user_id=payload.get("user_id"),
+                       username=payload.get("username"))
 
-            if not token:
-                logger.warning("WebSocket connection without token")
-                await self._send_error(websocket, "Authentication required")
-                return None
-
-            # Декодуємо токен
-            try:
-                payload = await get_auth_manager().decode_token(token)
-                logger.info("WebSocket authenticated", user_id=payload["user_id"])
-                return payload
-            except Exception as e:
-                logger.warning("Invalid WebSocket token", error=str(e))
-                await self._send_error(websocket, "Invalid token")
-                return None
+            return {
+                "user_id": payload["user_id"],
+                "username": payload["username"],
+                "role": payload["role"],
+                "permissions": payload["permissions"],
+                "session_id": payload["session_id"]
+            }
 
         except Exception as e:
-            logger.error("WebSocket authentication error", error=str(e))
-            await self._send_error(websocket, "Authentication failed")
+            logger.warning("WebSocket authentication failed", 
+                         error=str(e),
+                         token_preview=token[:20] + "..." if len(token) > 20 else token)
             return None
 
     async def accept_connection(self, websocket: WebSocket, user_data: Dict) -> Optional[ConnectionInfo]:

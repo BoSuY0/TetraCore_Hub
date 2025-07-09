@@ -236,6 +236,9 @@ class Client(BaseModel):
 
     # WebSocket з'єднання (не серіалізується)
     websocket: Optional[Any] = Field(exclude=True, default=None)
+    
+    # ID для security менеджера (не серіалізується) 
+    security_client_id: Optional[str] = Field(exclude=True, default=None)
 
     # Черга завдань для воркера
     task_queue: List[str] = Field(default_factory=list)

@@ -8,8 +8,10 @@ TetraCore Stream Hub Configuration
 import os
 from typing import Optional, List
 from enum import Enum
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import socket
+
+# Redis конфігурація тепер через змінні середовища (.env файл)
 
 
 class Environment(str, Enum):
@@ -70,23 +72,25 @@ class Settings:
     cleanup_interval_minutes: int = 60
     require_username: bool = False
     require_photo: bool = False
-    
+
     # Role-based permissions
     role_permissions: dict = None
 
     # Redis налаштування
-    redis_enabled: bool = True
-    redis_url: str = "redis://localhost:6379"
+    redis_enabled: bool = False  # За замовчуванням вимкнено для безпеки
+    redis_url: str = ""  # Має бути встановлено через REDIS_URL
+    redis_tls_enabled: bool = True  # За замовчуванням TLS для продакшн
+    redis_ssl_cert_reqs: str = "required"
     redis_max_connections: int = 20
     redis_retry_on_timeout: bool = True
     redis_health_check_interval: int = 30
 
     # Redis Sentinel налаштування
-    redis_sentinel_urls: List[str] = None
+    redis_sentinel_urls: List[str] = field(default_factory=list)
     redis_sentinel_service_name: str = "tetracore-master"
 
     # Redis Cluster налаштування
-    redis_cluster_nodes: List[str] = None
+    redis_cluster_nodes: List[str] = field(default_factory=list)
 
     # Pipeline налаштування
     redis_pipeline_enabled: bool = True
@@ -133,7 +137,7 @@ class Settings:
         """Ініціалізація після створення"""
         if self.allowed_origins is None:
             self.allowed_origins = ["*"]
-        
+
         if self.role_permissions is None:
             self.role_permissions = {
                 "admin": [
@@ -151,6 +155,8 @@ class Settings:
         """Завантаження налаштувань зі змінних середовища"""
         self.redis_enabled = os.getenv("REDIS_ENABLED", str(self.redis_enabled)).lower() in ("true", "1", "yes")
         self.redis_url = os.getenv("REDIS_URL", self.redis_url)
+        self.redis_tls_enabled = os.getenv("REDIS_TLS_ENABLED", str(self.redis_tls_enabled)).lower() in ("true", "1", "yes")
+        self.redis_ssl_cert_reqs = os.getenv("REDIS_SSL_CERT_REQS", self.redis_ssl_cert_reqs)
 
         # Завантаження Sentinel URLs
         sentinel_urls = os.getenv("REDIS_SENTINEL_URLS")
@@ -171,7 +177,8 @@ class Settings:
         # Автоматичне визначення Heroku середовища
         if is_heroku_environment():
             self.environment = Environment.PRODUCTION
-            self.redis_enabled = True
+            # Redis увімкнено тільки якщо є URL
+            self.redis_enabled = bool(os.getenv("REDIS_URL"))
             self.debug = False
 
         env_name = os.getenv("ENVIRONMENT", self.environment.value)
@@ -254,6 +261,8 @@ class Settings:
         return {
             "enabled": self.redis_enabled,
             "url": self.redis_url,
+            "tls_enabled": self.redis_tls_enabled,
+            "ssl_cert_reqs": self.redis_ssl_cert_reqs,
             "max_connections": self.redis_max_connections,
             "retry_on_timeout": self.redis_retry_on_timeout,
             "health_check_interval": self.redis_health_check_interval,
@@ -289,22 +298,26 @@ class Settings:
     # URL getters
     def get_app_url(self) -> str:
         """Отримання URL додатку (Heroku або локальний)"""
-        if is_heroku_environment():
-            return "https://hub.tetra-core.website"
-        
+        # В development режимі завжди використовуємо localhost
         if self.environment == Environment.DEVELOPMENT:
             return f"http://localhost:{self.port}"
-        
+
+        # В production режимі перевіряємо Heroku
+        if is_heroku_environment():
+            return "https://hub.tetra-core.website"
+
         return f"http://localhost:{self.port}"
 
     def get_frontend_url(self) -> str:
         """Отримання URL frontend"""
-        if is_heroku_environment():
-            return self.get_app_url()
-        
+        # В development режимі frontend завжди на 3000
         if self.environment == Environment.DEVELOPMENT:
             return "http://localhost:3000"
-        
+
+        # В production режимі використовуємо той самий URL що і backend
+        if is_heroku_environment():
+            return self.get_app_url()
+
         return self.get_app_url()
 
     def get_backend_url(self) -> str:
@@ -322,7 +335,7 @@ class Settings:
         domain = app_url.replace("https://", "").replace("http://", "")
         return f"{protocol}://{domain}/ws"
 
-    # Auth utility methods  
+    # Auth utility methods
     def get_user_role(self, user_id: str = None) -> str:
         """Визначення ролі користувача"""
         return "admin"  # Поки що тільки адміністратор
@@ -352,7 +365,7 @@ class Settings:
         from datetime import datetime
         import sys
         import socket
-        
+
         info = {
             "timestamp": datetime.now().isoformat(),
             "python_version": sys.version,
@@ -381,21 +394,25 @@ class Settings:
                 "admin_configured": bool(self.admin_username and self.admin_password)
             }
         }
-        
+
         try:
             info["hostname"] = socket.gethostname()
         except:
             info["hostname"] = "<unknown>"
-            
+
         return info
-    
+
     def _safe_redis_url(self) -> str:
         """Повертає Redis URL з прихованим паролем"""
+        if not self.redis_url:
+            return "not configured"
+
         if "@" in self.redis_url:
             parts = self.redis_url.split("@")
             if len(parts) > 1:
-                return parts[0].split("//")[0] + "//<credentials>@" + parts[1]
-        return self.redis_url
+                protocol_part = parts[0].split("//")[0]
+                return f"{protocol_part}//<***hidden***>@{parts[1]}"
+        return "<***hidden***>"
 
 
 # Глобальний екземпляр налаштувань
@@ -435,7 +452,7 @@ PRODUCTION_OVERRIDES = {
 TESTING_OVERRIDES = {
     "debug": True,
     "log_level": LogLevel.DEBUG,
-    "redis_url": "redis://localhost:6379/1",
+    "redis_enabled": False,
     "enable_metrics": False,
 }
 

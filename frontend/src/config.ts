@@ -12,8 +12,15 @@ export const getApiBaseUrl = (): string => {
 
 // Get WebSocket URL
 export const getWebSocketUrl = (): string => {
-  // For WebSocket, we need absolute URL
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  
+  // In development, frontend runs on 3000, backend on 8000
+  if (!isProduction && window.location.port === "3000") {
+    const hostname = window.location.hostname;
+    return `${protocol}//${hostname}:8000`;
+  }
+  
+  // In production or other environments, use same host
   return `${protocol}//${window.location.host}`;
 };
 
