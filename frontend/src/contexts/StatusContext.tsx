@@ -139,8 +139,26 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
   // API calls
   const fetchHealth = async (): Promise<StreamHubHealth | null> => {
     try {
-      const response = await fetch(buildUrl("/health"));
-      if (!response.ok) throw new Error("Health check failed");
+      const sessionId = localStorage.getItem('sessionId');
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json',
+      };
+      
+      if (sessionId) {
+        headers.Authorization = `Bearer ${sessionId}`;
+      }
+      
+      const response = await fetch(buildUrl("/health"), {
+        headers,
+      });
+      if (!response.ok) {
+        if (response.status === 401) {
+          // Redirect to login on authentication failure
+          window.location.href = '/';
+          return null;
+        }
+        throw new Error("Health check failed");
+      }
       return await response.json();
     } catch (error) {
       console.error("Error fetching health:", error);
@@ -150,8 +168,26 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
   const fetchMetrics = async (): Promise<StreamHubMetrics | null> => {
     try {
-      const response = await fetch(buildUrl("/metrics"));
-      if (!response.ok) throw new Error("Metrics fetch failed");
+      const sessionId = localStorage.getItem('sessionId');
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json',
+      };
+      
+      if (sessionId) {
+        headers.Authorization = `Bearer ${sessionId}`;
+      }
+      
+      const response = await fetch(buildUrl("/metrics"), {
+        headers,
+      });
+      if (!response.ok) {
+        if (response.status === 401) {
+          // Redirect to login on authentication failure
+          window.location.href = '/';
+          return null;
+        }
+        throw new Error("Metrics fetch failed");
+      }
       return await response.json();
     } catch (error) {
       console.error("Error fetching metrics:", error);
@@ -161,8 +197,24 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
   const fetchClients = async (): Promise<Client[]> => {
     try {
-      const response = await fetch(buildUrl("/clients"));
+      const sessionId = localStorage.getItem('sessionId');
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json',
+      };
+      
+      if (sessionId) {
+        headers.Authorization = `Bearer ${sessionId}`;
+      }
+      
+      const response = await fetch(buildUrl("/clients"), {
+        headers,
+      });
       if (!response.ok) {
+        if (response.status === 401) {
+          // Redirect to login on authentication failure
+          window.location.href = '/';
+          return [];
+        }
         // Return empty array if service unavailable (no clients connected)
         if (response.status === 503) return [];
         throw new Error("Clients fetch failed");
@@ -177,8 +229,26 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
   const fetchTaskStats = async (): Promise<TaskQueueStats | null> => {
     try {
-      const response = await fetch(buildUrl("/tasks"));
-      if (!response.ok) throw new Error("Task stats fetch failed");
+      const sessionId = localStorage.getItem('sessionId');
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json',
+      };
+      
+      if (sessionId) {
+        headers.Authorization = `Bearer ${sessionId}`;
+      }
+      
+      const response = await fetch(buildUrl("/tasks"), {
+        headers,
+      });
+      if (!response.ok) {
+        if (response.status === 401) {
+          // Redirect to login on authentication failure
+          window.location.href = '/';
+          return null;
+        }
+        throw new Error("Task stats fetch failed");
+      }
       return await response.json();
     } catch (error) {
       console.error("Error fetching task stats:", error);
@@ -187,6 +257,12 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
   };
 
   const refreshData = async () => {
+    // Only refresh data if user is authenticated
+    if (!auth.isAuthenticated) {
+      dispatch({ type: "SET_CONNECTION_STATUS", payload: "disconnected" });
+      return;
+    }
+
     dispatch({ type: "SET_LOADING", payload: true });
     dispatch({ type: "SET_CONNECTION_STATUS", payload: "connecting" });
 
@@ -305,10 +381,12 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
   // Auto-refresh data
   useEffect(() => {
-    refreshData();
-    const interval = setInterval(refreshData, refreshInterval);
-    return () => clearInterval(interval);
-  }, [refreshInterval]);
+    if (auth.isAuthenticated) {
+      refreshData();
+      const interval = setInterval(refreshData, refreshInterval);
+      return () => clearInterval(interval);
+    }
+  }, [refreshInterval, auth.isAuthenticated]);
 
   // Connect WebSocket when authenticated
   useEffect(() => {

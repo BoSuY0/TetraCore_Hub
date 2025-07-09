@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import { useStatus } from "../contexts/StatusContext";
 import { useI18n } from "../contexts/I18nContext";
+import { useAuth } from "../contexts/AuthContext";
 import { buildUrl } from "../config";
 import {
   UsersIcon,
@@ -244,17 +245,39 @@ const AdvancedProgress: React.FC<AdvancedProgressProps> = ({
 // Компонент системного здоров'я
 const SystemHealthWidget: React.FC = () => {
   const { t } = useI18n();
+  const { auth } = useAuth();
   const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
 
   useEffect(() => {
     const fetchMetrics = async () => {
+      // Only fetch if user is authenticated
+      if (!auth.isAuthenticated) {
+        return;
+      }
+      
       try {
+        const sessionId = localStorage.getItem('sessionId');
+        const headers: HeadersInit = {
+          'Content-Type': 'application/json',
+        };
+        
+        if (sessionId) {
+          headers.Authorization = `Bearer ${sessionId}`;
+        }
+        
         const response = await fetch(
           buildUrl("/dashboard/api/real-time-metrics"),
+          {
+            headers,
+          }
         );
+        
         if (response.ok) {
           const data = await response.json();
           setMetrics(data.performance_data);
+        } else if (response.status === 401) {
+          // Redirect to login on authentication failure
+          window.location.href = '/';
         }
       } catch (error) {
         console.error("Failed to fetch metrics:", error);
@@ -264,7 +287,7 @@ const SystemHealthWidget: React.FC = () => {
     fetchMetrics();
     const interval = setInterval(fetchMetrics, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [auth.isAuthenticated]);
 
   const getHealthStatus = (cpu: number, memory: number) => {
     const safeCpu = cpu || 0;
