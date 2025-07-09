@@ -704,9 +704,21 @@ class StreamHub:
 
     def _authenticate_client(self, message: BaseMessage) -> bool:
         """Аутентифікація клієнта"""
-        if not self.settings.auth_token:
-            return True  # Аутентифікація вимкнена
+        # 1. Dashboard / monitor клієнти вже проходять JWT-аутентифікацію під час
+        #    встановлення WebSocket-зʼєднання, тому їм не потрібен додатковий
+        #    static auth_token. Дозволяємо реєстрацію, щоб уникнути помилки
+        #    «AUTH_FAILED» та циклів reconnection на фронтенді.
+        from models.client import ClientType  # Локальний імпорт, щоб уникнути циклічних залежностей
 
+        if message.client_type == ClientType.MONITOR:
+            return True
+
+        # 2. Якщо глобальний static AUTH_TOKEN не налаштований – додаткова
+        #    перевірка не потрібна.
+        if not self.settings.auth_token:
+            return True
+
+        # 3. Для усіх інших клієнтів вимагаємо збіг із налаштованим AUTH_TOKEN.
         return getattr(message, 'auth_token', None) == self.settings.auth_token
 
     def _get_client_config(self, client: Client) -> Dict[str, Any]:
