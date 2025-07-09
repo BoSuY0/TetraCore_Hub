@@ -261,6 +261,12 @@ async def require_auth_middleware(request: Request, call_next):
         "/favicon.ico"
     ]
 
+    # Dashboard API endpoints (потребують автентифікації але обробляються окремо)
+    dashboard_paths = [
+        "/dashboard/api/",
+        "/api/auth/validate"
+    ]
+
     # Статичні файли також публічні
     if request.url.path.startswith("/static/") or request.url.path == "/":
         return await call_next(request)
@@ -271,6 +277,10 @@ async def require_auth_middleware(request: Request, call_next):
 
     # WebSocket має свою автентифікацію
     if request.url.path.startswith("/ws/"):
+        return await call_next(request)
+
+    # Dashboard та auth API мають свою обробку автентифікації
+    if any(request.url.path.startswith(path) for path in dashboard_paths):
         return await call_next(request)
 
     # Для всіх інших endpoints потрібна автентифікація

@@ -1,8 +1,8 @@
 """
 TetraCore Stream Hub Configuration
 
-Централізована конфігурація для StreamHub з підтримкою різних середовищ
-та змінних оточення для розгортання на Heroku.
+Централізована конфігурація для StreamHub з підтримкою різних середовищ,
+змінних оточення та системи автентифікації.
 """
 
 import os
@@ -28,12 +28,17 @@ class LogLevel(str, Enum):
     CRITICAL = "CRITICAL"
 
 
-# Функція detect_heroku_app_name видалена - використовуємо статичний домен
-
-
 def is_heroku_environment() -> bool:
     """Перевіряє чи код запущено на Heroku"""
     return bool(os.getenv("DYNO") or os.getenv("PORT") and os.getenv("HOME") == "/app")
+
+
+# Завантаження змінних з .env файлу
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv не обов'язкова залежність
 
 
 @dataclass
@@ -42,7 +47,7 @@ class Settings:
 
     # Основні параметри додатка
     app_name: str = "TetraCore StreamHub"
-    app_version: str = "1.0.0"
+    app_version: str = "2.0.0"
     environment: Environment = Environment.DEVELOPMENT
     debug: bool = False
     require_authentication: bool = True
@@ -58,6 +63,17 @@ class Settings:
     websocket_heartbeat_interval: int = 30
     max_connections: int = 1000
 
+    # Автентифікація та безпека
+    admin_username: str = None
+    admin_password: str = None
+    session_duration_hours: int = 24
+    cleanup_interval_minutes: int = 60
+    require_username: bool = False
+    require_photo: bool = False
+    
+    # Role-based permissions
+    role_permissions: dict = None
+
     # Redis налаштування
     redis_enabled: bool = True
     redis_url: str = "redis://localhost:6379"
@@ -66,11 +82,11 @@ class Settings:
     redis_health_check_interval: int = 30
 
     # Redis Sentinel налаштування
-    redis_sentinel_urls: List[str] = None  # ["host1:26379", "host2:26379"]
+    redis_sentinel_urls: List[str] = None
     redis_sentinel_service_name: str = "tetracore-master"
 
     # Redis Cluster налаштування
-    redis_cluster_nodes: List[str] = None  # ["host1:7000", "host2:7001"]
+    redis_cluster_nodes: List[str] = None
 
     # Pipeline налаштування
     redis_pipeline_enabled: bool = True
@@ -117,9 +133,19 @@ class Settings:
         """Ініціалізація після створення"""
         if self.allowed_origins is None:
             self.allowed_origins = ["*"]
+        
+        if self.role_permissions is None:
+            self.role_permissions = {
+                "admin": [
+                    "dashboard.view", "clients.view", "clients.manage",
+                    "tasks.view", "tasks.manage", "settings.view",
+                    "settings.manage", "logs.view", "auth.manage"
+                ]
+            }
 
         # Завантаження з змінних середовища
         self._load_from_env()
+        self._setup_auth()
 
     def _load_from_env(self):
         """Завантаження налаштувань зі змінних середовища"""
@@ -145,7 +171,7 @@ class Settings:
         # Автоматичне визначення Heroku середовища
         if is_heroku_environment():
             self.environment = Environment.PRODUCTION
-            self.redis_enabled = True  # На Heroku зазвичай використовуємо Redis
+            self.redis_enabled = True
             self.debug = False
 
         env_name = os.getenv("ENVIRONMENT", self.environment.value)
@@ -163,13 +189,27 @@ class Settings:
         # Динамічні CORS налаштування
         self._setup_cors_origins()
 
+    def _setup_auth(self):
+        """Налаштування автентифікації"""
+        self.admin_username = os.getenv("ADMIN_USERNAME")
+        self.admin_password = os.getenv("ADMIN_PASSWORD")
+
+        # Перевірка та налаштування дефолтних значень для розробки
+        if not self.admin_username or not self.admin_password:
+            if self.environment == Environment.DEVELOPMENT:
+                self.admin_username = self.admin_username or "admin"
+                self.admin_password = self.admin_password or "TetraCore@Admin123!"
+            elif self.environment == Environment.PRODUCTION:
+                raise ValueError(
+                    "ADMIN_USERNAME та ADMIN_PASSWORD мають бути встановлені в продакшені!"
+                )
+
     def _setup_cors_origins(self):
         """Налаштування CORS origins залежно від середовища"""
         origins = []
 
         # Production domains
         if is_heroku_environment() or self.environment == Environment.PRODUCTION:
-            # Custom domain
             origins.extend([
                 "https://hub.tetra-core.website",
                 "https://tetra-core-hub-29fb6c8b7947.herokuapp.com"
@@ -195,6 +235,7 @@ class Settings:
 
         self.allowed_origins = origins
 
+    # Utility methods
     def is_production(self) -> bool:
         """Перевірка чи це продакшн середовище"""
         return self.environment == Environment.PRODUCTION
@@ -207,6 +248,7 @@ class Settings:
         """Перевірка чи це тестове середовище"""
         return self.environment == Environment.TESTING
 
+    # Configuration getters
     def get_redis_config(self) -> dict:
         """Отримання конфігурації Redis"""
         return {
@@ -232,30 +274,37 @@ class Settings:
             "max_connections": self.max_connections,
         }
 
+    def get_auth_config(self) -> dict:
+        """Отримання конфігурації автентифікації"""
+        return {
+            "admin_username": self.admin_username,
+            "admin_password": self.admin_password,
+            "session_duration_hours": self.session_duration_hours,
+            "cleanup_interval_minutes": self.cleanup_interval_minutes,
+            "require_username": self.require_username,
+            "require_photo": self.require_photo,
+            "role_permissions": self.role_permissions
+        }
+
+    # URL getters
     def get_app_url(self) -> str:
         """Отримання URL додатку (Heroku або локальний)"""
-        # Перевіряємо чи це Heroku
         if is_heroku_environment():
-            # Використовуємо кастомний домен
             return "https://hub.tetra-core.website"
-
-        # Для локальної розробки
+        
         if self.environment == Environment.DEVELOPMENT:
             return f"http://localhost:{self.port}"
-
-        # Для production без Heroku
+        
         return f"http://localhost:{self.port}"
 
     def get_frontend_url(self) -> str:
         """Отримання URL frontend"""
-        # На Heroku frontend та backend на одному домені
         if is_heroku_environment():
             return self.get_app_url()
-
-        # Для локальної розробки frontend на порту 3000
+        
         if self.environment == Environment.DEVELOPMENT:
             return "http://localhost:3000"
-
+        
         return self.get_app_url()
 
     def get_backend_url(self) -> str:
@@ -272,6 +321,81 @@ class Settings:
         protocol = "wss" if app_url.startswith("https") else "ws"
         domain = app_url.replace("https://", "").replace("http://", "")
         return f"{protocol}://{domain}/ws"
+
+    # Auth utility methods  
+    def get_user_role(self, user_id: str = None) -> str:
+        """Визначення ролі користувача"""
+        return "admin"  # Поки що тільки адміністратор
+
+    def get_user_permissions(self, user_id: str = None) -> List[str]:
+        """Отримання дозволів користувача"""
+        return self.role_permissions.get("admin", [])
+
+    def validate_auth_config(self) -> List[str]:
+        """Валідація конфігурації автентифікації"""
+        errors = []
+
+        if not self.admin_username:
+            errors.append("ADMIN_USERNAME not configured")
+        if not self.admin_password:
+            errors.append("ADMIN_PASSWORD not configured")
+
+        if self.admin_username and len(self.admin_username) < 3:
+            errors.append("ADMIN_USERNAME must be at least 3 characters long")
+        if self.admin_password and len(self.admin_password) < 8:
+            errors.append("ADMIN_PASSWORD must be at least 8 characters long")
+
+        return errors
+
+    def diagnose_environment(self) -> dict:
+        """Діагностика середовища виконання"""
+        from datetime import datetime
+        import sys
+        import socket
+        
+        info = {
+            "timestamp": datetime.now().isoformat(),
+            "python_version": sys.version,
+            "platform": sys.platform,
+            "environment": {
+                "is_heroku": is_heroku_environment(),
+                "dyno": os.getenv("DYNO"),
+                "port": os.getenv("PORT"),
+                "home": os.getenv("HOME"),
+                "environment": self.environment.value,
+                "debug": self.debug,
+                "log_level": self.log_level.value
+            },
+            "urls": {
+                "backend": self.get_backend_url(),
+                "frontend": self.get_frontend_url(),
+                "dashboard": self.get_dashboard_url(),
+                "websocket": self.get_websocket_url()
+            },
+            "redis": {
+                "enabled": self.redis_enabled,
+                "url_safe": self._safe_redis_url()
+            },
+            "auth": {
+                "require_authentication": self.require_authentication,
+                "admin_configured": bool(self.admin_username and self.admin_password)
+            }
+        }
+        
+        try:
+            info["hostname"] = socket.gethostname()
+        except:
+            info["hostname"] = "<unknown>"
+            
+        return info
+    
+    def _safe_redis_url(self) -> str:
+        """Повертає Redis URL з прихованим паролем"""
+        if "@" in self.redis_url:
+            parts = self.redis_url.split("@")
+            if len(parts) > 1:
+                return parts[0].split("//")[0] + "//<credentials>@" + parts[1]
+        return self.redis_url
 
 
 # Глобальний екземпляр налаштувань
@@ -296,23 +420,22 @@ def update_settings(**kwargs) -> Settings:
 DEVELOPMENT_OVERRIDES = {
     "debug": True,
     "log_level": LogLevel.DEBUG,
-    "redis_enabled": False,  # Для локальної розробки Redis не обов'язковий
-    "redis_url": "redis://localhost:6379",
+    "redis_enabled": False,
     "enable_metrics": True
 }
 
 PRODUCTION_OVERRIDES = {
     "debug": False,
-    "log_level": LogLevel.WARNING,  # Змінено з INFO на WARNING для зменшення логів
+    "log_level": LogLevel.WARNING,
     "enable_metrics": True,
     "enable_compression": True,
-    "redis_enabled": True,  # Redis увімкнений в продакшені
+    "redis_enabled": True,
 }
 
 TESTING_OVERRIDES = {
     "debug": True,
     "log_level": LogLevel.DEBUG,
-    "redis_url": "redis://localhost:6379/1",  # Окрема база для тестів
+    "redis_url": "redis://localhost:6379/1",
     "enable_metrics": False,
 }
 
@@ -334,3 +457,24 @@ def configure_for_environment(env: Environment):
 # Автоматична конфігурація при імпорті
 if settings.environment:
     configure_for_environment(settings.environment)
+
+
+# Backward compatibility aliases
+def get_user_role(user_id: str = None) -> str:
+    """Backward compatibility for auth_config.py"""
+    return settings.get_user_role(user_id)
+
+
+def get_user_permissions(user_id: str = None) -> List[str]:
+    """Backward compatibility for auth_config.py"""
+    return settings.get_user_permissions(user_id)
+
+
+# Constants for backward compatibility
+ADMIN_USERNAME = settings.admin_username
+ADMIN_PASSWORD = settings.admin_password
+SESSION_DURATION_HOURS = settings.session_duration_hours
+CLEANUP_INTERVAL_MINUTES = settings.cleanup_interval_minutes
+REQUIRE_USERNAME = settings.require_username
+REQUIRE_PHOTO = settings.require_photo
+ROLE_PERMISSIONS = settings.role_permissions

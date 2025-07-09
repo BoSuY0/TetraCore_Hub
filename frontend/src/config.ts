@@ -62,6 +62,7 @@ export const endpoints = {
   tasks: "/tasks",
   dashboard: {
     realTimeMetrics: "/dashboard/api/real-time-metrics",
+    systemLogs: "/dashboard/api/system-logs",
   },
   api: {
     status: "/api/status",
@@ -69,15 +70,38 @@ export const endpoints = {
   },
 };
 
-// Helper function to build full URL
-export const buildUrl = (endpoint: string): string => {
-  // With relative URLs, just return the endpoint
-  return endpoint;
+// Helper function for building full URLs
+export const buildUrl = (path: string = "/"): string => {
+  return `${config.api.baseUrl}${path}`;
 };
 
 // Helper function for WebSocket URL with path
 export const buildWsUrl = (path: string = "/ws"): string => {
   return `${config.websocket.url}${path}`;
+};
+
+// Authenticated fetch function
+export const authenticatedFetch = async (url: string, options: RequestInit = {}): Promise<Response> => {
+  const sessionId = localStorage.getItem('sessionId');
+  
+  const defaultHeaders: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  
+  // Додаємо Authorization header якщо є токен
+  if (sessionId) {
+    defaultHeaders['Authorization'] = `Bearer ${sessionId}`;
+  }
+  
+  const mergedOptions: RequestInit = {
+    ...options,
+    headers: {
+      ...defaultHeaders,
+      ...options.headers,
+    },
+  };
+  
+  return fetch(url, mergedOptions);
 };
 
 // Export individual values for backward compatibility

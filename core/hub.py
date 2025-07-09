@@ -819,6 +819,9 @@ class StreamHub:
                 "redis": await self.redis_manager.is_healthy() if self.redis_manager else False,
                 "client_manager": self.client_manager.is_healthy() if self.client_manager else False,
                 "task_router": self.task_router.is_healthy() if self.task_router else False,
+                "websocket_manager": self.websocket_manager.is_healthy() if hasattr(self, 'websocket_manager') and self.websocket_manager else self.is_running,
+                "health_monitor": self.health_monitor.is_healthy() if hasattr(self, 'health_monitor') and self.health_monitor else self.is_running,
+                "metrics_collector": self.metrics_collector.is_healthy() if hasattr(self, 'metrics_collector') and self.metrics_collector else self.is_running,
             },
             "stats": {
                 "total_connections": self.total_connections,

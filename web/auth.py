@@ -53,10 +53,9 @@ class User(BaseModel):
 logger = structlog.get_logger()
 
 # Імпорт конфігурації авторизації
-from auth_config import (
-    SESSION_DURATION_HOURS,
-    get_user_role, get_user_permissions,
-    ROLE_PERMISSIONS
+from config import (
+    get_settings,
+    get_user_role, get_user_permissions
 )
 
 # Security схема для Bearer токенів
@@ -65,9 +64,11 @@ security = HTTPBearer()
 
 def get_user_role_and_permissions(user_id: str) -> tuple[str, List[str]]:
     """Визначення ролі та дозволів користувача"""
+    settings = get_settings()
+    
     # Для адміна повертаємо відповідну роль та дозволи
     if user_id == "admin":
-        return "admin", ROLE_PERMISSIONS["admin"]
+        return "admin", settings.role_permissions["admin"]
 
     # Для інших користувачів можна додати логіку
     role = get_user_role(user_id)

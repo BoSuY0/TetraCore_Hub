@@ -596,30 +596,67 @@ class StreamHubLauncher:
     def create_app(self):
         """Створює FastAPI додаток"""
         from core.hub import StreamHub
-
-        # Створюємо StreamHub
-        hub = StreamHub()
+        
+        # Глобальна змінна для збереження hub instance
+        self._hub_instance = None
 
         @asynccontextmanager
         async def lifespan(app: FastAPI):
             # Startup
-            print("🚀 Запуск StreamHub...")
-            await hub.initialize()
-            app.state.hub = hub
+            self.logger.info("🚀 Запуск TetraCore StreamHub...")
+            
+            try:
+                # Створюємо та ініціалізуємо StreamHub
+                hub = StreamHub()
+                await hub.initialize()
 
-            yield
+                # Зберігаємо в app state та в launcher
+                app.state.hub = hub
+                self._hub_instance = hub
 
-            # Shutdown
-            print("🛑 Зупинка StreamHub...")
-            await hub.shutdown()
+                self.logger.info("✅ StreamHub успішно запущено")
+                yield
 
-        # Встановлюємо lifespan перед створенням app
-        hub.lifespan = lifespan
+            finally:
+                # Shutdown
+                self.logger.info("🛑 Зупинка StreamHub...")
 
-        # Отримуємо FastAPI додаток від StreamHub
+                if self._hub_instance:
+                    try:
+                        await self._hub_instance.shutdown()
+                    except Exception as e:
+                        self.logger.error(f"Помилка при зупинці StreamHub: {e}")
+                    finally:
+                        self._hub_instance = None
+
+                self.logger.info("👋 StreamHub зупинено")
+
+        # Створюємо тимчасовий hub для отримання app
+        from config import get_settings
+        settings = get_settings()
+        hub = StreamHub(settings)
         app = hub.get_app()
 
+        # Встановлюємо lifespan
+        if hasattr(app, 'router') and hasattr(app.router, 'lifespan_context'):
+            app.router.lifespan_context = lifespan
+        else:
+            # Для старіших версій FastAPI
+            new_app = FastAPI(
+                title="TetraCore StreamHub",
+                description="Централізований хаб для маршрутизації завдань",
+                version="2.0.0",
+                lifespan=lifespan
+            )
+            # Копіюємо всі роути
+            new_app.mount("/", app)
+            app = new_app
+
         return app
+
+    def get_hub(self):
+        """Отримує поточний екземпляр StreamHub"""
+        return getattr(self, '_hub_instance', None)
 
     async def run_backend(self, host="0.0.0.0", port=None, reload=False, log_level="info"):
         """Запускає backend сервер"""
@@ -742,6 +779,87 @@ class StreamHubLauncher:
         finally:
             await self.cleanup()
 
+    async def run_main_mode(self, verbose=False):
+        """Main режим - простий запуск як в main.py"""
+        # Налаштування
+        self.setup_environment()
+        
+        # Логування
+        log_level = self.setup_logging(verbose)
+        
+        # Не показуємо банер в main режимі для сумісності
+        print("🚀 Запуск TetraCore StreamHub (main mode)...")
+
+        try:
+            # Запускаємо backend тільки з базовими налаштуваннями
+            await self.run_backend(
+                host="0.0.0.0",
+                port=int(os.environ.get("PORT", "8000")),
+                reload=False,
+                log_level=log_level
+            )
+
+        finally:
+            await self.cleanup()
+
+    def diagnose_environment(self):
+        """Діагностика середовища виконання"""
+        from config import get_settings
+        
+        print("🔍 Діагностика середовища TetraCore Hub")
+        print("=" * 60)
+        
+        settings = get_settings()
+        info = settings.diagnose_environment()
+        
+        # Основна інформація
+        print(f"\n📊 ЗАГАЛЬНА ІНФОРМАЦІЯ")
+        print(f"Дата/час: {info['timestamp']}")
+        print(f"Python: {info['python_version']}")
+        print(f"Платформа: {info['platform']}")
+        print(f"Hostname: {info['hostname']}")
+        
+        # Середовище
+        print(f"\n🌍 СЕРЕДОВИЩЕ")
+        env = info['environment']
+        print(f"Heroku: {'ТАК' if env['is_heroku'] else 'НІ'}")
+        print(f"DYNO: {env['dyno'] or '<не встановлено>'}")
+        print(f"PORT: {env['port'] or '<не встановлено>'}")
+        print(f"Environment: {env['environment']}")
+        print(f"Debug: {env['debug']}")
+        print(f"Log Level: {env['log_level']}")
+        
+        # URL конфігурація
+        print(f"\n🔗 URL КОНФІГУРАЦІЯ")
+        urls = info['urls']
+        print(f"Backend: {urls['backend']}")
+        print(f"Frontend: {urls['frontend']}")
+        print(f"Dashboard: {urls['dashboard']}")
+        print(f"WebSocket: {urls['websocket']}")
+        
+        # Redis
+        print(f"\n🔴 REDIS")
+        redis = info['redis']
+        print(f"Enabled: {redis['enabled']}")
+        print(f"URL: {redis['url_safe']}")
+        
+        # Автентифікація
+        print(f"\n🔐 АВТЕНТИФІКАЦІЯ")
+        auth = info['auth']
+        print(f"Require Auth: {auth['require_authentication']}")
+        print(f"Admin Configured: {auth['admin_configured']}")
+        
+        # Валідація
+        auth_errors = settings.validate_auth_config()
+        if auth_errors:
+            print(f"\n⚠️ ПОМИЛКИ КОНФІГУРАЦІЇ:")
+            for error in auth_errors:
+                print(f"  • {error}")
+        else:
+            print(f"\n✅ Конфігурація валідна")
+        
+        print("\n" + "=" * 60)
+
     async def cleanup(self):
         """Очищення ресурсів"""
         self.logger.info("🧹 Очищення ресурсів...")
@@ -782,11 +900,13 @@ def main():
   python hub_launcher.py fast         # Швидкий запуск backend
   python hub_launcher.py prod         # Production сервер
   python hub_launcher.py build        # Збірка frontend
+  python hub_launcher.py main         # Простий запуск (замість main.py)
+  python hub_launcher.py diagnose     # Діагностика середовища
         """,
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("mode", nargs="?", default="dev",
-                       choices=["dev", "fast", "prod", "build"],
+                       choices=["dev", "fast", "prod", "build", "main", "diagnose"],
                        help="Режим запуску (за замовчуванням: dev)")
     parser.add_argument("--force-build", action="store_true",
                        help="Примусова збірка frontend")
@@ -819,6 +939,12 @@ def main():
             else:
                 print("❌ Помилка збірки")
                 sys.exit(1)
+        elif args.mode == "main":
+            # Режим main.py для сумісності
+            asyncio.run(launcher.run_main_mode(verbose=args.verbose))
+        elif args.mode == "diagnose":
+            # Діагностика середовища
+            launcher.diagnose_environment()
     except KeyboardInterrupt:
         print("\n👋 Зупинено користувачем")
     except Exception as e:
