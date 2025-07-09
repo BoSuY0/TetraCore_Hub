@@ -293,26 +293,44 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
   };
 
   const connectWebSocket = () => {
-    if (socket) return;
+    if (socket) {
+      console.log('WebSocket already exists, skipping connection');
+      return;
+    }
 
+    // Перевіряємо, чи користувач все ще автентифікований
+    if (!auth.isAuthenticated) {
+      console.warn('🔒 User not authenticated, skipping WebSocket connection');
+      dispatch({ type: "SET_CONNECTION_STATUS", payload: "disconnected" });
+      return;
+    }
+
+    console.log('🔌 Initiating WebSocket connection...');
     dispatch({ type: "SET_CONNECTION_STATUS", payload: "connecting" });
 
     // Отримуємо токен із localStorage
     const sessionId = localStorage.getItem('sessionId');
     if (!sessionId) {
-      console.warn('No session ID found, skipping WebSocket connection');
+      console.warn('❌ No session ID found, skipping WebSocket connection');
+      dispatch({ type: "SET_CONNECTION_STATUS", payload: "disconnected" });
+      return;
+    }
+
+    // Перевіряємо, чи sessionId відповідає sessionId із auth стану
+    if (auth.sessionId && sessionId !== auth.sessionId) {
+      console.warn('⚠️ Session ID mismatch, skipping WebSocket connection');
       dispatch({ type: "SET_CONNECTION_STATUS", payload: "disconnected" });
       return;
     }
 
     // Будуємо URL з токеном
     const wsUrl = `${buildWsUrl("/ws")}?token=${encodeURIComponent(sessionId)}`;
-    console.log('Connecting to WebSocket with token:', sessionId.substring(0, 8) + '...');
+    console.log('🔌 Connecting to WebSocket with token:', sessionId.substring(0, 8) + '...');
 
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
-      console.log('WebSocket connected successfully');
+      console.log('✅ WebSocket connected successfully');
       dispatch({ type: "SET_CONNECTION_STATUS", payload: "connected" });
 
       // Send registration message
@@ -352,20 +370,38 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
     };
 
     ws.onclose = (event) => {
-      console.log('WebSocket closed:', event.code, event.reason);
+      console.log('🔌 WebSocket closed:', event.code, event.reason);
       dispatch({ type: "SET_CONNECTION_STATUS", payload: "disconnected" });
       setSocket(null);
 
+      // Детальна обробка закриття WebSocket
+      if (event.code === 1006) {
+        console.warn('⚠️ WebSocket closed abnormally, possibly due to authentication issues');
+      } else if (event.code === 1000) {
+        console.log('✅ WebSocket closed normally');
+      } else if (event.code === 1008) {
+        console.error('❌ WebSocket closed due to policy violation (likely authentication failed)');
+      }
+
       // Attempt to reconnect after 5 seconds if we have a valid session
-      if (auth.isAuthenticated) {
+      if (auth.isAuthenticated && localStorage.getItem('sessionId')) {
+        console.log('⏰ Scheduling WebSocket reconnection in 5 seconds...');
         setTimeout(() => {
-          if (!socket) connectWebSocket();
+          // Перевіряємо ще раз перед переконнектуванням
+          if (!socket && auth.isAuthenticated && localStorage.getItem('sessionId')) {
+            console.log('🔄 Attempting WebSocket reconnection...');
+            connectWebSocket();
+          } else {
+            console.log('🚫 Skipping WebSocket reconnection - user no longer authenticated');
+          }
         }, 5000);
+      } else {
+        console.log('🚫 Not scheduling WebSocket reconnection - user not authenticated');
       }
     };
 
     ws.onerror = (error) => {
-      console.error("WebSocket error:", error);
+      console.error("❌ WebSocket error:", error);
       dispatch({ type: "SET_CONNECTION_STATUS", payload: "error" });
     };
 
@@ -374,6 +410,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
   const disconnectWebSocket = () => {
     if (socket) {
+      console.log('🔌 Disconnecting WebSocket...');
       socket.close();
       setSocket(null);
     }
@@ -382,17 +419,23 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
   // Auto-refresh data
   useEffect(() => {
     if (auth.isAuthenticated) {
+      console.log('📊 Starting data refresh interval');
       refreshData();
       const interval = setInterval(refreshData, refreshInterval);
-      return () => clearInterval(interval);
+      return () => {
+        console.log('📊 Stopping data refresh interval');
+        clearInterval(interval);
+      };
     }
   }, [refreshInterval, auth.isAuthenticated]);
 
   // Connect WebSocket when authenticated
   useEffect(() => {
-    if (auth.isAuthenticated) {
+    if (auth.isAuthenticated && localStorage.getItem('sessionId')) {
+      console.log('🔐 User authenticated, connecting WebSocket');
       connectWebSocket();
     } else {
+      console.log('🔒 User not authenticated, disconnecting WebSocket');
       disconnectWebSocket();
     }
     return () => disconnectWebSocket();
