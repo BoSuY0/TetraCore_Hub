@@ -134,7 +134,12 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 }) => {
   const [state, dispatch] = useReducer(statusReducer, initialState);
   const [socket, setSocket] = React.useState<WebSocket | null>(null);
+  const [reconnectAttempts, setReconnectAttempts] = React.useState(0);
+  const [reconnectTimeout, setReconnectTimeout] = React.useState<NodeJS.Timeout | null>(null);
   const { auth } = useAuth();
+  
+  const maxReconnectAttempts = 5;
+  const reconnectDelay = 5000;
 
   // API calls
   const fetchHealth = async (): Promise<StreamHubHealth | null> => {
@@ -302,6 +307,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
     if (!auth.isAuthenticated) {
       console.warn('🔒 User not authenticated, skipping WebSocket connection');
       dispatch({ type: "SET_CONNECTION_STATUS", payload: "disconnected" });
+      setReconnectAttempts(0);
       return;
     }
 
@@ -313,6 +319,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
     if (!sessionId) {
       console.warn('❌ No session ID found, skipping WebSocket connection');
       dispatch({ type: "SET_CONNECTION_STATUS", payload: "disconnected" });
+      setReconnectAttempts(0);
       return;
     }
 
@@ -320,6 +327,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
     if (auth.sessionId && sessionId !== auth.sessionId) {
       console.warn('⚠️ Session ID mismatch, skipping WebSocket connection');
       dispatch({ type: "SET_CONNECTION_STATUS", payload: "disconnected" });
+      setReconnectAttempts(0);
       return;
     }
 
@@ -332,6 +340,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
     ws.onopen = () => {
       console.log('✅ WebSocket connected successfully');
       dispatch({ type: "SET_CONNECTION_STATUS", payload: "connected" });
+      setReconnectAttempts(0); // Reset reconnect attempts on successful connection
 
       // Send registration message
       const registrationMessage = {
@@ -340,6 +349,9 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
         client_id: "dashboard-" + Date.now(),
         client_name: "React Dashboard",
         client_version: "1.0.0",
+        capabilities: [],
+        max_concurrent_tasks: 1,
+        client_info: {}
       };
 
       ws.send(JSON.stringify(registrationMessage));
@@ -349,20 +361,41 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       try {
         const message = JSON.parse(event.data);
 
-        // Handle real-time updates
-        if (message.message_type === "stats_update") {
-          dispatch({ type: "UPDATE_LAST_UPDATED" });
-        } else if (message.message_type === "system_notification") {
-          const alert: SystemAlert = {
-            id: Date.now().toString(),
-            type: message.severity || "info",
-            title: message.title || "System Notification",
-            message: message.message || "No message",
-            timestamp: new Date().toISOString(),
-            acknowledged: false,
-            source: "StreamHub",
-          };
-          dispatch({ type: "ADD_ALERT", payload: alert });
+        // Handle different message types
+        switch (message.message_type) {
+          case "registration_ack":
+            console.log('✅ Client registration acknowledged', message);
+            break;
+          case "registration_error":
+            console.error('❌ Client registration failed', message);
+            break;
+          case "stats_update":
+            dispatch({ type: "UPDATE_LAST_UPDATED" });
+            break;
+          case "system_notification":
+            const alert: SystemAlert = {
+              id: Date.now().toString(),
+              type: message.severity || "info",
+              title: message.title || "System Notification",
+              message: message.message || "No message",
+              timestamp: new Date().toISOString(),
+              acknowledged: false,
+              source: "StreamHub",
+            };
+            dispatch({ type: "ADD_ALERT", payload: alert });
+            break;
+          case "error":
+            console.error('❌ WebSocket error from server:', message);
+            break;
+          case "ping":
+            // Respond to ping with pong
+            ws.send(JSON.stringify({
+              message_type: "pong",
+              correlation_id: message.correlation_id
+            }));
+            break;
+          default:
+            console.log('📨 Received message:', message);
         }
       } catch (error) {
         console.error("Error parsing WebSocket message:", error);
@@ -381,22 +414,43 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
         console.log('✅ WebSocket closed normally');
       } else if (event.code === 1008) {
         console.error('❌ WebSocket closed due to policy violation (likely authentication failed)');
+      } else if (event.code === 4001) {
+        console.error('❌ WebSocket closed due to registration failure');
       }
 
-      // Attempt to reconnect after 5 seconds if we have a valid session
-      if (auth.isAuthenticated && localStorage.getItem('sessionId')) {
-        console.log('⏰ Scheduling WebSocket reconnection in 5 seconds...');
-        setTimeout(() => {
+      // Attempt to reconnect with exponential backoff
+      const shouldReconnect = auth.isAuthenticated && 
+                            localStorage.getItem('sessionId') && 
+                            reconnectAttempts < maxReconnectAttempts &&
+                            event.code !== 1008 && // Don't reconnect on auth failure
+                            event.code !== 4001;   // Don't reconnect on registration failure
+
+      if (shouldReconnect) {
+        const nextAttempt = reconnectAttempts + 1;
+        const delay = Math.min(reconnectDelay * Math.pow(2, reconnectAttempts), 30000); // Max 30 seconds
+        
+        console.log(`⏰ Scheduling WebSocket reconnection attempt ${nextAttempt}/${maxReconnectAttempts} in ${delay}ms...`);
+        
+        const timeoutId = setTimeout(() => {
           // Перевіряємо ще раз перед переконнектуванням
           if (!socket && auth.isAuthenticated && localStorage.getItem('sessionId')) {
-            console.log('🔄 Attempting WebSocket reconnection...');
+            console.log(`🔄 Attempting WebSocket reconnection (${nextAttempt}/${maxReconnectAttempts})...`);
+            setReconnectAttempts(nextAttempt);
             connectWebSocket();
           } else {
-            console.log('🚫 Skipping WebSocket reconnection - user no longer authenticated');
+            console.log('🚫 Skipping WebSocket reconnection - conditions no longer met');
           }
-        }, 5000);
+          setReconnectTimeout(null);
+        }, delay);
+        
+        setReconnectTimeout(timeoutId);
       } else {
-        console.log('🚫 Not scheduling WebSocket reconnection - user not authenticated');
+        if (reconnectAttempts >= maxReconnectAttempts) {
+          console.error('❌ Maximum reconnection attempts reached, giving up');
+          dispatch({ type: "SET_CONNECTION_STATUS", payload: "error" });
+        } else {
+          console.log('🚫 Not scheduling WebSocket reconnection - user not authenticated or auth failed');
+        }
       }
     };
 
@@ -414,6 +468,15 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       socket.close();
       setSocket(null);
     }
+    
+    // Clear reconnect timeout
+    if (reconnectTimeout) {
+      clearTimeout(reconnectTimeout);
+      setReconnectTimeout(null);
+    }
+    
+    // Reset reconnect attempts
+    setReconnectAttempts(0);
   };
 
   // Auto-refresh data
@@ -438,7 +501,13 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       console.log('🔒 User not authenticated, disconnecting WebSocket');
       disconnectWebSocket();
     }
-    return () => disconnectWebSocket();
+    return () => {
+      disconnectWebSocket();
+      // Clear any pending reconnect timeout
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+      }
+    };
   }, [auth.isAuthenticated]);
 
   const value: StatusContextType = {
