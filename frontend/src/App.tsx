@@ -12,6 +12,7 @@ import { SettingsProvider } from "./contexts/SettingsContext";
 import { I18nProvider } from "./contexts/I18nContext";
 import { AuthProvider } from "./contexts/AuthContext";
 import { PageTransition } from "./components/PageTransition";
+import ConsoleLogs from "./components/ConsoleLogs";
 
 const AppContent: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -69,6 +70,14 @@ const AppContent: React.FC = () => {
               requiredPermissions={["settings.view"]}
             >
               <Settings />
+            </ProtectedRoute>
+          </PageTransition>
+        );
+      case "console":
+        return (
+          <PageTransition pageKey="console" animationType="tasks">
+            <ProtectedRoute requiredRole="viewer">
+              <ConsoleLogs />
             </ProtectedRoute>
           </PageTransition>
         );
