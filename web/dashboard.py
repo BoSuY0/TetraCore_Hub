@@ -65,28 +65,27 @@ async def get_dashboard_status():
 
 
 @dashboard_router.get("/api/system-logs")
-async def get_system_logs(limit: int = 50):
-    """API endpoint для системних логів"""
-    # TODO: Інтегрувати з системою логування StreamHub
-    sample_logs = [
-        {
-            "timestamp": datetime.utcnow().isoformat(),
-            "level": "INFO",
-            "message": "Client connected: bot_001",
-            "component": "client_manager"
-        },
-        {
-            "timestamp": datetime.utcnow().isoformat(),
-            "level": "INFO",
-            "message": "Task completed successfully: task_12345",
-            "component": "task_router"
-        }
-    ]
+async def get_system_logs(limit: int = 200):
+    """API endpoint для отримання останніх системних логів
 
-    return {
-        "logs": sample_logs[-limit:],
-        "total_count": len(sample_logs)
-    }
+    Повертає *limit* останніх записів, які зберігаються у
+    ``utils.in_memory_logger``.  Якщо параметр не вказано, за замовчуванням
+    повертаємо 200 записів.  Логи вже відсортовані від старіших до новіших.
+    """
+
+    try:
+        from utils.in_memory_logger import get_recent_logs  # локальний імпорт щоб уникнути циклів
+
+        logs = get_recent_logs(limit)
+        # ``get_recent_logs`` повертає логи у правильному порядку.
+        return {
+            "logs": logs,
+            "total_count": len(logs),
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+    except Exception as exc:
+        logger.error("Failed to fetch system logs", error=str(exc))
+        raise HTTPException(status_code=500, detail="Failed to fetch system logs")
 
 
 @dashboard_router.post("/api/actions/restart-component")

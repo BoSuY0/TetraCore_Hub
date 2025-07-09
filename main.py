@@ -8,6 +8,12 @@ TetraCore StreamHub - Main Entry Point
 
 import asyncio
 import sys
+
+# ---------------------------------------------------------------------------
+# Ensure that the in-memory log collector is initialised *before* any other
+# logging takes place so that we do not miss early-startup messages.
+# ---------------------------------------------------------------------------
+import utils.in_memory_logger  # noqa: F401 – side-effect import
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Optional
