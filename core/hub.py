@@ -21,8 +21,8 @@ import os
 # Third-party libraries
 import fastapi  # type: ignore  # noqa: F401 (used for typing and sub-modules)
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException  # type: ignore
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware  # type: ignore
+from fastapi.staticfiles import StaticFiles  # type: ignore
 
 import structlog  # type: ignore
 
