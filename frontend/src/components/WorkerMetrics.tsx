@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, memo, useCallback } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { useStatus } from "../contexts/StatusContext";
 import { Client } from "../types/api";
-import { API_BASE_URL } from "../config";
+import { API_BASE_URL, buildUrl } from "../config";
 import "../animations.css";
 import {
   CpuIcon,
@@ -45,8 +45,28 @@ interface WorkerMetricsProps {
 
 const fetchHubMetrics = async (): Promise<any> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/dashboard/api/hub-metrics`);
-    if (!response.ok) throw new Error("Failed to fetch hub metrics");
+    const sessionId = localStorage.getItem('sessionId');
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+    };
+    
+    if (sessionId) {
+      headers.Authorization = `Bearer ${sessionId}`;
+    }
+    
+    const response = await fetch(buildUrl("/api/metrics"), {
+      headers,
+    });
+    
+    if (!response.ok) {
+      if (response.status === 401) {
+        // Redirect to login on authentication failure
+        window.location.href = '/';
+        return null;
+      }
+      throw new Error("Failed to fetch hub metrics");
+    }
+    
     return await response.json();
   } catch (error) {
     console.error("Error fetching hub metrics:", error);
@@ -58,11 +78,31 @@ const fetchClientMetrics = async (
   clientId: string,
 ): Promise<WorkerMetricsData[]> => {
   try {
+    const sessionId = localStorage.getItem('sessionId');
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+    };
+    
+    if (sessionId) {
+      headers.Authorization = `Bearer ${sessionId}`;
+    }
+    
     const response = await fetch(
       `${API_BASE_URL}/dashboard/api/clients/${clientId}/metrics`,
+      {
+        headers,
+      }
     );
-    if (!response.ok)
+    
+    if (!response.ok) {
+      if (response.status === 401) {
+        // Redirect to login on authentication failure
+        window.location.href = '/';
+        return [];
+      }
       throw new Error(`Failed to fetch metrics for client ${clientId}`);
+    }
+    
     const data = await response.json();
 
     // Перетворюємо дані з API у формат WorkerMetricsData
@@ -87,10 +127,31 @@ const fetchClientMetrics = async (
 
 const fetchRealTimeMetrics = async (): Promise<any> => {
   try {
+    const sessionId = localStorage.getItem('sessionId');
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+    };
+    
+    if (sessionId) {
+      headers.Authorization = `Bearer ${sessionId}`;
+    }
+    
     const response = await fetch(
       `${API_BASE_URL}/dashboard/api/real-time-metrics`,
+      {
+        headers,
+      }
     );
-    if (!response.ok) throw new Error("Failed to fetch real-time metrics");
+    
+    if (!response.ok) {
+      if (response.status === 401) {
+        // Redirect to login on authentication failure
+        window.location.href = '/';
+        return null;
+      }
+      throw new Error("Failed to fetch real-time metrics");
+    }
+    
     return await response.json();
   } catch (error) {
     console.error("Error fetching real-time metrics:", error);
