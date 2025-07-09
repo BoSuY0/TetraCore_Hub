@@ -19,12 +19,12 @@ from contextlib import asynccontextmanager
 import os
 
 # Third-party libraries
-import fastapi  # noqa: F401 (used for typing and sub-modules)
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+import fastapi  # type: ignore  # noqa: F401 (used for typing and sub-modules)
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException  # type: ignore
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-import structlog
+import structlog  # type: ignore
 
 from config import Settings, get_settings, is_heroku_environment
 from models.messages import (
@@ -151,7 +151,8 @@ class StreamHub:
             self.task_router.on_task_failed = self._on_task_failed
 
         # Обробники подій здоров'я
-        self.health_monitor.on_client_unhealthy = self._on_client_unhealthy
+        if self.health_monitor:
+            self.health_monitor.on_client_unhealthy = self._on_client_unhealthy
 
         # Обробники Redis подій (якщо Redis увімкнено)
         if self.redis_manager:
@@ -170,7 +171,8 @@ class StreamHub:
             lifespan=lifespan
         )
 
-
+        # Статична перевірка: self.app тепер гарантовано не None
+        assert self.app is not None
 
         # Налаштування CORS
         self.app.add_middleware(
@@ -181,9 +183,6 @@ class StreamHub:
             allow_headers=["*"],
             expose_headers=["*"]
         )
-
-        # Після створення self.app можемо безпечно вважати, що це FastAPI
-        assert self.app is not None
 
         integrate_security(
             self.app,
