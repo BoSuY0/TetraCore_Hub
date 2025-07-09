@@ -5,11 +5,9 @@ TetraCore StreamHub Web Dashboard Routes
 Забезпечує HTML інтерфейс та API endpoints для моніторингу.
 """
 
-import json
 import random
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional
-from fastapi import APIRouter, Request, HTTPException, Depends
+from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 import structlog
