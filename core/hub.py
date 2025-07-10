@@ -40,6 +40,7 @@ from core.metrics_collector import MetricsCollector
 from core.redis_manager import RedisManager
 from core.security_integration import security_integration, integrate_security
 from core.async_optimization import AsyncOptimizer
+from core.auth_manager import get_current_user
 # Celery task queue видалено - завдання тепер обробляються через tetra-core-api
 # Removed old dashboard imports - now using React SPA
 
@@ -165,6 +166,9 @@ class StreamHub:
 
     def _create_fastapi_app(self):
         """Створення FastAPI додатка"""
+        self.logger.info("Creating FastAPI app",
+                        is_initialized=self.is_running,
+                        has_components=bool(self.client_manager))
 
         # Використовуємо зовнішній lifespan якщо він є
         lifespan = getattr(self, 'lifespan', None)
@@ -216,10 +220,17 @@ class StreamHub:
         self._setup_dashboard()
 
         # Реєстрація роутів
+        self.logger.info("Registering routes",
+                        has_client_manager=bool(self.client_manager),
+                        is_running=self.is_running)
         self._register_routes()
 
     def _register_routes(self):
         """Реєстрація HTTP та WebSocket роутів"""
+        self.logger.info("Inside _register_routes",
+                        hub_id=id(self),
+                        has_client_manager=bool(self.client_manager),
+                        client_manager_id=id(self.client_manager) if self.client_manager else None)
 
         # Auth router is now included in security integration
 
@@ -232,8 +243,22 @@ class StreamHub:
         @self.app.websocket("/ws")  # type: ignore[attr-defined]
         async def websocket_endpoint(websocket: WebSocket):
             """WebSocket endpoint with authentication"""
-            # Отримуємо справжній hub instance з app.state якщо доступний
-            hub = getattr(websocket.app.state, 'hub', self)
+            # Отримуємо hub instance з app.state (встановлюється в lifespan)
+            hub = getattr(websocket.app.state, 'hub', None)
+
+            if hub is None:
+                self.logger.error("Hub instance not found in app.state")
+                await websocket.close(code=1011, reason="Server not initialized")
+                return
+
+            # Перевіряємо чи hub ініціалізований
+            if not hub.is_running or not hub.client_manager:
+                self.logger.error("Hub not properly initialized",
+                                is_running=hub.is_running if hasattr(hub, 'is_running') else False,
+                                has_client_manager=bool(hub.client_manager) if hasattr(hub, 'client_manager') else False)
+                await websocket.close(code=1011, reason="Server not ready")
+                return
+
             await hub.handle_websocket_connection(websocket)
 
         @self.app.get("/health")  # type: ignore[attr-defined]
@@ -263,7 +288,7 @@ class StreamHub:
             return await hub.get_system_metrics()
 
         @self.app.get("/clients")  # type: ignore[attr-defined]
-        async def get_clients(request: fastapi.Request):
+        async def get_clients(request: fastapi.Request, user: Dict[str, Any] = fastapi.Depends(get_current_user)):
             """Отримання списку підключених клієнтів"""
             # Отримуємо справжній hub instance з app.state якщо доступний
             hub = getattr(request.app.state, 'hub', self)
@@ -280,7 +305,7 @@ class StreamHub:
             }
 
         @self.app.get("/tasks")  # type: ignore[attr-defined]
-        async def get_tasks(request: fastapi.Request):
+        async def get_tasks(request: fastapi.Request, user: Dict[str, Any] = fastapi.Depends(get_current_user)):
             """Отримання інформації про завдання"""
             # Отримуємо справжній hub instance з app.state якщо доступний
             hub = getattr(request.app.state, 'hub', self)
@@ -393,6 +418,9 @@ class StreamHub:
             # Accept connection after successful authentication
             await websocket.accept()
             self.total_connections += 1
+            self.logger.info("WebSocket accepted",
+                           total_connections=self.total_connections,
+                           user_id=user_data["user_id"])
 
             # Register connection with security manager
             conn_info = await ws_security_manager.accept_connection(websocket, user_data)
@@ -418,7 +446,23 @@ class StreamHub:
 
             # Додавання клієнта до менеджера
             if self.client_manager:
-                await self.client_manager.add_client(client)
+                self.logger.info("Adding client to ClientManager",
+                               client_id=client.info.client_id,
+                               client_type=client.info.client_type,
+                               client_manager_id=id(self.client_manager),
+                               manager_is_running=self.client_manager.is_running if hasattr(self.client_manager, 'is_running') else None,
+                               current_client_count=self.client_manager.get_client_count() if hasattr(self.client_manager, 'get_client_count') else None)
+                added = await self.client_manager.add_client(client)
+                self.logger.info("Client added to manager",
+                               success=added,
+                               client_id=client.info.client_id,
+                               total_clients_after=self.client_manager.get_client_count() if hasattr(self.client_manager, 'get_client_count') else None)
+            else:
+                self.logger.error("ClientManager not available!",
+                               has_client_manager=hasattr(self, 'client_manager'),
+                               client_manager_value=self.client_manager,
+                               hub_id=id(self),
+                               is_running=self.is_running)
 
             # Обробка повідомлень від клієнта
             await self._handle_client_messages(client, websocket)
@@ -430,9 +474,16 @@ class StreamHub:
                             remote_addr=websocket.client.host if websocket.client else "unknown")
             self.total_errors += 1
         finally:
-            if 'client' in locals() and client is not None and self.client_manager:
-                await self.client_manager.remove_client(client.info.client_id)
-                self.logger.info("Client removed after disconnection", client_id=client.info.client_id)
+            if 'client' in locals() and client is not None:
+                self.logger.info("WebSocket cleanup",
+                               client_id=client.info.client_id,
+                               has_client_manager=bool(self.client_manager))
+                if self.client_manager:
+                    await self.client_manager.remove_client(client.info.client_id)
+                    self.logger.info("Client removed after disconnection",
+                                   client_id=client.info.client_id)
+            else:
+                self.logger.warning("WebSocket cleanup - no client to remove")
 
     async def _handle_client_registration(self, websocket: WebSocket, user_data: Dict[str, Any]) -> Optional[Client]:
         """Обробка реєстрації клієнта з автентифікованими даними"""
@@ -944,17 +995,37 @@ class StreamHub:
                 if hasattr(component, 'is_healthy'):
                     return component.is_healthy()
                 return component is not None
-            except Exception:
+            except Exception as e:
+                self.logger.error(f"Error checking component: {e}")
                 return False
+
+        # Спеціальна перевірка для WebSocket - перевіряємо чи є активні клієнти
+        # оскільки з'єднання керуються через ClientManager, а не WebSocketManager
+        websocket_healthy = False
+        client_count = 0
+        if self.client_manager:
+            try:
+                client_count = self.client_manager.get_client_count()
+                websocket_healthy = client_count > 0
+                self.logger.info(f"WebSocket health check: client_count={client_count}, healthy={websocket_healthy}")
+            except Exception as e:
+                self.logger.error(f"Error checking WebSocket health: {e}")
+                websocket_healthy = False
 
         components = {
             "redis": check_component_simple(self.redis_manager),
             "client_manager": check_component_simple(self.client_manager),
             "task_router": check_component_simple(self.task_router),
-            "websocket_manager": check_component_simple(self.websocket_manager),
+            "websocket_manager": websocket_healthy,
             "health_monitor": check_component_simple(self.health_monitor),
             "metrics_collector": check_component_simple(self.metrics_collector),
         }
+
+        # Логування стану всіх компонентів
+        self.logger.info("Health check components status:",
+                        components=components,
+                        client_count=client_count,
+                        total_connections=self.total_connections)
 
         # Визначаємо загальний статус системи
         healthy_components = sum(1 for health in components.values() if health)
@@ -967,7 +1038,7 @@ class StreamHub:
         else:
             overall_status = "unhealthy"
 
-        return {
+        health_status = {
             "status": overall_status,
             "uptime": (datetime.utcnow() - self.start_time).total_seconds() if self.start_time else 0,
             "version": "1.0.0",
@@ -979,6 +1050,13 @@ class StreamHub:
                 "total_errors": self.total_errors
             }
         }
+
+        self.logger.info("Health status response:",
+                        status=overall_status,
+                        websocket_manager=components["websocket_manager"],
+                        active_clients=health_status["stats"]["active_clients"])
+
+        return health_status
 
     async def get_system_metrics(self) -> Dict[str, Any]:
         """Отримання системних метрик"""
@@ -1149,6 +1227,9 @@ class StreamHub:
     def get_app(self) -> FastAPI:
         """Отримання FastAPI додатка"""
         if not self.app:
-            # Створення FastAPI додатка без ініціалізації
+            # Перевіряємо чи hub ініціалізований
+            if not self.is_running:
+                self.logger.warning("get_app() called before initialize(), hub components may not be available")
+            # Створення FastAPI додатка
             self._create_fastapi_app()
         return self.app

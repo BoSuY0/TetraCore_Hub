@@ -41,9 +41,6 @@ class RefreshTokenRequest(BaseModel):
 class User(BaseModel):
     id: str
     username: str
-    firstName: str
-    lastName: Optional[str] = None
-    photoUrl: Optional[str] = None
     role: str = "viewer"
     permissions: List[str] = Field(default_factory=list)
     sessionId: str
@@ -65,7 +62,7 @@ security = HTTPBearer()
 def get_user_role_and_permissions(user_id: str) -> tuple[str, List[str]]:
     """Визначення ролі та дозволів користувача"""
     settings = get_settings()
-    
+
     # Для адміна повертаємо відповідну роль та дозволи
     if user_id == "admin":
         return "admin", settings.role_permissions["admin"]
@@ -116,8 +113,8 @@ async def login(request: Request, credentials: LoginRequest):
     admin_password = secrets_mgr.get_secret("ADMIN_PASSWORD")
 
     # Логування для діагностики
-    logger.info("Checking credentials", 
-               stored_username=admin_username, 
+    logger.info("Checking credentials",
+               stored_username=admin_username,
                stored_password_length=len(admin_password) if admin_password else 0,
                input_username=credentials.username,
                input_password_length=len(credentials.password))
@@ -147,9 +144,6 @@ async def login(request: Request, credentials: LoginRequest):
         user_data = {
             "id": "admin",
             "username": credentials.username,
-            "firstName": credentials.username,
-            "lastName": None,
-            "photoUrl": None,
             "role": role,
             "permissions": permissions
         }
@@ -172,19 +166,19 @@ async def login(request: Request, credentials: LoginRequest):
 @auth_router.post("/validate")
 async def validate_token(credentials: HTTPAuthorizationCredentials = Security(security)):
     """Валідація JWT токена"""
-    
-    logger.info("🔍 Token validation started", 
+
+    logger.info("🔍 Token validation started",
                 has_credentials=bool(credentials),
                 token_preview=credentials.credentials[:20] + "..." if credentials and len(credentials.credentials) > 20 else "no_token")
 
     try:
         token = credentials.credentials
-        logger.info("📋 Extracting token from credentials", 
+        logger.info("📋 Extracting token from credentials",
                     token_length=len(token) if token else 0)
-        
+
         user_data = await get_current_user(credentials)
-        
-        logger.info("✅ Token validated successfully", 
+
+        logger.info("✅ Token validated successfully",
                     user_id=user_data["user_id"],
                     username=user_data["username"],
                     role=user_data["role"])
@@ -195,12 +189,12 @@ async def validate_token(credentials: HTTPAuthorizationCredentials = Security(se
         }
 
     except HTTPException as he:
-        logger.error("❌ HTTP Exception during token validation", 
+        logger.error("❌ HTTP Exception during token validation",
                      status_code=he.status_code,
                      detail=he.detail)
         raise
     except Exception as e:
-        logger.error("❌ Unexpected error during token validation", 
+        logger.error("❌ Unexpected error during token validation",
                      error=str(e),
                      error_type=type(e).__name__,
                      token_preview=credentials.credentials[:20] + "..." if credentials and len(credentials.credentials) > 20 else "no_token")
@@ -232,11 +226,28 @@ async def logout(
     """Вихід з системи"""
 
     try:
-        # Відкликаємо токен
-        get_auth_manager().revoke_token(credentials.credentials)
+        auth_mgr = get_auth_manager()
 
-        # Видаляємо сесію
-        get_auth_manager().logout(user["session_id"])
+        # Відкликаємо токен
+        auth_mgr.revoke_token(credentials.credentials)
+
+        # Видаляємо поточну сесію
+        auth_mgr.logout(user["session_id"])
+
+        # Додатково очищаємо всі можливі сесії користувача
+        if auth_mgr.redis_client:
+            # Шукаємо всі сесії користувача
+            pattern = f"session:*"
+            for key in auth_mgr.redis_client.scan_iter(match=pattern):
+                try:
+                    session_data = auth_mgr.redis_client.get(key)
+                    if session_data:
+                        session = json.loads(session_data)
+                        if session.get("user_id") == user["user_id"]:
+                            auth_mgr.redis_client.delete(key)
+                            logger.info("Deleted user session", key=key, user_id=user["user_id"])
+                except Exception as e:
+                    logger.error("Error deleting session", key=key, error=str(e))
 
         logger.info("User logged out",
                    user_id=user["user_id"],
@@ -304,13 +315,13 @@ async def debug_auth():
     import os
     if os.getenv("ENVIRONMENT", "development") != "development":
         raise HTTPException(status_code=404, detail="Not found")
-    
+
     secrets_mgr = get_secrets_manager()
     admin_username = secrets_mgr.get_secret("ADMIN_USERNAME")
     admin_password = secrets_mgr.get_secret("ADMIN_PASSWORD")
-    
+
     from config import settings
-    
+
     return {
         "secrets_manager": {
             "admin_username": admin_username,

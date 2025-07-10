@@ -27,7 +27,7 @@ export const Header: React.FC<HeaderProps> = ({
   sidebarCollapsed,
   setSidebarCollapsed,
 }) => {
-  const { state } = useStatus();
+  const { state, disconnectWebSocket } = useStatus();
   const { t, currentLanguage, changeLanguage } = useI18n();
   const { auth, logout } = useAuth();
   const [languageDropdownOpen, setLanguageDropdownOpen] = useState(false);
@@ -38,16 +38,22 @@ export const Header: React.FC<HeaderProps> = ({
   // Закриваємо dropdown при кліку поза ними
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (userDropdownRef.current && !userDropdownRef.current.contains(event.target as Node)) {
+      if (
+        userDropdownRef.current &&
+        !userDropdownRef.current.contains(event.target as Node)
+      ) {
         setUserDropdownOpen(false);
       }
-      if (languageDropdownRef.current && !languageDropdownRef.current.contains(event.target as Node)) {
+      if (
+        languageDropdownRef.current &&
+        !languageDropdownRef.current.contains(event.target as Node)
+      ) {
         setLanguageDropdownOpen(false);
       }
     };
 
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   const getStatusText = () => {
@@ -143,27 +149,31 @@ export const Header: React.FC<HeaderProps> = ({
             >
               {currentLanguage.toUpperCase()}
             </button>
-            
+
             {languageDropdownOpen && (
               <div className="absolute right-0 mt-2 w-32 bg-white rounded-xl shadow-lg border border-slate-200 py-1 z-50">
                 <button
                   onClick={() => {
-                    changeLanguage('uk');
+                    changeLanguage("uk");
                     setLanguageDropdownOpen(false);
                   }}
                   className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-50 transition-colors ${
-                    currentLanguage === 'uk' ? 'text-blue-600 bg-blue-50' : 'text-slate-700'
+                    currentLanguage === "uk"
+                      ? "text-blue-600 bg-blue-50"
+                      : "text-slate-700"
                   }`}
                 >
                   🇺🇦 Українська
                 </button>
                 <button
                   onClick={() => {
-                    changeLanguage('en');
+                    changeLanguage("en");
                     setLanguageDropdownOpen(false);
                   }}
                   className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-50 transition-colors ${
-                    currentLanguage === 'en' ? 'text-blue-600 bg-blue-50' : 'text-slate-700'
+                    currentLanguage === "en"
+                      ? "text-blue-600 bg-blue-50"
+                      : "text-slate-700"
                   }`}
                 >
                   🇺🇸 English
@@ -187,40 +197,54 @@ export const Header: React.FC<HeaderProps> = ({
                 onClick={() => setUserDropdownOpen(!userDropdownOpen)}
                 className="flex items-center space-x-3 px-3 py-2 text-slate-600 hover:bg-slate-100 rounded-xl transition-all duration-300 min-w-0"
               >
-                {auth.user.photoUrl ? (
-                  <img
-                    src={auth.user.photoUrl}
-                    alt={auth.user.firstName}
-                    className="w-9 h-9 rounded-full border-2 border-white shadow-sm flex-shrink-0"
-                  />
-                ) : (
-                  <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center shadow-sm flex-shrink-0">
-                    <span className="text-white text-sm font-bold">
-                      {auth.user.firstName.charAt(0).toUpperCase()}
-                    </span>
-                  </div>
-                )}
+                <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center shadow-sm flex-shrink-0">
+                  <span className="text-white text-sm font-bold">
+                    {auth.user.username.charAt(0).toUpperCase()}
+                  </span>
+                </div>
                 <div className="hidden lg:block text-left min-w-0 flex-1">
                   <p className="text-sm font-semibold text-slate-800 truncate">
-                    {auth.user.firstName} {auth.user.lastName}
+                    {auth.user.username}
                   </p>
                   <div className="flex items-center space-x-1">
-                    {auth.user.role === 'admin' ? (
-                      <AdminIcon size="sm" className="text-purple-500 flex-shrink-0" />
-                    ) : auth.user.role === 'user' ? (
-                      <UsersIcon size="sm" className="text-blue-500 flex-shrink-0" />
+                    {auth.user.role === "admin" ? (
+                      <AdminIcon
+                        size="sm"
+                        className="text-purple-500 flex-shrink-0"
+                      />
+                    ) : auth.user.role === "user" ? (
+                      <UsersIcon
+                        size="sm"
+                        className="text-blue-500 flex-shrink-0"
+                      />
                     ) : (
-                      <UsersIcon size="sm" className="text-slate-400 flex-shrink-0" />
+                      <UsersIcon
+                        size="sm"
+                        className="text-slate-400 flex-shrink-0"
+                      />
                     )}
                     <span className="text-xs text-slate-500 truncate">
-                      {auth.user.role === 'admin' ? 'Адміністратор' : 
-                       auth.user.role === 'user' ? 'Користувач' : 'Глядач'}
+                      {auth.user.role === "admin"
+                        ? "Адміністратор"
+                        : auth.user.role === "user"
+                          ? "Користувач"
+                          : "Глядач"}
                     </span>
                   </div>
                 </div>
                 <div className="hidden lg:block flex-shrink-0">
-                  <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  <svg
+                    className="w-4 h-4 text-slate-400"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M19 9l-7 7-7-7"
+                    />
                   </svg>
                 </div>
               </button>
@@ -230,39 +254,42 @@ export const Header: React.FC<HeaderProps> = ({
                   {/* User Info */}
                   <div className="px-4 py-4 bg-gradient-to-r from-slate-50 to-blue-50 border-b border-slate-100">
                     <div className="flex items-center space-x-3">
-                      {auth.user.photoUrl ? (
-                        <img
-                          src={auth.user.photoUrl}
-                          alt={auth.user.firstName}
-                          className="w-12 h-12 rounded-full border-3 border-white shadow-md"
-                        />
-                      ) : (
-                        <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center shadow-md">
-                          <span className="text-white font-bold text-lg">
-                            {auth.user.firstName.charAt(0).toUpperCase()}
-                          </span>
-                        </div>
-                      )}
+                      <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center shadow-md">
+                        <span className="text-white font-bold text-lg">
+                          {auth.user.username.charAt(0).toUpperCase()}
+                        </span>
+                      </div>
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-slate-800 text-base truncate">
-                          {auth.user.firstName} {auth.user.lastName}
+                          {auth.user.username}
                         </p>
-                        <p className="text-sm text-slate-600 truncate">@{auth.user.username}</p>
+                        <p className="text-sm text-slate-600 truncate">
+                          @{auth.user.username}
+                        </p>
                         <div className="flex items-center space-x-2 mt-1">
-                          {auth.user.role === 'admin' ? (
+                          {auth.user.role === "admin" ? (
                             <div className="flex items-center space-x-1 px-2 py-1 bg-purple-100 rounded-full">
-                              <AdminIcon size="sm" className="text-purple-600" />
-                              <span className="text-xs font-medium text-purple-700">Адміністратор</span>
+                              <AdminIcon
+                                size="sm"
+                                className="text-purple-600"
+                              />
+                              <span className="text-xs font-medium text-purple-700">
+                                Адміністратор
+                              </span>
                             </div>
-                          ) : auth.user.role === 'user' ? (
+                          ) : auth.user.role === "user" ? (
                             <div className="flex items-center space-x-1 px-2 py-1 bg-blue-100 rounded-full">
                               <UsersIcon size="sm" className="text-blue-600" />
-                              <span className="text-xs font-medium text-blue-700">Користувач</span>
+                              <span className="text-xs font-medium text-blue-700">
+                                Користувач
+                              </span>
                             </div>
                           ) : (
                             <div className="flex items-center space-x-1 px-2 py-1 bg-slate-100 rounded-full">
                               <UsersIcon size="sm" className="text-slate-600" />
-                              <span className="text-xs font-medium text-slate-700">Глядач</span>
+                              <span className="text-xs font-medium text-slate-700">
+                                Глядач
+                              </span>
                             </div>
                           )}
                         </div>
@@ -284,12 +311,13 @@ export const Header: React.FC<HeaderProps> = ({
                       </div>
                       <span className="font-medium">Налаштування профілю</span>
                     </button>
-                    
+
                     <div className="border-t border-slate-100 my-2"></div>
-                    
+
                     <button
                       onClick={() => {
                         setUserDropdownOpen(false);
+                        disconnectWebSocket();
                         logout();
                       }}
                       className="w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50 transition-all duration-200 flex items-center space-x-3 group"
@@ -305,20 +333,31 @@ export const Header: React.FC<HeaderProps> = ({
                   <div className="px-4 py-3 bg-slate-50 border-t border-slate-100">
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium text-slate-500">ID сесії:</span>
+                        <span className="text-xs font-medium text-slate-500">
+                          ID сесії:
+                        </span>
                         <span className="text-xs font-mono text-slate-600 bg-white px-2 py-1 rounded">
-                          {auth.user.sessionId ? auth.user.sessionId.slice(0, 8) + '...' : 'N/A'}
+                          {auth.user.sessionId
+                            ? auth.user.sessionId.slice(0, 8) + "..."
+                            : "N/A"}
                         </span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium text-slate-500">Час входу:</span>
+                        <span className="text-xs font-medium text-slate-500">
+                          Час входу:
+                        </span>
                         <span className="text-xs text-slate-600">
-                          {auth.user.loginTime ? new Date(auth.user.loginTime).toLocaleString('uk-UA', {
-                            day: '2-digit',
-                            month: '2-digit',
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          }) : 'N/A'}
+                          {auth.user.loginTime
+                            ? new Date(auth.user.loginTime).toLocaleString(
+                                "uk-UA",
+                                {
+                                  day: "2-digit",
+                                  month: "2-digit",
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                },
+                              )
+                            : "N/A"}
                         </span>
                       </div>
                     </div>

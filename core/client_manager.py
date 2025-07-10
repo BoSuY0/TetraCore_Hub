@@ -92,6 +92,10 @@ class ClientManager:
 
     async def add_client(self, client: Client) -> bool:
         """Додавання нового клієнта"""
+        self.logger.info("Adding new client",
+                       client_id=client.info.client_id,
+                       client_type=client.info.client_type,
+                       current_count=len(self.clients))
         try:
             client_id = client.info.client_id
 
@@ -118,6 +122,12 @@ class ClientManager:
 
             # Статистика
             self.total_connections += 1
+
+            self.logger.info("Client added successfully",
+                           client_id=client_id,
+                           client_type=client.info.client_type,
+                           total_clients=len(self.clients),
+                           clients_by_type={k.value: len(v) for k, v in self.clients_by_type.items()})
             self.peak_connections = max(self.peak_connections, len(self.clients))
 
             # Логування успішного додавання

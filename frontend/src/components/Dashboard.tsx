@@ -430,9 +430,11 @@ const RealTimeActivity: React.FC = () => {
   // Відстежуємо зміни кількості клієнтів
   useEffect(() => {
     if (state.clients) {
-      const connectedCount = state.clients.filter(
-        (c) => c.connection_status === "connected",
-      ).length;
+      const connectedCount = Array.isArray(state.clients) 
+        ? state.clients.filter(
+            (c) => c.connection_status === "connected",
+          ).length 
+        : 0;
 
       if (connectedCount !== lastClientCount && lastClientCount > 0) {
         const change = connectedCount - lastClientCount;
@@ -698,7 +700,7 @@ export const Dashboard: React.FC = () => {
 
   // Обчислення статистики клієнтів
   const clientStats: ClientStats = useMemo(() => {
-    const clients = state.clients || [];
+    const clients = Array.isArray(state.clients) ? state.clients : [];
     const connected = clients.filter(
       (c: any) => c.connection_status === "connected",
     );

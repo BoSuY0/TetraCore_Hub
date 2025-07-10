@@ -12,7 +12,7 @@ export const getApiBaseUrl = (): string => {
     const protocol = window.location.protocol;
     return `${protocol}//${hostname}:8000`;
   }
-  
+
   // In production or other environments, use same host (relative URLs)
   return "";
 };
@@ -20,13 +20,13 @@ export const getApiBaseUrl = (): string => {
 // Get WebSocket URL
 export const getWebSocketUrl = (): string => {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  
+
   // In development, frontend runs on 3000, backend on 8000
   if (!isProduction && window.location.port === "3000") {
     const hostname = window.location.hostname;
     return `${protocol}//${hostname}:8000`;
   }
-  
+
   // In production or other environments, use same host
   return `${protocol}//${window.location.host}`;
 };
@@ -71,7 +71,7 @@ export const config = {
 // API endpoints
 export const endpoints = {
   health: "/dashboard/api/health",
-  metrics: "/dashboard/api/metrics", 
+  metrics: "/dashboard/api/metrics",
   clients: "/dashboard/api/clients",
   tasks: "/dashboard/api/tasks",
   dashboard: {
@@ -79,8 +79,8 @@ export const endpoints = {
     systemLogs: "/dashboard/api/system-logs",
   },
   api: {
-    status: "/api/status",
-    metrics: "/api/metrics",
+    status: "/dashboard/api/status",
+    metrics: "/dashboard/api/metrics",
   },
 };
 
@@ -95,18 +95,21 @@ export const buildWsUrl = (path: string = "/ws"): string => {
 };
 
 // Authenticated fetch function
-export const authenticatedFetch = async (url: string, options: RequestInit = {}): Promise<Response> => {
-  const sessionId = localStorage.getItem('sessionId');
-  
+export const authenticatedFetch = async (
+  url: string,
+  options: RequestInit = {},
+): Promise<Response> => {
+  const sessionId = localStorage.getItem("sessionId");
+
   const defaultHeaders: Record<string, string> = {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
   };
-  
+
   // Додаємо Authorization header якщо є токен
   if (sessionId) {
-    defaultHeaders['Authorization'] = `Bearer ${sessionId}`;
+    defaultHeaders["Authorization"] = `Bearer ${sessionId}`;
   }
-  
+
   const mergedOptions: RequestInit = {
     ...options,
     headers: {
@@ -114,7 +117,7 @@ export const authenticatedFetch = async (url: string, options: RequestInit = {})
       ...options.headers,
     },
   };
-  
+
   return fetch(url, mergedOptions);
 };
 

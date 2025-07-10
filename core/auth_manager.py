@@ -76,7 +76,7 @@ class AuthManager:
 
     def __init__(self, redis_client: Optional[redis.Redis] = None):
         logger.info("🔧 Initializing AuthManager", has_redis=bool(redis_client))
-        
+
         self.redis_client = redis_client
         self.async_optimizer = AsyncOptimizer(max_workers=5)
 
@@ -106,9 +106,9 @@ class AuthManager:
 
         # Кеш для спроб входу
         self._login_attempts = {}
-        
+
         logger.info("✅ AuthManager initialized successfully")
-        
+
         # Логування стану Redis
         if self.redis_client:
             try:
@@ -139,16 +139,15 @@ class AuthManager:
     def create_access_token(self, data: Dict, expires_delta: Optional[timedelta] = None) -> str:
         """Створення access токена"""
         to_encode = data.copy()
-        
-        # Security: Always generate new session ID, ignore external ones
-        if "session_id" in to_encode:
-            logger.warning("Attempted to set external session_id, generating new one")
-        to_encode["session_id"] = self.generate_session_id()
-        
+
+        # Якщо session_id вже є (наприклад при refresh), зберігаємо його
+        if "session_id" not in to_encode:
+            to_encode["session_id"] = self.generate_session_id()
+
         # Додаємо стандартні claims
         now = datetime.now(timezone.utc)
         expire = now + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
-        
+
         to_encode.update({
             "exp": expire,
             "iat": now,
@@ -156,7 +155,7 @@ class AuthManager:
             "jti": secrets.token_urlsafe(16),  # JWT ID для унікальності
             "token_type": "access"
         })
-        
+
         encoded_jwt = jwt.encode(to_encode, self.secret_key, algorithm=ALGORITHM)
         return encoded_jwt
 
@@ -217,18 +216,18 @@ class AuthManager:
 
     async def decode_token(self, token: str, token_type: str = "access") -> Dict:
         """Декодування та валідація JWT токена"""
-        logger.info("🔓 decode_token called", 
+        logger.info("🔓 decode_token called",
                     token_type=token_type,
                     token_preview=token[:20] + "..." if len(token) > 20 else token,
                     has_secret_key=bool(self.secret_key),
                     secret_key_length=len(self.secret_key) if self.secret_key else 0)
-        
+
         try:
             secret = self.secret_key if token_type == "access" else self.refresh_secret
             logger.info("📋 Using secret for decoding",
                         secret_type=token_type,
                         secret_length=len(secret) if secret else 0)
-            
+
             payload = jwt.decode(token, secret, algorithms=[ALGORITHM])
             logger.info("✅ JWT decoded successfully",
                         payload_keys=list(payload.keys()),
@@ -245,6 +244,13 @@ class AuthManager:
             if jti and jti in self._blocked_tokens:
                 logger.warning("❌ Token is revoked", jti=jti)
                 raise jwt.InvalidTokenError("Token has been revoked")
+
+            # Перевірка в Redis якщо доступний
+            if jti and self.redis_client:
+                blocked_key = f"blocked_token:{jti}"
+                if self.redis_client.exists(blocked_key):
+                    logger.warning("❌ Token is revoked in Redis", jti=jti)
+                    raise jwt.InvalidTokenError("Token has been revoked")
 
             # Перевірка сесії в Redis (опціонально)
             if self.redis_client and "session_id" in payload:
@@ -266,18 +272,18 @@ class AuthManager:
             return payload
 
         except jwt.ExpiredSignatureError as e:
-            logger.warning("❌ Token has expired", 
+            logger.warning("❌ Token has expired",
                            token_preview=token[:20] + "..." if len(token) > 20 else token,
                            error=str(e))
             raise HTTPException(status_code=401, detail="Token has expired")
         except jwt.InvalidTokenError as e:
-            logger.warning("❌ Invalid token", 
-                           error=str(e), 
+            logger.warning("❌ Invalid token",
+                           error=str(e),
                            token_preview=token[:20] + "..." if len(token) > 20 else token)
             raise HTTPException(status_code=401, detail="Invalid token")
         except Exception as e:
-            logger.error("❌ Token decode error", 
-                         error=str(e), 
+            logger.error("❌ Token decode error",
+                         error=str(e),
                          error_type=type(e).__name__,
                          token_preview=token[:20] + "..." if len(token) > 20 else token)
             raise HTTPException(status_code=401, detail="Could not validate credentials")
@@ -286,13 +292,21 @@ class AuthManager:
         """Оновлення access токена за допомогою refresh токена"""
         payload = await self.decode_token(refresh_token, token_type="refresh")
 
+        # Перевіряємо чи сесія ще активна
+        session_id = payload.get("session_id")
+        if session_id and self.redis_client:
+            session_key = f"session:{session_id}"
+            if not self.redis_client.exists(session_key):
+                logger.warning("Session not found during refresh", session_id=session_id[:8] + "...")
+                raise HTTPException(status_code=401, detail="Session expired")
+
         # Створюємо новий access токен з тими ж даними
         token_data = {
             "user_id": payload["user_id"],
             "username": payload["username"],
             "role": payload["role"],
             "permissions": payload["permissions"],
-            "session_id": payload["session_id"]
+            "session_id": session_id  # Зберігаємо існуючий session_id
         }
 
         new_access_token = self.create_access_token(token_data)
@@ -336,7 +350,7 @@ class AuthManager:
         # Normalize inputs to prevent bypass
         username = self._normalize_username(username)
         ip_address = self._normalize_ip_address(ip_address)
-        
+
         key = f"{username}:{ip_address}"
         now = datetime.now(timezone.utc)
 
@@ -355,7 +369,7 @@ class AuthManager:
         # Normalize inputs
         username = self._normalize_username(username)
         ip_address = self._normalize_ip_address(ip_address)
-        
+
         if success:
             # Очищаємо спроби при успішному вході
             key = f"{username}:{ip_address}"
@@ -373,12 +387,12 @@ class AuthManager:
             return ""
         # Convert to lowercase and strip whitespace
         return username.lower().strip()
-    
+
     def _normalize_ip_address(self, ip_address: str) -> str:
         """Normalize IP address to prevent bypass attempts"""
         if not ip_address:
             return ""
-            
+
         try:
             # Parse IP address to normalize format
             import ipaddress
@@ -460,14 +474,14 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Security(
     logger.info("🔐 get_current_user called",
                 has_credentials=bool(credentials),
                 token_preview=credentials.credentials[:20] + "..." if credentials and len(credentials.credentials) > 20 else "no_token")
-    
+
     try:
         token = credentials.credentials
         logger.info("📋 Calling decode_token",
                     token_length=len(token) if token else 0)
-        
+
         payload = await get_auth_manager().decode_token(token)
-        
+
         logger.info("✅ Token decoded successfully",
                     user_id=payload.get("user_id"),
                     username=payload.get("username"),
