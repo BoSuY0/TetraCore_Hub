@@ -250,6 +250,8 @@ security_integration = SecurityIntegration()
 # Middleware для перевірки автентифікації на всіх endpoints
 async def require_auth_middleware(request: Request, call_next):
     """Middleware що вимагає автентифікацію для всіх endpoints крім публічних"""
+    if request.method == "OPTIONS":
+        return await call_next(request)
 
     # Публічні endpoints що не потребують автентифікації
     public_paths = [
@@ -283,6 +285,10 @@ async def require_auth_middleware(request: Request, call_next):
 
     # Dashboard та auth API мають свою обробку автентифікації
     if any(request.url.path.startswith(path) for path in dashboard_paths):
+        return await call_next(request)
+
+    # Пропускаємо OPTIONS запити для CORS preflight
+    if request.method == "OPTIONS":
         return await call_next(request)
 
     # Для всіх інших endpoints потрібна автентифікація

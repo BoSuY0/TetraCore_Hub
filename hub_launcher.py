@@ -188,11 +188,11 @@ class SecureCommand:
             # Обмеження CPU часу
             resource.setrlimit(resource.RLIMIT_CPU, (300, 300))
 
-            # Обмеження пам'яті (1GB)
-            resource.setrlimit(resource.RLIMIT_AS, (1024 * 1024 * 1024, 1024 * 1024 * 1024))
+            # Обмеження пам'яті (1GB) - закоментовано, бо викликає OOM в node
+            # resource.setrlimit(resource.RLIMIT_AS, (1024 * 1024 * 1024, 1024 * 1024 * 1024))
 
-            # Обмеження кількості процесів
-            resource.setrlimit(resource.RLIMIT_NPROC, (100, 100))
+            # Видаляємо обмеження на кількість процесів, бо воно викликає помилки fork
+            # resource.setrlimit(resource.RLIMIT_NPROC, (100, 100))
 
         except Exception:
             pass  # Ігноруємо помилки на системах без resource
@@ -277,8 +277,8 @@ class StreamHubLauncher:
             log_level = logging.DEBUG
             uvicorn_log_level = "debug"
         else:
-            log_level = logging.WARNING
-            uvicorn_log_level = "warning"
+            log_level = logging.INFO  # Змінено з WARNING на INFO для кращого діагностування
+            uvicorn_log_level = "info"
 
         # Налаштування Uvicorn логерів
         uvicorn_loggers = [
@@ -304,12 +304,22 @@ class StreamHubLauncher:
                 structlog.processors.TimeStamper(fmt="iso"),
                 structlog.processors.StackInfoRenderer(),
                 structlog.processors.format_exc_info,
-                structlog.dev.ConsoleRenderer()
+                structlog.dev.ConsoleRenderer(colors=True)  # Додаємо кольори для кращої читабельності
             ],
             context_class=dict,
             logger_factory=structlog.stdlib.LoggerFactory(),
             cache_logger_on_first_use=True,
         )
+        
+        # Встановлюємо рівень логування для root logger (structlog використовує stdlib)
+        logging.getLogger().setLevel(log_level)
+        
+        # Логування налаштувань логування
+        logger = structlog.get_logger()
+        logger.info("🔧 Логування налаштовано", 
+                    log_level=log_level,
+                    uvicorn_log_level=uvicorn_log_level,
+                    verbose=verbose)
 
         return uvicorn_log_level
 
@@ -407,60 +417,44 @@ class StreamHubLauncher:
             return False
 
     async def install_dependencies(self):
-        """Встановлює залежності з безпековими обмеженнями"""
-        package_json = self.frontend_dir / "package.json"
-        if not package_json.exists():
-            self.logger.warning("package.json не знайдено, пропускаємо встановлення залежностей")
+        """Встановлює залежності використовуючи системний Node.js."""
+        self.logger.info("📦 Починаємо встановлення/перевірку залежностей...")
+
+        if not (self.frontend_dir / "package.json").exists():
+            self.logger.warning("package.json не знайдено, пропускаємо крок.")
             return True
 
-        node_modules = self.frontend_dir / "node_modules"
-        package_lock = self.frontend_dir / "package-lock.json"
+        self.logger.info("Використовуємо системний Node.js та 'npm install'.")
 
-        # Перевіряємо чи потрібно встановлювати залежності
-        if node_modules.exists() and package_lock.exists():
-            # Перевіряємо час модифікації
-            if package_lock.stat().st_mtime < package_json.stat().st_mtime:
-                self.logger.info("package.json новіший за package-lock.json, оновлюємо залежності")
-            else:
-                self.logger.info("Залежності вже встановлені")
-                return True
+        command_list = ["npm", "install", "--legacy-peer-deps", "--no-audit"]
 
-        print("📦 Встановлення залежностей...")
         try:
-            # Валідуємо шлях
             frontend_path = self.secure_path.validate_path(str(self.frontend_dir))
-
+            
             returncode, stdout, stderr = await self.secure_cmd.run_safe(
-                ["npm", "ci", "--prefer-offline", "--no-audit"],
+                command_list,
                 cwd=frontend_path,
-                timeout=300
+                timeout=600  # 10 хвилин
             )
 
             if returncode == 0:
-                print("✅ Залежності встановлено")
+                self.logger.info("✅ Залежності успішно встановлено/перевірено.")
+                if stdout.strip(): self.logger.debug(f"STDOUT:\n{stdout}")
                 return True
             else:
-                self.logger.error(f"npm ci failed: {stderr}")
-                # Спробуємо npm install
-                returncode, stdout, stderr = await self.secure_cmd.run_safe(
-                    ["npm", "install", "--no-audit"],
-                    cwd=frontend_path,
-                    timeout=300
+                self.logger.error(
+                    "Помилка виконання 'npm install'",
+                    stdout=stdout.strip(),
+                    stderr=stderr.strip()
                 )
-
-                if returncode == 0:
-                    print("✅ Залежності встановлено через npm install")
-                    return True
-                else:
-                    print(f"❌ Помилка встановлення: {stderr}")
-                    return False
+                return False
 
         except Exception as e:
-            print(f"❌ Помилка встановлення залежностей: {e}")
+            self.logger.error(f"❌ Фатальна помилка під час встановлення залежностей: {e}")
             return False
 
     async def build_frontend(self, force=False):
-        """Будує frontend з безпековими обмеженнями"""
+        """Збирає frontend, якщо потрібно"""
         if not await self.check_node_available():
             self.logger.error("Node.js не встановлено")
             return False
@@ -519,9 +513,10 @@ class StreamHubLauncher:
             # Валідуємо шлях
             frontend_path = self.secure_path.validate_path(str(self.frontend_dir))
 
-            # Запускаємо процес без обмеження часу для dev server
+            command_list = ["npm", "run", "dev"]
+
             process = await asyncio.create_subprocess_exec(
-                "npm", "start",
+                *command_list,
                 cwd=str(frontend_path),
                 env=self.secure_cmd.create_safe_env(),
                 stdout=asyncio.subprocess.PIPE,
@@ -691,6 +686,7 @@ class StreamHubLauncher:
         # Налаштування
         self.setup_environment()
         os.environ["ENVIRONMENT"] = "development"
+        os.environ["NODE_ENV"] = "development"  # ← додали, щоб npm ставив devDeps
 
         # Логування
         log_level = self.setup_logging(verbose)

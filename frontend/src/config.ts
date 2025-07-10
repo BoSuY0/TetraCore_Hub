@@ -6,7 +6,14 @@ const isProduction = process.env.NODE_ENV === "production";
 
 // Get the base URL for API calls
 export const getApiBaseUrl = (): string => {
-  // Always use relative URLs - this ensures same-origin requests
+  // In development, frontend runs on 3000, backend on 8000
+  if (!isProduction && window.location.port === "3000") {
+    const hostname = window.location.hostname;
+    const protocol = window.location.protocol;
+    return `${protocol}//${hostname}:8000`;
+  }
+  
+  // In production or other environments, use same host (relative URLs)
   return "";
 };
 
@@ -63,10 +70,10 @@ export const config = {
 
 // API endpoints
 export const endpoints = {
-  health: "/health",
-  metrics: "/metrics",
-  clients: "/clients",
-  tasks: "/tasks",
+  health: "/dashboard/api/health",
+  metrics: "/dashboard/api/metrics", 
+  clients: "/dashboard/api/clients",
+  tasks: "/dashboard/api/tasks",
   dashboard: {
     realTimeMetrics: "/dashboard/api/real-time-metrics",
     systemLogs: "/dashboard/api/system-logs",

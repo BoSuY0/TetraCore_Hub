@@ -75,27 +75,30 @@ class AuthManager:
     """Менеджер автентифікації з підтримкою JWT токенів"""
 
     def __init__(self, redis_client: Optional[redis.Redis] = None):
+        logger.info("🔧 Initializing AuthManager", has_redis=bool(redis_client))
+        
         self.redis_client = redis_client
         self.async_optimizer = AsyncOptimizer(max_workers=5)
 
         # Отримуємо ключі через secrets_manager
+        logger.info("🔐 Loading secrets from secrets_manager")
         secrets_mgr = get_secrets_manager()
         try:
             self.secret_key = secrets_mgr.get_jwt_key()
-            logger.info("JWT secret key loaded successfully")
-        except ValueError:
+            logger.info("✅ JWT secret key loaded successfully", key_length=len(self.secret_key))
+        except ValueError as e:
             # Генеруємо випадковий ключ якщо не задано
             self.secret_key = secrets.token_urlsafe(32)
-            logger.warning("JWT_SECRET_KEY не встановлено. Використовується тимчасовий ключ.")
+            logger.warning("⚠️ JWT_SECRET_KEY не встановлено. Використовується тимчасовий ключ.", error=str(e))
             # Зберігаємо згенерований ключ
             secrets_mgr.set_secret("JWT_SECRET_KEY", self.secret_key)
 
         try:
             self.refresh_secret = secrets_mgr.get_refresh_key()
-            logger.info("JWT refresh secret loaded successfully")
-        except ValueError:
+            logger.info("✅ JWT refresh secret loaded successfully", key_length=len(self.refresh_secret))
+        except ValueError as e:
             self.refresh_secret = secrets.token_urlsafe(32)
-            logger.warning("JWT_REFRESH_SECRET не встановлено. Використовується тимчасовий ключ.")
+            logger.warning("⚠️ JWT_REFRESH_SECRET не встановлено. Використовується тимчасовий ключ.", error=str(e))
             secrets_mgr.set_secret("JWT_REFRESH_SECRET", self.refresh_secret)
 
         # Кеш для заблокованих токенів
@@ -103,6 +106,8 @@ class AuthManager:
 
         # Кеш для спроб входу
         self._login_attempts = {}
+        
+        logger.info("✅ AuthManager initialized successfully")
         
         # Логування стану Redis
         if self.redis_client:
@@ -212,21 +217,33 @@ class AuthManager:
 
     async def decode_token(self, token: str, token_type: str = "access") -> Dict:
         """Декодування та валідація JWT токена"""
+        logger.info("🔓 decode_token called", 
+                    token_type=token_type,
+                    token_preview=token[:20] + "..." if len(token) > 20 else token,
+                    has_secret_key=bool(self.secret_key),
+                    secret_key_length=len(self.secret_key) if self.secret_key else 0)
+        
         try:
-            logger.debug("Decoding token", token_preview=token[:20] + "..." if len(token) > 20 else token)
-            
             secret = self.secret_key if token_type == "access" else self.refresh_secret
+            logger.info("📋 Using secret for decoding",
+                        secret_type=token_type,
+                        secret_length=len(secret) if secret else 0)
+            
             payload = jwt.decode(token, secret, algorithms=[ALGORITHM])
+            logger.info("✅ JWT decoded successfully",
+                        payload_keys=list(payload.keys()),
+                        token_type_in_payload=payload.get("token_type"),
+                        user_id=payload.get("user_id"))
 
             # Перевірка типу токена
             if payload.get("token_type") != token_type:
-                logger.warning("Invalid token type", expected=token_type, received=payload.get("token_type"))
+                logger.warning("❌ Invalid token type", expected=token_type, received=payload.get("token_type"))
                 raise jwt.InvalidTokenError(f"Invalid token type. Expected {token_type}")
 
             # Перевірка чи токен не заблокований
             jti = payload.get("jti")
             if jti and jti in self._blocked_tokens:
-                logger.warning("Token is revoked", jti=jti)
+                logger.warning("❌ Token is revoked", jti=jti)
                 raise jwt.InvalidTokenError("Token has been revoked")
 
             # Перевірка сесії в Redis (опціонально)
@@ -234,27 +251,35 @@ class AuthManager:
                 session_key = f"session:{payload['session_id']}"
                 try:
                     if not self.redis_client.exists(session_key):
-                        logger.warning("Session not found in Redis", session_id=payload['session_id'])
+                        logger.warning("⚠️ Session not found in Redis", session_id=payload['session_id'])
                         # Не викидаємо помилку, просто логуємо - JWT може працювати без Redis
-                        logger.info("Continuing validation without Redis session check")
+                        logger.info("ℹ️ Continuing validation without Redis session check")
                     else:
                         # Оновлюємо час останньої активності якщо сесія існує
                         await self.update_session_activity(payload['session_id'])
+                        logger.info("✅ Redis session updated")
                 except Exception as redis_error:
-                    logger.warning("Redis operation failed during token validation", error=str(redis_error))
+                    logger.warning("⚠️ Redis operation failed during token validation", error=str(redis_error))
                     # Продовжуємо без Redis
 
-            logger.debug("Token validation successful", user_id=payload.get("user_id"))
+            logger.info("✅ Token validation successful", user_id=payload.get("user_id"))
             return payload
 
-        except jwt.ExpiredSignatureError:
-            logger.warning("Token has expired", token_preview=token[:20] + "..." if len(token) > 20 else token)
+        except jwt.ExpiredSignatureError as e:
+            logger.warning("❌ Token has expired", 
+                           token_preview=token[:20] + "..." if len(token) > 20 else token,
+                           error=str(e))
             raise HTTPException(status_code=401, detail="Token has expired")
         except jwt.InvalidTokenError as e:
-            logger.warning("Invalid token", error=str(e), token_preview=token[:20] + "..." if len(token) > 20 else token)
+            logger.warning("❌ Invalid token", 
+                           error=str(e), 
+                           token_preview=token[:20] + "..." if len(token) > 20 else token)
             raise HTTPException(status_code=401, detail="Invalid token")
         except Exception as e:
-            logger.error("Token decode error", error=str(e), token_preview=token[:20] + "..." if len(token) > 20 else token)
+            logger.error("❌ Token decode error", 
+                         error=str(e), 
+                         error_type=type(e).__name__,
+                         token_preview=token[:20] + "..." if len(token) > 20 else token)
             raise HTTPException(status_code=401, detail="Could not validate credentials")
 
     async def refresh_access_token(self, refresh_token: str) -> TokenPair:
@@ -420,7 +445,9 @@ def get_auth_manager() -> AuthManager:
     """Get or create the global auth manager instance"""
     global _auth_manager
     if _auth_manager is None:
+        logger.info("🔧 Creating new AuthManager instance")
         _auth_manager = AuthManager()
+        logger.info("✅ AuthManager instance created successfully")
     return _auth_manager
 
 # For backward compatibility
@@ -430,16 +457,35 @@ auth_manager = None  # Will be set by imports that need it
 # Dependency для FastAPI
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Security(security)) -> Dict:
     """Отримання поточного користувача з токена"""
-    token = credentials.credentials
-    payload = await get_auth_manager().decode_token(token)
+    logger.info("🔐 get_current_user called",
+                has_credentials=bool(credentials),
+                token_preview=credentials.credentials[:20] + "..." if credentials and len(credentials.credentials) > 20 else "no_token")
+    
+    try:
+        token = credentials.credentials
+        logger.info("📋 Calling decode_token",
+                    token_length=len(token) if token else 0)
+        
+        payload = await get_auth_manager().decode_token(token)
+        
+        logger.info("✅ Token decoded successfully",
+                    user_id=payload.get("user_id"),
+                    username=payload.get("username"),
+                    role=payload.get("role"),
+                    session_id=payload.get("session_id"))
 
-    return {
-        "user_id": payload["user_id"],
-        "username": payload["username"],
-        "role": payload["role"],
-        "permissions": payload["permissions"],
-        "session_id": payload["session_id"]
-    }
+        return {
+            "user_id": payload.get("user_id"),
+            "username": payload.get("username"),
+            "role": payload.get("role"),
+            "permissions": payload.get("permissions", []),
+            "session_id": payload.get("session_id")
+        }
+    except Exception as e:
+        logger.error("❌ Error in get_current_user",
+                     error=str(e),
+                     error_type=type(e).__name__)
+        raise
 
 
 def require_permission(permission: str):

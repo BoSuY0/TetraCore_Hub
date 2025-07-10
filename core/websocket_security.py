@@ -40,13 +40,18 @@ class WebSocketMessage(BaseModel):
     data: Dict[str, Any] = Field(default_factory=dict)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     message_id: Optional[str] = None
+    correlation_id: Optional[str] = None
 
     @validator('type')
     def validate_type(cls, v):
         allowed_types = [
             'ping', 'pong', 'subscribe', 'unsubscribe',
             'task_update', 'status_update', 'error',
-            'auth', 'client_info', 'metrics'
+            'auth', 'client_info', 'metrics',
+            'client_registration', 'registration_ack', 'registration_error',
+            'task_submit', 'task_assign', 'task_result',
+            'health_check', 'health_status', 'broadcast',
+            'system_notification', 'stats_update'
         ]
         if v not in allowed_types:
             raise ValueError(f'Invalid message type: {v}')
@@ -102,11 +107,11 @@ class WebSocketSecurityManager:
                        username=payload.get("username"))
 
             return {
-                "user_id": payload["user_id"],
-                "username": payload["username"],
-                "role": payload["role"],
-                "permissions": payload["permissions"],
-                "session_id": payload["session_id"]
+                "user_id": payload.get("user_id"),
+                "username": payload.get("username"),
+                "role": payload.get("role"),
+                "permissions": payload.get("permissions", []),
+                "session_id": payload.get("session_id")
             }
 
         except Exception as e:

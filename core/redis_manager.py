@@ -154,13 +154,17 @@ class RedisManager:
     async def _detect_redis_mode(self):
         """Визначення режиму роботи Redis"""
         try:
-            # Перевірка наявності конфігурації Sentinel
-            if self.settings.redis_sentinel_urls:
+            # Перевірка наявності валідної конфігурації Sentinel
+            if (self.settings.redis_sentinel_urls and 
+                len(self.settings.redis_sentinel_urls) > 0 and
+                not any('host' in url and 'port' in url for url in self.settings.redis_sentinel_urls)):
                 self.redis_mode = "sentinel"
                 return
 
-            # Перевірка наявності конфігурації Cluster
-            if self.settings.redis_cluster_nodes:
+            # Перевірка наявності валідної конфігурації Cluster
+            if (self.settings.redis_cluster_nodes and 
+                len(self.settings.redis_cluster_nodes) > 0 and
+                not any('host' in node and 'port' in node for node in self.settings.redis_cluster_nodes)):
                 self.redis_mode = "cluster"
                 return
 

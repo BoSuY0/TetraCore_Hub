@@ -136,16 +136,24 @@ async def export_metrics():
 def register_dashboard_routes(app, streamhub_instance):
     """Реєстрація роутів дашборду з інстансом StreamHub"""
 
-    @dashboard_router.get("/api/hub-health")
-    async def get_hub_health():
-        """Отримання здоров'я StreamHub"""
+    # Додаємо відсутні роути які очікує frontend
+    @dashboard_router.get("/api/health")
+    async def get_dashboard_health():
+        """Отримання здоров'я системи для dashboard"""
         if streamhub_instance:
             return await streamhub_instance.get_health_status()
         return {"status": "hub_not_initialized"}
 
-    @dashboard_router.get("/api/hub-clients")
-    async def get_hub_clients():
-        """Отримання клієнтів StreamHub"""
+    @dashboard_router.get("/api/metrics")
+    async def get_dashboard_metrics():
+        """Отримання метрик системи для dashboard"""
+        if streamhub_instance:
+            return await streamhub_instance.get_system_metrics()
+        return {}
+
+    @dashboard_router.get("/api/clients")
+    async def get_dashboard_clients():
+        """Отримання списку клієнтів для dashboard"""
         if streamhub_instance and streamhub_instance.client_manager:
             clients = streamhub_instance.client_manager.get_all_clients()
             return {
@@ -153,6 +161,31 @@ def register_dashboard_routes(app, streamhub_instance):
                 "total_count": len(clients)
             }
         return {"clients": [], "total_count": 0}
+
+    @dashboard_router.get("/api/tasks")
+    async def get_dashboard_tasks():
+        """Отримання завдань для dashboard"""
+        if streamhub_instance and streamhub_instance.task_router:
+            return await streamhub_instance.task_router.get_queue_stats()
+        
+        # Повертаємо порожні статистики якщо TaskRouter недоступний
+        return {
+            "total_tasks": 0,
+            "pending_tasks": 0,
+            "processing_tasks": 0,
+            "completed_tasks": 0,
+            "failed_tasks": 0,
+            "average_processing_time": 0,
+            "queue_sizes": {
+                "critical": 0,
+                "high": 0,
+                "normal": 0,
+                "low": 0
+            },
+            "worker_distribution": {}
+        }
+
+
 
     @dashboard_router.get("/api/clients/detailed")
     async def get_clients_detailed():
@@ -302,22 +335,9 @@ def register_dashboard_routes(app, streamhub_instance):
 
         raise HTTPException(status_code=404, detail="StreamHub not available")
 
-    @dashboard_router.get("/api/hub-tasks")
-    async def get_hub_tasks():
-        """Отримання завдань StreamHub"""
-        if streamhub_instance and streamhub_instance.task_router:
-            return await streamhub_instance.task_router.get_queue_stats()
-        return {"queue_sizes": {}, "total_tasks": 0}
 
-    @dashboard_router.get("/api/tasks")
-    async def get_tasks():
-        """Отримання списку всіх завдань"""
-        # TODO: Інтегрувати з реальним TaskRouter
-        return {
-            "tasks": [],
-            "total_count": 0,
-            "timestamp": datetime.utcnow().isoformat()
-        }
+
+
 
     @dashboard_router.get("/api/tasks/stats")
     async def get_task_stats():
@@ -382,12 +402,7 @@ def register_dashboard_routes(app, streamhub_instance):
             "timestamp": datetime.utcnow().isoformat()
         }
 
-    @dashboard_router.get("/api/hub-metrics")
-    async def get_hub_metrics():
-        """Отримання метрик StreamHub"""
-        if streamhub_instance:
-            return await streamhub_instance.get_system_metrics()
-        return {}
+
 
     @dashboard_router.get("/api/real-time-metrics")
     async def get_real_time_metrics():

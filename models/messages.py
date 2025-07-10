@@ -266,8 +266,8 @@ class HealthCheck(BaseMessage):
 
     message_type: MessageType = MessageType.PING
 
-    # Ідентифікатор клієнта
-    client_id: str
+    # Ідентифікатор клієнта (опціональний, може бути автоматично призначений)
+    client_id: Optional[str] = None
 
     # Тип перевірки
     check_type: str = "ping"
@@ -281,8 +281,8 @@ class HealthStatus(BaseMessage):
 
     message_type: MessageType = MessageType.PONG
 
-    # Ідентифікатор клієнта
-    client_id: str
+    # Ідентифікатор клієнта (опціональний)
+    client_id: Optional[str] = None
 
     # Статус здоров'я
     healthy: bool = True

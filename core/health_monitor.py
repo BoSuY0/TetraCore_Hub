@@ -479,11 +479,41 @@ class HealthMonitor:
         """Основний цикл моніторингу компонентів"""
         while self.is_running:
             try:
-                # Перевірка компонентів
+                # Перевірка компонентів - додаємо посилання на StreamHub
+                hub = getattr(self, 'hub', None)
+                
                 if self.client_manager:
                     await self.check_component_health(
                         "client_manager",
                         lambda: self.client_manager.is_healthy()
+                    )
+
+                # Перевірка WebSocket менеджера
+                if hub and hasattr(hub, 'websocket_manager') and hub.websocket_manager:
+                    await self.check_component_health(
+                        "websocket_manager",
+                        lambda: hub.websocket_manager.is_healthy()
+                    )
+
+                # Перевірка Task Router
+                if hub and hasattr(hub, 'task_router') and hub.task_router:
+                    await self.check_component_health(
+                        "task_router",
+                        lambda: hub.task_router.is_healthy()
+                    )
+
+                # Перевірка Redis менеджера
+                if hub and hasattr(hub, 'redis_manager') and hub.redis_manager:
+                    await self.check_component_health(
+                        "redis_manager",
+                        lambda: hub.redis_manager.is_healthy()
+                    )
+
+                # Перевірка Metrics Collector
+                if hub and hasattr(hub, 'metrics_collector') and hub.metrics_collector:
+                    await self.check_component_health(
+                        "metrics_collector",
+                        lambda: hub.metrics_collector.is_healthy()
                     )
 
                 # Перевірка клієнтів

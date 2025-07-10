@@ -525,7 +525,10 @@ class WebSocketManager:
     def is_healthy(self) -> bool:
         """Перевірка здоров'я менеджера"""
         return (self.is_running and
-                len(self.connections) < self.settings.max_connections)
+                self.heartbeat_task is not None and
+                not self.heartbeat_task.done() and
+                self.cleanup_task is not None and
+                not self.cleanup_task.done())
 
     async def _heartbeat_loop(self):
         """Фонова задача heartbeat"""

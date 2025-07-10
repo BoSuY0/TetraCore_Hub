@@ -115,6 +115,13 @@ async def login(request: Request, credentials: LoginRequest):
     admin_username = secrets_mgr.get_secret("ADMIN_USERNAME")
     admin_password = secrets_mgr.get_secret("ADMIN_PASSWORD")
 
+    # Логування для діагностики
+    logger.info("Checking credentials", 
+               stored_username=admin_username, 
+               stored_password_length=len(admin_password) if admin_password else 0,
+               input_username=credentials.username,
+               input_password_length=len(credentials.password))
+
     if not admin_username or not admin_password:
         logger.error("Admin credentials not configured")
         raise HTTPException(status_code=500, detail="Сервер не налаштований для авторизації")
@@ -124,6 +131,9 @@ async def login(request: Request, credentials: LoginRequest):
     if credentials.username.lower() == admin_username.lower():
         # Для демо використовуємо просту перевірку
         # В продакшені має бути: auth_manager.verify_password(credentials.password, stored_hash)
+        logger.info("Username match found, checking password",
+                   expected_password=admin_password,
+                   received_password=credentials.password)
         if credentials.password == admin_password:
             login_successful = True
 
@@ -162,23 +172,39 @@ async def login(request: Request, credentials: LoginRequest):
 @auth_router.post("/validate")
 async def validate_token(credentials: HTTPAuthorizationCredentials = Security(security)):
     """Валідація JWT токена"""
+    
+    logger.info("🔍 Token validation started", 
+                has_credentials=bool(credentials),
+                token_preview=credentials.credentials[:20] + "..." if credentials and len(credentials.credentials) > 20 else "no_token")
 
     try:
         token = credentials.credentials
+        logger.info("📋 Extracting token from credentials", 
+                    token_length=len(token) if token else 0)
+        
         user_data = await get_current_user(credentials)
-
-        logger.info("Token validated", user_id=user_data["user_id"])
+        
+        logger.info("✅ Token validated successfully", 
+                    user_id=user_data["user_id"],
+                    username=user_data["username"],
+                    role=user_data["role"])
 
         return {
             "valid": True,
             "user": user_data
         }
 
-    except HTTPException:
+    except HTTPException as he:
+        logger.error("❌ HTTP Exception during token validation", 
+                     status_code=he.status_code,
+                     detail=he.detail)
         raise
     except Exception as e:
-        logger.error("Token validation error", error=str(e))
-        raise HTTPException(status_code=500, detail="Token validation failed")
+        logger.error("❌ Unexpected error during token validation", 
+                     error=str(e),
+                     error_type=type(e).__name__,
+                     token_preview=credentials.credentials[:20] + "..." if credentials and len(credentials.credentials) > 20 else "no_token")
+        raise HTTPException(status_code=500, detail=f"Token validation failed: {str(e)}")
 
 @auth_router.post("/refresh")
 async def refresh_token(request: RefreshTokenRequest):
@@ -270,6 +296,37 @@ async def get_permissions(user: Dict = Depends(get_current_user)):
 
     return {
         "permissions": user["permissions"]
+    }
+
+@auth_router.get("/debug")
+async def debug_auth():
+    """Debug endpoint для перевірки авторизації (тільки в development)"""
+    import os
+    if os.getenv("ENVIRONMENT", "development") != "development":
+        raise HTTPException(status_code=404, detail="Not found")
+    
+    secrets_mgr = get_secrets_manager()
+    admin_username = secrets_mgr.get_secret("ADMIN_USERNAME")
+    admin_password = secrets_mgr.get_secret("ADMIN_PASSWORD")
+    
+    from config import settings
+    
+    return {
+        "secrets_manager": {
+            "admin_username": admin_username,
+            "admin_password": admin_password,
+            "admin_password_length": len(admin_password) if admin_password else 0
+        },
+        "config_settings": {
+            "admin_username": settings.admin_username,
+            "admin_password": settings.admin_password,
+            "admin_password_length": len(settings.admin_password) if settings.admin_password else 0
+        },
+        "environment": {
+            "ADMIN_USERNAME": os.getenv("ADMIN_USERNAME"),
+            "ADMIN_PASSWORD": os.getenv("ADMIN_PASSWORD"),
+            "ENVIRONMENT": os.getenv("ENVIRONMENT", "development")
+        }
     }
 
 # Health check endpoint

@@ -33,6 +33,7 @@ export interface AuthContextType {
   logout: () => Promise<void>;
   validateSession: () => Promise<boolean>;
   clearError: () => void;
+  refreshToken: () => Promise<boolean>;
 }
 
 // Ініціалізація контексту з початковими значеннями
@@ -50,6 +51,7 @@ const AuthContext = createContext<AuthContextType>({
   logout: async () => {},
   validateSession: async () => false,
   clearError: () => {},
+  refreshToken: async () => false,
 });
 
 // Провайдер контексту авторизації
@@ -96,6 +98,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         
         // Зберігаємо access_token як sessionId для WebSocket
         localStorage.setItem('sessionId', data.tokens.access_token);
+        localStorage.setItem('accessToken', data.tokens.access_token);
+        localStorage.setItem('refreshToken', data.tokens.refresh_token);
         return true;
       } else {
         throw new Error(data.message || 'Login failed');
@@ -147,89 +151,91 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, []);
 
+  const refreshToken = useCallback(async (): Promise<boolean> => {
+    console.log('🔄 Attempting token refresh');
+    const refresh = localStorage.getItem('refreshToken');
+    if (!refresh) {
+        console.log('❌ No refresh token available');
+        return false;
+    }
+    try {
+        console.log('📤 Sending refresh request with token:', refresh.substring(0, 20) + '...');
+        const response = await fetch('/api/auth/refresh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refresh_token: refresh }),
+        });
+        console.log('📥 Refresh response status:', response.status);
+        if (!response.ok) {
+            console.log('❌ Refresh failed with status:', response.status);
+            return false;
+        }
+        const data = await response.json();
+        console.log('✅ Refresh successful, new access token received');
+        if (data.tokens?.access_token) {
+            localStorage.setItem('accessToken', data.tokens.access_token);
+            localStorage.setItem('sessionId', data.tokens.access_token);
+            setAuth((prev) => ({ ...prev, sessionId: data.tokens.access_token }));
+            return true;
+        }
+        console.log('❌ No new access token in response');
+        return false;
+    } catch (error) {
+        console.error('❌ Error during token refresh:', error);
+        return false;
+    }
+}, []);
+
   // Валідація сесії
   const validateSession = useCallback(async (): Promise<boolean> => {
+    console.log('🔍 Starting session validation');
     const sessionId = localStorage.getItem('sessionId');
-    console.log('🔍 validateSession called', { 
-      sessionId: sessionId ? sessionId.substring(0, 8) + '...' : null, 
-      hasLocalStorageSessionId: !!sessionId 
-    });
-
     if (!sessionId) {
-      console.log('❌ No sessionId found, clearing auth state');
-      setAuth(initialAuthState);
-      return false;
+        console.log('❌ No sessionId in localStorage');
+        return false;
     }
-
-    setAuth((prev) => ({ ...prev, isLoading: true }));
     try {
-      console.log('📤 Sending validation request for token:', sessionId.substring(0, 8) + '...');
-      const response = await fetch('/api/auth/validate', {
-        method: 'POST',
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${sessionId}`,
-        },
-      });
-
-      if (!response.ok) {
-        console.log(
-          "❌ Validation failed with status:",
-          response.status,
-          response.statusText,
-        );
-        setAuth(initialAuthState);
-        localStorage.removeItem('sessionId');
+        console.log('📤 Sending validation request with token:', sessionId.substring(0, 20) + '...');
+        const response = await fetch('/api/auth/validate', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${sessionId}`
+            },
+        });
+        console.log('📥 Validation response status:', response.status);
+        if (!response.ok) {
+            console.log('⚠️ Validation failed with status:', response.status);
+            if (response.status === 401) {
+                console.log('🔄 Validation failed with 401, attempting refresh');
+                const refreshed = await refreshToken();
+                if (refreshed) {
+                    console.log('✅ Refresh successful, retrying validation');
+                    return await validateSession();
+                } else {
+                    console.log('❌ Refresh failed, validation unsuccessful');
+                }
+            }
+            return false;
+        }
+        const data = await response.json();
+        console.log('✅ Validation successful');
+        if (data.valid && data.user) {
+            setAuth(prev => ({
+                ...prev,
+                isAuthenticated: true,
+                isLoading: false,
+                user: data.user,
+                error: null
+            }));
+            return true;
+        }
         return false;
-      }
-
-      const data = await response.json();
-      if (!data.valid) {
-        console.log("❌ Session marked as invalid by server");
-        setAuth(initialAuthState);
-        localStorage.removeItem('sessionId');
-        return false;
-      }
-
-      console.log(
-        "✅ Session validation successful for user:",
-        data.user?.username,
-      );
-      
-      // Створюємо користувача з правильними даними
-      const userWithSession = {
-        id: data.user.user_id,
-        username: data.user.username,
-        firstName: data.user.username,
-        lastName: undefined,
-        photoUrl: undefined,
-        role: data.user.role,
-        permissions: data.user.permissions,
-        sessionId: sessionId,
-        loginTime: new Date().toISOString(),
-      };
-      
-      // Оновлення стану при валідній сесії
-      setAuth({
-        isAuthenticated: true,
-        user: userWithSession,
-        sessionId,
-        error: null,
-        isLoading: false,
-      });
-      return true;
     } catch (error) {
-      console.error("Помилка валідації сесії:", error);
-      setAuth(initialAuthState);
-      localStorage.removeItem("sessionId");
-      return false;
+        console.error('❌ Error validating session:', error);
+        return false;
     }
-  }, []);
-
-  // Очищення помилки
-  const clearError = useCallback(() => {
-    setAuth((prev) => ({ ...prev, error: null }));
-  }, []);
+}, [refreshToken]);
 
   // Перевірка сесії при завантаженні (тільки один раз)
   useEffect(() => {
@@ -246,6 +252,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     checkSession();
   }, []); // Порожній масив залежностей - виконується тільки при монтуванні
 
+  // Очищення помилки
+  const clearError = useCallback(() => {
+    setAuth((prev) => ({ ...prev, error: null }));
+  }, []);
+
   return (
     <AuthContext.Provider
       value={{
@@ -254,6 +265,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         logout,
         validateSession,
         clearError,
+        refreshToken,
       }}
     >
       {children}

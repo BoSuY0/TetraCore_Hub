@@ -281,7 +281,8 @@ const SystemHealthWidget: React.FC = () => {
           window.location.href = '/';
         }
       } catch (error) {
-        console.error("Failed to fetch metrics:", error);
+        console.error("❌ Failed to fetch real-time metrics:", error);
+        // Не встановлюємо метрики як null при помилці, залишаємо попередні значення
       }
     };
 

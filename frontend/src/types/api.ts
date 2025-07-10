@@ -111,9 +111,9 @@ export interface ClientsResponse {
 }
 
 export interface WebSocketMessage {
-  message_id: string;
-  message_type: string;
-  timestamp: string;
+  message_id?: string;
+  type: string;
+  timestamp?: string;
   sender_id?: string;
   recipient_id?: string;
   correlation_id?: string;

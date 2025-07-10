@@ -1,4 +1,11 @@
-import React, { createContext, useContext, useReducer, useEffect } from "react";
+import React, {
+  createContext,
+  useContext,
+  useReducer,
+  useEffect,
+  useRef,
+  useCallback,
+} from "react";
 import {
   StreamHubHealth,
   StreamHubMetrics,
@@ -97,7 +104,6 @@ function statusReducer(state: StatusState, action: StatusAction): StatusState {
         health: action.payload,
         error: null,
         lastUpdated: new Date(),
-        connectionStatus: "connected",
       };
     case "SET_METRICS":
       return {
@@ -194,9 +200,15 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
     React.useState<NodeJS.Timeout | null>(null);
   // Using a ref instead of state for the connection timeout ensures we always have
   // the latest timeout ID inside asynchronous WebSocket callbacks without relying
-  // on React’s asynchronous state updates.
+  // on React's asynchronous state updates.
   const connectionTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
-  const { auth } = useAuth();
+  const { auth: authState, refreshToken } = useAuth();
+
+  // Додаємо рефи для відстеження стану підключення
+  const isConnectingRef = useRef(false);
+  const mountedRef = useRef(true);
+  const lastAuthStateRef = useRef(authState.isAuthenticated);
+  const dataRefreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const maxReconnectAttempts = 5;
   const reconnectDelay = 5000;
@@ -450,7 +462,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
         console.log("💓 Sending heartbeat ping...");
         ws.send(
           JSON.stringify({
-            message_type: "ping",
+            type: "ping",
             timestamp: new Date().toISOString(),
           }),
         );
@@ -470,170 +482,182 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
     }
   };
 
-  // API calls
+  // API calls з кращим обробленням помилок
+  const createApiHeaders = (): HeadersInit => {
+    const headers: HeadersInit = {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "Cache-Control": "no-cache",
+    };
+
+    if (authState.sessionId) {
+      headers.Authorization = `Bearer ${authState.sessionId}`;
+    }
+
+    return headers;
+  };
+
+  const authenticatedFetch = async (url: string, options: RequestInit = {}): Promise<Response> => {
+    let response = await fetch(url, { ...options, headers: { ...createApiHeaders(), ...options.headers } });
+    if (response.status === 401) {
+        const refreshed = await refreshToken();
+        if (refreshed) {
+            response = await fetch(url, { ...options, headers: { ...createApiHeaders(), ...options.headers } });
+        }
+    }
+    return response;
+};
+
+  const handleApiError = async (response: Response, endpoint: string) => {
+    if (response.status === 401) {
+      console.warn(
+        `🔒 Authentication failed for ${endpoint}, redirecting to login`,
+      );
+      window.location.href = "/";
+      return null;
+    }
+
+    let errorMessage = `HTTP ${response.status}`;
+    try {
+      const errorBody = await response.text();
+      if (errorBody) {
+        try {
+          const parsed = JSON.parse(errorBody);
+          errorMessage = parsed.error || parsed.message || errorMessage;
+        } catch {
+          errorMessage = errorBody;
+        }
+      }
+    } catch {
+      // Ignore parsing errors
+    }
+
+    throw new Error(`${endpoint} failed: ${errorMessage}`);
+  };
+
+  const fetchWithTimeout = async (
+    url: string,
+    options: RequestInit = {},
+    timeoutMs: number = 10000,
+  ): Promise<Response> => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      return response;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      throw error;
+    }
+  };
+
   const fetchHealth = async (): Promise<StreamHubHealth | null> => {
     try {
-      const sessionId = localStorage.getItem("sessionId");
-      const headers: HeadersInit = {
-        "Content-Type": "application/json",
-      };
+      const response = await fetchWithTimeout(
+        buildUrl("/health"),
+        {
+          headers: createApiHeaders(),
+        },
+      );
 
-      if (sessionId) {
-        headers.Authorization = `Bearer ${sessionId}`;
-      }
-
-      const response = await fetch(buildUrl("/health"), {
-        headers,
-      });
       if (!response.ok) {
-        if (response.status === 401) {
-          // Redirect to login on authentication failure
-          window.location.href = "/";
-          return null;
-        }
-        throw new Error("Health check failed");
+        return await handleApiError(response, "Health check");
       }
-      return await response.json();
+
+      const data = await response.json();
+      return data;
     } catch (error) {
-      console.error("Error fetching health:", error);
-      return null;
+      if (
+        error instanceof Error &&
+        error.message.includes("Authentication failed")
+      ) {
+        return null; // Handled by handleApiError
+      }
+      console.error("❌ Error fetching health:", error);
+      throw error;
     }
   };
 
   const fetchMetrics = async (): Promise<StreamHubMetrics | null> => {
     try {
-      const sessionId = localStorage.getItem("sessionId");
-      const headers: HeadersInit = {
-        "Content-Type": "application/json",
-      };
+      const response = await fetchWithTimeout(
+        buildUrl("/metrics"),
+        {
+          headers: createApiHeaders(),
+        },
+      );
 
-      if (sessionId) {
-        headers.Authorization = `Bearer ${sessionId}`;
-      }
-
-      const response = await fetch(buildUrl("/metrics"), {
-        headers,
-      });
       if (!response.ok) {
-        if (response.status === 401) {
-          // Redirect to login on authentication failure
-          window.location.href = "/";
-          return null;
-        }
-        throw new Error("Metrics fetch failed");
+        return await handleApiError(response, "Metrics");
       }
-      return await response.json();
+
+      const data = await response.json();
+      return data;
     } catch (error) {
-      console.error("Error fetching metrics:", error);
-      return null;
+      if (
+        error instanceof Error &&
+        error.message.includes("Authentication failed")
+      ) {
+        return null; // Handled by handleApiError
+      }
+      console.error("❌ Error fetching metrics:", error);
+      throw error;
     }
   };
 
   const fetchClients = async (): Promise<Client[]> => {
     try {
-      const sessionId = localStorage.getItem("sessionId");
-      const headers: HeadersInit = {
-        "Content-Type": "application/json",
-      };
-
-      if (sessionId) {
-        headers.Authorization = `Bearer ${sessionId}`;
-      }
-
-      const response = await fetch(buildUrl("/clients"), {
-        headers,
-      });
-      if (!response.ok) {
-        if (response.status === 401) {
-          // Redirect to login on authentication failure
-          window.location.href = "/";
-          return [];
+        const response = await authenticatedFetch(`${apiBaseUrl}/clients`);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch clients: ${response.status}`);
         }
-        // Return empty array if service unavailable (no clients connected)
-        if (response.status === 503) return [];
-        throw new Error("Clients fetch failed");
-      }
-      const data = await response.json();
-      return data.clients || [];
+        const data: Client[] = await response.json();
+        return data;
     } catch (error) {
-      console.error("Error fetching clients:", error);
-      return [];
+        console.error('❌ Error fetching clients:', error);
+        return [];
     }
-  };
+};
 
   const fetchTaskStats = async (): Promise<TaskQueueStats | null> => {
     try {
-      const sessionId = localStorage.getItem("sessionId");
-      const headers: HeadersInit = {
-        "Content-Type": "application/json",
-      };
-
-      if (sessionId) {
-        headers.Authorization = `Bearer ${sessionId}`;
-      }
-
-      const response = await fetch(buildUrl("/tasks"), {
-        headers,
-      });
-      if (!response.ok) {
-        if (response.status === 401) {
-          // Redirect to login on authentication failure
-          window.location.href = "/";
-          return null;
+        const response = await authenticatedFetch(`${apiBaseUrl}/tasks`);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch task stats: ${response.status}`);
         }
-        throw new Error("Task stats fetch failed");
-      }
-      return await response.json();
+        const data: TaskQueueStats = await response.json();
+        return data;
     } catch (error) {
-      console.error("Error fetching task stats:", error);
-      return null;
+        console.error('❌ Error fetching task stats:', error);
+        return null;
     }
-  };
+};
 
-  const refreshData = async () => {
-    // Only refresh data if user is authenticated
-    if (!auth.isAuthenticated) {
-      dispatch({ type: "SET_CONNECTION_STATUS", payload: "disconnected" });
+  const connectWebSocket = useCallback(() => {
+    // Перевіряємо чи компонент все ще змонтований
+    if (!mountedRef.current) {
+      console.log("🚫 Component unmounted, skipping WebSocket connection");
       return;
     }
 
-    dispatch({ type: "SET_LOADING", payload: true });
-    dispatch({ type: "SET_CONNECTION_STATUS", payload: "connecting" });
-
-    try {
-      const [health, metrics, clients, taskStats] = await Promise.all([
-        fetchHealth(),
-        fetchMetrics(),
-        fetchClients(),
-        fetchTaskStats(),
-      ]);
-
-      if (health) dispatch({ type: "SET_HEALTH", payload: health });
-      if (metrics) dispatch({ type: "SET_METRICS", payload: metrics });
-      dispatch({ type: "SET_CLIENTS", payload: clients });
-      if (taskStats) dispatch({ type: "SET_TASK_STATS", payload: taskStats });
-
-      dispatch({ type: "SET_ERROR", payload: null });
-      dispatch({ type: "SET_CONNECTION_STATUS", payload: "connected" });
-    } catch (error) {
-      dispatch({
-        type: "SET_ERROR",
-        payload: error instanceof Error ? error.message : "Unknown error",
-      });
-      dispatch({ type: "SET_CONNECTION_STATUS", payload: "error" });
-    } finally {
-      dispatch({ type: "SET_LOADING", payload: false });
+    // Перевіряємо чи вже підключаємося
+    if (isConnectingRef.current) {
+      console.log("🔄 WebSocket connection already in progress, skipping");
+      return;
     }
-  };
 
-  const connectWebSocket = () => {
     if (socket) {
-      console.log("WebSocket already exists, skipping connection");
+      console.log("✅ WebSocket already exists, skipping connection");
       return;
     }
 
     // Перевіряємо, чи користувач все ще автентифікований
-    if (!auth.isAuthenticated) {
+    if (!authState.isAuthenticated) {
       console.warn("🔒 User not authenticated, skipping WebSocket connection");
       dispatch({ type: "SET_CONNECTION_STATUS", payload: "disconnected" });
       dispatch({ type: "RESET_RECONNECT_INFO" });
@@ -641,6 +665,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
     }
 
     console.log("🔌 Initiating WebSocket connection...");
+    isConnectingRef.current = true;
     dispatch({ type: "SET_CONNECTION_STATUS", payload: "connecting" });
     dispatch({ type: "SET_WEBSOCKET_ERROR", payload: null });
 
@@ -648,6 +673,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
     const sessionId = localStorage.getItem("sessionId");
     if (!sessionId) {
       console.warn("❌ No session ID found, skipping WebSocket connection");
+      isConnectingRef.current = false;
       const authError: WebSocketError = {
         type: "authentication",
         code: 4000,
@@ -665,8 +691,9 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
     }
 
     // Перевіряємо, чи sessionId відповідає sessionId із auth стану
-    if (auth.sessionId && sessionId !== auth.sessionId) {
+    if (authState.sessionId && sessionId !== authState.sessionId) {
       console.warn("⚠️ Session ID mismatch, skipping WebSocket connection");
+      isConnectingRef.current = false;
       const authError: WebSocketError = {
         type: "authentication",
         code: 4002,
@@ -702,7 +729,16 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
+      if (!mountedRef.current) {
+        console.log(
+          "🚫 Component unmounted during connection, closing WebSocket",
+        );
+        ws.close(1000, "Component unmounted");
+        return;
+      }
+
       console.log("✅ WebSocket connected successfully");
+      isConnectingRef.current = false;
 
       // Очищаємо таймаут з'єднання
       if (connectionTimeoutRef.current) {
@@ -719,13 +755,14 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
       // Send registration message
       const registrationMessage = {
-        message_type: "client_registration",
+        type: "client_registration",
         client_type: "monitor",
         client_id: "dashboard-" + Date.now(),
         client_name: "React Dashboard",
         client_version: "1.0.0",
         capabilities: [],
         max_concurrent_tasks: 1,
+        auth_token: sessionId,
         client_info: {
           userAgent: navigator.userAgent,
           timestamp: new Date().toISOString(),
@@ -733,8 +770,10 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       };
 
       try {
-        ws.send(JSON.stringify(registrationMessage));
-        console.log("📝 Registration message sent successfully");
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(registrationMessage));
+          console.log("📝 Registration message sent successfully");
+        }
       } catch (error) {
         console.error("❌ Failed to send registration message:", error);
         const regError: WebSocketError = {
@@ -755,24 +794,27 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
     };
 
     ws.onmessage = (event) => {
+      if (!mountedRef.current) return;
+
       try {
         const message = JSON.parse(event.data);
         console.log("📨 Received WebSocket message:", message);
 
-        // Перевіряємо чи є message_type
-        if (!message.message_type) {
-          console.log("📨 Received message without message_type:", message);
-          return; // Просто ігноруємо такі повідомлення
+        // Перевіряємо чи є type
+        const msgType = message.type || message.message_type;
+        if (!msgType) {
+          console.log("📨 Received message without type:", message);
+          return;
         }
 
-        console.log("📨 Processing message type:", message.message_type);
+        console.log("📨 Processing message type:", msgType);
 
         // Handle different message types
-        switch (message.message_type) {
+        switch (msgType) {
           case "registration_ack":
             console.log("✅ Client registration acknowledged", message);
 
-            // Створюємо alert про успішне підключення
+            // Створюємо alert про успішне підключення тільки один раз
             const successAlert: SystemAlert = {
               id: `ws-success-${Date.now()}`,
               type: "success",
@@ -805,6 +847,41 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
           case "stats_update":
             dispatch({ type: "UPDATE_LAST_UPDATED" });
+            break;
+
+          case "component_status_update":
+            console.log("🔧 Received component status update:", message);
+            if (message.data && state.health) {
+              const updatedHealth = {
+                ...state.health,
+                components: {
+                  ...state.health.components,
+                  ...message.data,
+                },
+              };
+              dispatch({ type: "SET_HEALTH", payload: updatedHealth });
+            }
+            break;
+
+          case "metrics_update":
+            console.log("📊 Received metrics update:", message);
+            if (message.data) {
+              dispatch({ type: "SET_METRICS", payload: message.data });
+            }
+            break;
+
+          case "clients_update":
+            console.log("👥 Received clients update:", message);
+            if (message.data && Array.isArray(message.data)) {
+              dispatch({ type: "SET_CLIENTS", payload: message.data });
+            }
+            break;
+
+          case "task_stats_update":
+            console.log("📋 Received task stats update:", message);
+            if (message.data) {
+              dispatch({ type: "SET_TASK_STATS", payload: message.data });
+            }
             break;
 
           case "system_notification":
@@ -842,14 +919,16 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
           case "ping":
             // Respond to ping with pong
             try {
-              ws.send(
-                JSON.stringify({
-                  message_type: "pong",
-                  correlation_id: message.correlation_id,
-                  timestamp: new Date().toISOString(),
-                }),
-              );
-              console.log("🏓 Responded to ping with pong");
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(
+                  JSON.stringify({
+                    type: "pong",
+                    correlation_id: message.correlation_id,
+                    timestamp: new Date().toISOString(),
+                  }),
+                );
+                console.log("🏓 Responded to ping with pong");
+              }
             } catch (error) {
               console.error("❌ Failed to send pong response:", error);
             }
@@ -860,10 +939,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
             break;
 
           default:
-            console.log(
-              "📨 Received unknown message type:",
-              message.message_type,
-            );
+            console.log("📨 Received unknown message type:", msgType);
         }
       } catch (error) {
         console.error("❌ Error parsing WebSocket message:", error);
@@ -885,6 +961,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
     };
 
     ws.onclose = (event) => {
+      isConnectingRef.current = false;
       console.log("🔌 WebSocket closed:", event.code, event.reason);
 
       // Очищаємо таймаут з'єднання
@@ -903,18 +980,21 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
       setSocket(null);
 
-      // Детальне логування
-      console.log(`🔍 WebSocket Error Details:
-        Type: ${error.type}
-        Code: ${error.code}
-        Reason: ${error.reason}
-        Message: ${error.message}
-        Retryable: ${error.isRetryable}
-      `);
+      // Детальне логування тільки для важливих помилок
+      if (error.type !== "connection" || error.code !== 1000) {
+        console.log(`🔍 WebSocket Error Details:
+          Type: ${error.type}
+          Code: ${error.code}
+          Reason: ${error.reason}
+          Message: ${error.message}
+          Retryable: ${error.isRetryable}
+        `);
+      }
 
       // Attempt to reconnect with exponential backoff
       const shouldReconnect =
-        auth.isAuthenticated &&
+        mountedRef.current &&
+        authState.isAuthenticated &&
         localStorage.getItem("sessionId") &&
         state.reconnectInfo.attempts < state.reconnectInfo.maxAttempts &&
         error.isRetryable;
@@ -942,8 +1022,10 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
         const timeoutId = setTimeout(() => {
           // Перевіряємо ще раз перед переконнектуванням
           if (
+            mountedRef.current &&
             !socket &&
-            auth.isAuthenticated &&
+            !isConnectingRef.current &&
+            authState.isAuthenticated &&
             localStorage.getItem("sessionId")
           ) {
             console.log(
@@ -984,13 +1066,14 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
           );
         } else {
           console.log(
-            "🚫 Not scheduling WebSocket reconnection - user not authenticated",
+            "🚫 Not scheduling WebSocket reconnection - user not authenticated or component unmounted",
           );
         }
       }
     };
 
     ws.onerror = (error) => {
+      isConnectingRef.current = false;
       console.error("❌ WebSocket error event:", error);
 
       // Очищаємо таймаут з'єднання
@@ -1014,11 +1097,18 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
     };
 
     setSocket(ws);
-  };
+  }, [
+    authState.isAuthenticated,
+    authState.sessionId,
+    socket,
+    state.reconnectInfo.attempts,
+  ]);
 
-  const disconnectWebSocket = () => {
+  const disconnectWebSocket = useCallback(() => {
+    console.log("🔌 Disconnecting WebSocket...");
+    isConnectingRef.current = false;
+
     if (socket) {
-      console.log("🔌 Disconnecting WebSocket...");
       socket.close(1000, "User disconnection");
       setSocket(null);
     }
@@ -1039,38 +1129,136 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
     // Reset reconnect info
     dispatch({ type: "RESET_RECONNECT_INFO" });
     dispatch({ type: "SET_WEBSOCKET_ERROR", payload: null });
-  };
+  }, [socket, reconnectTimeout]);
 
-  // Auto-refresh data
-  useEffect(() => {
-    if (auth.isAuthenticated) {
-      console.log("📊 Starting data refresh interval");
-      refreshData();
-      const interval = setInterval(refreshData, refreshInterval);
-      return () => {
-        console.log("📊 Stopping data refresh interval");
-        clearInterval(interval);
-      };
+  // Покращена функція refreshData з меншим логуванням
+  const refreshData = useCallback(async () => {
+    if (!authState.isAuthenticated) {
+      console.log('Skipping data refresh - user not authenticated');
+      return;
     }
-  }, [refreshInterval, auth.isAuthenticated]);
 
-  // Connect WebSocket when authenticated
-  useEffect(() => {
-    if (auth.isAuthenticated && localStorage.getItem("sessionId")) {
-      console.log("🔐 User authenticated, connecting WebSocket");
-      connectWebSocket();
-    } else {
-      console.log("🔒 User not authenticated, disconnecting WebSocket");
-      disconnectWebSocket();
+    dispatch({ type: "SET_LOADING", payload: true });
+
+    try {
+      const [health, metrics, clients, taskStats] = await Promise.all([
+        fetchHealth(),
+        fetchMetrics(),
+        fetchClients(),
+        fetchTaskStats(),
+      ]);
+
+      if (!mountedRef.current) return;
+
+      if (health) dispatch({ type: "SET_HEALTH", payload: health });
+      if (metrics) dispatch({ type: "SET_METRICS", payload: metrics });
+      dispatch({ type: "SET_CLIENTS", payload: clients });
+      if (taskStats) dispatch({ type: "SET_TASK_STATS", payload: taskStats });
+
+      dispatch({ type: "SET_ERROR", payload: null });
+    } catch (error) {
+      if (!mountedRef.current) return;
+
+      console.error("Error fetching data:", error);
+      dispatch({
+        type: "SET_ERROR",
+        payload: error instanceof Error ? error.message : "Unknown error",
+      });
+    } finally {
+      if (mountedRef.current) {
+        dispatch({ type: "SET_LOADING", payload: false });
+      }
     }
+  }, [authState.isAuthenticated]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    mountedRef.current = true;
     return () => {
-      disconnectWebSocket();
-      // Clear any pending reconnect timeout
-      if (reconnectTimeout) {
-        clearTimeout(reconnectTimeout);
+      console.log("🧹 StatusProvider unmounting - cleaning up");
+      mountedRef.current = false;
+      isConnectingRef.current = false;
+
+      // Очищаємо інтервал data refresh
+      if (dataRefreshIntervalRef.current) {
+        clearInterval(dataRefreshIntervalRef.current);
+        dataRefreshIntervalRef.current = null;
       }
     };
-  }, [auth.isAuthenticated]);
+  }, []);
+
+  // Auto-refresh data - покращена логіка з затримкою
+  useEffect(() => {
+    // Очищаємо попередній інтервал
+    if (dataRefreshIntervalRef.current) {
+      clearInterval(dataRefreshIntervalRef.current);
+      dataRefreshIntervalRef.current = null;
+    }
+
+    if (authState.isAuthenticated && mountedRef.current && !authState.isLoading) {
+      console.log("📊 Starting data refresh interval");
+
+      // Додаємо невелику затримку щоб дати час сесії встановитися
+      const startDataRefresh = () => {
+        refreshData(); // Виконуємо одразу
+
+        const interval = setInterval(() => {
+          if (mountedRef.current && authState.isAuthenticated && !authState.isLoading) {
+            refreshData();
+          }
+        }, refreshInterval);
+
+        dataRefreshIntervalRef.current = interval;
+      };
+
+      // Якщо сесія вже є, запускаємо одразу, інакше чекаємо 1 секунду
+      const sessionId = localStorage.getItem("sessionId");
+      if (sessionId) {
+        startDataRefresh();
+      } else {
+        setTimeout(() => {
+          if (
+            mountedRef.current &&
+            authState.isAuthenticated &&
+            localStorage.getItem("sessionId")
+          ) {
+            startDataRefresh();
+          }
+        }, 1000);
+      }
+    }
+
+    return () => {
+      if (dataRefreshIntervalRef.current) {
+        console.log("📊 Stopping data refresh interval");
+        clearInterval(dataRefreshIntervalRef.current);
+        dataRefreshIntervalRef.current = null;
+      }
+    };
+  }, [authState.isAuthenticated, authState.isLoading, refreshInterval, refreshData]);
+
+  // Connect WebSocket when authenticated - покращена логіка
+  useEffect(() => {
+    const authChanged = lastAuthStateRef.current !== authState.isAuthenticated;
+    lastAuthStateRef.current = authState.isAuthenticated;
+
+    if (authState.isAuthenticated && localStorage.getItem("sessionId")) {
+      if (authChanged || !socket) {
+        console.log("🔐 User authenticated, connecting WebSocket");
+        connectWebSocket();
+      }
+    } else {
+      if (socket || isConnectingRef.current) {
+        console.log("🔒 User not authenticated, disconnecting WebSocket");
+        disconnectWebSocket();
+      }
+    }
+  }, [
+    authState.isAuthenticated,
+    authState.sessionId,
+    connectWebSocket,
+    disconnectWebSocket,
+  ]);
 
   const value: StatusContextType = {
     state,

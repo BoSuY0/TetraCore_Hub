@@ -84,7 +84,7 @@ class StreamHub:
 
             # Ініціалізація Redis (якщо увімкнено)
             if self.settings.redis_enabled:
-                self.logger.info("Redis enabled, initializing Redis manager...", 
+                self.logger.info("Redis enabled, initializing Redis manager...",
                                 redis_url=self.settings._safe_redis_url(),
                                 tls_enabled=getattr(self.settings, 'redis_tls_enabled', False))
                 self.redis_manager = RedisManager(self.settings)
@@ -116,6 +116,8 @@ class StreamHub:
                 self.task_router.set_client_manager(self.client_manager)
             if self.health_monitor and self.client_manager:
                 self.health_monitor.client_manager = self.client_manager
+                # Встановлення посилання на hub для доступу до всіх компонентів
+                self.health_monitor.hub = self
 
             # Ініціалізація компонентів
             await self.client_manager.initialize()
@@ -230,12 +232,16 @@ class StreamHub:
         @self.app.websocket("/ws")  # type: ignore[attr-defined]
         async def websocket_endpoint(websocket: WebSocket):
             """WebSocket endpoint with authentication"""
-            await self.handle_websocket_connection(websocket)
+            # Отримуємо справжній hub instance з app.state якщо доступний
+            hub = getattr(websocket.app.state, 'hub', self)
+            await hub.handle_websocket_connection(websocket)
 
         @self.app.get("/health")  # type: ignore[attr-defined]
-        async def health_check():
+        async def health_check(request: fastapi.Request):
             """Перевірка здоров'я системи"""
-            return await self.get_health_status()
+            # Отримуємо справжній hub instance з app.state якщо доступний
+            hub = getattr(request.app.state, 'hub', self)
+            return await hub.get_health_status()
 
         @self.app.get("/config")  # type: ignore[attr-defined]
         async def get_app_config():
@@ -250,29 +256,37 @@ class StreamHub:
             }
 
         @self.app.get("/metrics")  # type: ignore[attr-defined]
-        async def get_metrics():
+        async def get_metrics(request: fastapi.Request):
             """Отримання метрик системи"""
-            return await self.get_system_metrics()
+            # Отримуємо справжній hub instance з app.state якщо доступний
+            hub = getattr(request.app.state, 'hub', self)
+            return await hub.get_system_metrics()
 
         @self.app.get("/clients")  # type: ignore[attr-defined]
-        async def get_clients():
+        async def get_clients(request: fastapi.Request):
             """Отримання списку підключених клієнтів"""
-            if not self.client_manager or not self.client_manager.is_healthy():
+            # Отримуємо справжній hub instance з app.state якщо доступний
+            hub = getattr(request.app.state, 'hub', self)
+
+            if not hub.client_manager or not hub.client_manager.is_healthy():
                 return {
                     "clients": [],
                     "total_count": 0
                 }
 
             return {
-                "clients": [client.to_dict() for client in self.client_manager.get_all_clients()],
-                "total_count": self.client_manager.get_client_count()
+                "clients": [client.to_dict() for client in hub.client_manager.get_all_clients()],
+                "total_count": hub.client_manager.get_client_count()
             }
 
         @self.app.get("/tasks")  # type: ignore[attr-defined]
-        async def get_tasks():
+        async def get_tasks(request: fastapi.Request):
             """Отримання інформації про завдання"""
+            # Отримуємо справжній hub instance з app.state якщо доступний
+            hub = getattr(request.app.state, 'hub', self)
+
             try:
-                if not self.task_router:
+                if not hub.task_router:
                     # Повертаємо порожні статистики якщо TaskRouter недоступний
                     return {
                         "total_tasks": 0,
@@ -290,9 +304,9 @@ class StreamHub:
                         "worker_distribution": {}
                     }
 
-                return await self.task_router.get_queue_stats()
+                return await hub.task_router.get_queue_stats()
             except Exception as e:
-                self.logger.error("Error getting task stats", error=str(e))
+                hub.logger.error("Error getting task stats", error=str(e))
                 # Повертаємо порожні статистики при помилці
                 return {
                     "total_tasks": 0,
@@ -311,12 +325,15 @@ class StreamHub:
                 }
 
         @self.app.post("/tasks/{task_id}/cancel")  # type: ignore[attr-defined]
-        async def cancel_task(task_id: str):
+        async def cancel_task(task_id: str, request: fastapi.Request):
             """Скасування завдання"""
-            if not self.task_router:
+            # Отримуємо справжній hub instance з app.state якщо доступний
+            hub = getattr(request.app.state, 'hub', self)
+
+            if not hub.task_router:
                 raise HTTPException(status_code=503, detail="StreamHub not initialized")
 
-            success = await self.task_router.cancel_task(task_id)
+            success = await hub.task_router.cancel_task(task_id)
             if not success:
                 raise HTTPException(status_code=404, detail="Task not found")
 
@@ -360,11 +377,11 @@ class StreamHub:
         try:
             # Authenticate WebSocket connection before accepting
             token = websocket.query_params.get("token")
-            self.logger.info("WebSocket connection attempt", 
+            self.logger.info("WebSocket connection attempt",
                            remote_addr=websocket.client.host if websocket.client else "unknown",
                            has_token=bool(token),
                            token_preview=token[:20] + "..." if token and len(token) > 20 else "no_token")
-            
+
             user_data = await ws_security_manager.authenticate_websocket(websocket, token)
 
             if not user_data:
@@ -406,15 +423,16 @@ class StreamHub:
             # Обробка повідомлень від клієнта
             await self._handle_client_messages(client, websocket)
 
-        except WebSocketDisconnect:
-            self.logger.info("WebSocket connection closed")
+        except WebSocketDisconnect as e:
+            self.logger.info("WebSocket disconnected", code=e.code, reason=e.reason if e.reason else 'No reason provided')
         except Exception as e:
-            self.logger.error("WebSocket connection error", error=str(e), 
+            self.logger.error("WebSocket connection error", error=str(e),
                             remote_addr=websocket.client.host if websocket.client else "unknown")
             self.total_errors += 1
         finally:
             if 'client' in locals() and client is not None and self.client_manager:
                 await self.client_manager.remove_client(client.info.client_id)
+                self.logger.info("Client removed after disconnection", client_id=client.info.client_id)
 
     async def _handle_client_registration(self, websocket: WebSocket, user_data: Dict[str, Any]) -> Optional[Client]:
         """Обробка реєстрації клієнта з автентифікованими даними"""
@@ -423,11 +441,24 @@ class StreamHub:
             self.logger.info("Waiting for client registration message")
             data = await websocket.receive_json()
             self.logger.info("Received registration data", data_keys=list(data.keys()),
-                           message_type=data.get("message_type"))
+                           type=data.get("type"))
+
+            # Обробка нового формату з полем 'type' та 'data'
+            if data.get("type") == "client_registration" and "data" in data:
+                # Новий формат: конвертуємо до старого формату для parse_message
+                message_data = {
+                    "message_type": data["type"],
+                    **data["data"]  # Merge registration data
+                }
+            else:
+                # Старий формат або формат з message_type
+                message_data = data
+                if "type" in data and "message_type" not in data:
+                    message_data["message_type"] = data["type"]
 
             # Парсинг повідомлення
             try:
-                message = parse_message(data)
+                message = parse_message(message_data)
                 self.logger.info("Message parsed successfully",
                                message_type=message.message_type,
                                client_type=getattr(message, 'client_type', 'unknown'),
@@ -539,21 +570,18 @@ class StreamHub:
             client.connect(websocket)
 
             # Відправка підтвердження реєстрації
-            self.logger.info("Creating registration acknowledgment", client_id=client.info.client_id)
             ack_message = create_message(
                 MessageType.REGISTRATION_ACK,
                 client_id=client.info.client_id,
                 session_id=client.info.session_id,
-                config=self._get_client_config(client)
+                config=self._get_client_config(client),
+                timestamp=datetime.utcnow()
             )
 
+            await websocket.send_json(ack_message.model_dump(mode='json'))
             self.logger.info("Sending registration acknowledgment",
-                           client_id=client.info.client_id,
-                           session_id=client.info.session_id)
-
-            # Використовуємо model_dump з mode='json' для правильної серіалізації datetime
-            ack_data = ack_message.model_dump(mode='json')
-            await websocket.send_json(ack_data)
+                            client_id=client.info.client_id,
+                            session_id=client.info.session_id)
 
             # Фінальне логування успішної реєстрації
             self.logger.info("✅ Client successfully connected to StreamHub",
@@ -588,8 +616,19 @@ class StreamHub:
                                           client_id=client.info.client_id)
                         continue
 
-                    # Parse validated message data
-                    message = parse_message(validated_message.data)
+                    # Convert WebSocketMessage to data format for parse_message
+                    # WebSocketMessage uses 'type' field, but parse_message expects 'message_type'
+                    message_data = {
+                        "message_type": validated_message.type,
+                        "timestamp": validated_message.timestamp,
+                        "correlation_id": validated_message.correlation_id,
+                        **validated_message.data  # Merge any additional data
+                    }
+
+                    # Додаємо message_id тільки якщо він не None
+                    if validated_message.message_id:
+                        message_data["message_id"] = validated_message.message_id
+                    message = parse_message(message_data)
                 else:
                     # Fallback for legacy connections (should be removed in future)
                     if self.async_optimizer:
@@ -597,6 +636,12 @@ class StreamHub:
                     else:
                         # Фолбек на стандартний json.loads у малоймовірному випадку, коли async_optimizer не ініціалізовано
                         data = json.loads(raw_data)
+
+                    # Support both 'type' and 'message_type'
+                    if "type" in data and "message_type" not in data:
+                        data = data.copy()
+                        data["message_type"] = data["type"]
+
                     message = parse_message(data)
 
                 # Оновлення часу останньої активності
@@ -634,7 +679,9 @@ class StreamHub:
             elif message.message_type == MessageType.METRICS_REQUEST:
                 # Обробка запиту метрик
                 await self._handle_metrics_request(client, message)
-
+            elif message.message_type == "pong":
+                self.logger.debug("Received pong from client", client_id=client.info.client_id)
+                client.info.stats.last_pong = datetime.utcnow()
             else:
                 self.logger.warning("Unknown message type",
                                   message_type=message.message_type,
@@ -708,15 +755,20 @@ class StreamHub:
         """Обробка ping запиту"""
         client.ping()
 
-        # Відправка pong відповіді
-        pong_message = create_message(
-            MessageType.PONG,
-            client_id=client.info.client_id,
-            correlation_id=message.correlation_id
-        )
+        # Автоматично додаємо client_id якщо його немає у повідомленні
+        if not hasattr(message, 'client_id') or not message.client_id:
+            message.client_id = client.info.client_id
+
+        # Створюємо WebSocket-сумісну pong відповідь з полем 'type'
+        pong_message = {
+            "type": "pong",
+            "client_id": client.info.client_id,
+            "correlation_id": message.correlation_id,
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
         if client.websocket:
-            await client.websocket.send_json(pong_message.model_dump(mode='json'))
+            await client.websocket.send_json(pong_message)
             client.pong()
 
     async def _handle_health_check(self, client: Client, message: BaseMessage):
@@ -760,14 +812,17 @@ class StreamHub:
 
     async def _send_error(self, websocket: WebSocket, error_code: str, error_message: str):
         """Відправка повідомлення про помилку"""
-        error_msg = create_message(
-            MessageType.ERROR,
-            error_code=error_code,
-            error_message=error_message
-        )
+        # Створюємо WebSocket-сумісне error повідомлення з полем 'type'
+        error_msg = {
+            "type": "error",
+            "error_code": error_code,
+            "error_message": error_message,
+            "timestamp": datetime.utcnow().isoformat(),
+            "retryable": False
+        }
 
         try:
-            await websocket.send_json(error_msg.model_dump(mode='json'))
+            await websocket.send_json(error_msg)
         except:
             pass  # WebSocket може бути закритий
 
@@ -858,18 +913,65 @@ class StreamHub:
     # Public API methods
     async def get_health_status(self) -> Dict[str, Any]:
         """Отримання статусу здоров'я системи"""
+        # Перевіряємо чи система ініціалізована
+        if not self.is_running or not self.start_time:
+            return {
+                "status": "initializing",
+                "uptime": 0,
+                "version": "1.0.0",
+                "components": {
+                    "redis": False,
+                    "client_manager": False,
+                    "task_router": False,
+                    "websocket_manager": False,
+                    "health_monitor": False,
+                    "metrics_collector": False,
+                },
+                "stats": {
+                    "total_connections": 0,
+                    "active_clients": 0,
+                    "total_tasks_processed": 0,
+                    "total_errors": 0
+                }
+            }
+
+        # Проста перевірка компонентів без складної логіки
+        def check_component_simple(component):
+            """Проста перевірка компонента"""
+            try:
+                if not component:
+                    return False
+                if hasattr(component, 'is_healthy'):
+                    return component.is_healthy()
+                return component is not None
+            except Exception:
+                return False
+
+        components = {
+            "redis": check_component_simple(self.redis_manager),
+            "client_manager": check_component_simple(self.client_manager),
+            "task_router": check_component_simple(self.task_router),
+            "websocket_manager": check_component_simple(self.websocket_manager),
+            "health_monitor": check_component_simple(self.health_monitor),
+            "metrics_collector": check_component_simple(self.metrics_collector),
+        }
+
+        # Визначаємо загальний статус системи
+        healthy_components = sum(1 for health in components.values() if health)
+        total_components = len(components)
+
+        if healthy_components == total_components:
+            overall_status = "healthy"
+        elif healthy_components > 0:
+            overall_status = "degraded"
+        else:
+            overall_status = "unhealthy"
+
         return {
-            "status": "healthy" if self.is_running else "unhealthy",
+            "status": overall_status,
             "uptime": (datetime.utcnow() - self.start_time).total_seconds() if self.start_time else 0,
             "version": "1.0.0",
-            "components": {
-                "redis": await self.redis_manager.is_healthy() if self.redis_manager else False,
-                "client_manager": self.client_manager.is_healthy() if self.client_manager else False,
-                "task_router": self.task_router.is_healthy() if self.task_router else False,
-                "websocket_manager": self.websocket_manager.is_healthy() if hasattr(self, 'websocket_manager') and self.websocket_manager else self.is_running,
-                "health_monitor": self.health_monitor.is_healthy() if hasattr(self, 'health_monitor') and self.health_monitor else self.is_running,
-                "metrics_collector": self.metrics_collector.is_healthy() if hasattr(self, 'metrics_collector') and self.metrics_collector else self.is_running,
-            },
+            "components": components,
             "stats": {
                 "total_connections": self.total_connections,
                 "active_clients": self.client_manager.get_client_count() if self.client_manager else 0,
