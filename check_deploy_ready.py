@@ -259,6 +259,27 @@ class DeploymentChecker:
                 self.check_passed("config.ts has isProduction variable defined")
             else:
                 self.check_failed("config.ts missing isProduction variable")
+        
+        # Check for required TypeScript dependencies in frontend package.json
+        frontend_package = self.frontend_dir / "package.json"
+        if frontend_package.exists():
+            with open(frontend_package, 'r') as f:
+                data = json.load(f)
+            
+            dependencies = data.get('dependencies', {})
+            required_types = ['@types/node', '@types/react-window']
+            
+            for type_pkg in required_types:
+                if type_pkg in dependencies:
+                    self.check_passed(f"Frontend has {type_pkg} in dependencies")
+                else:
+                    self.check_failed(f"Frontend missing {type_pkg} in dependencies (needed for Heroku build)")
+            
+            # Check if TypeScript is available for build
+            if 'typescript' in dependencies or 'typescript' in data.get('devDependencies', {}):
+                self.check_passed("TypeScript is available for frontend build")
+            else:
+                self.check_failed("TypeScript missing from frontend dependencies")
 
     def run_checks(self):
         """Запуск всіх перевірок"""
