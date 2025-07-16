@@ -41,10 +41,21 @@ export interface StreamHubMetrics {
 export interface Client {
   client_id: string;
   client_name: string;
-  client_type: 'bot' | 'worker' | 'worker_api' | 'stream_hub' | 'monitor' | 'admin';
+  client_type:
+    | "bot"
+    | "worker"
+    | "worker_api"
+    | "stream_hub"
+    | "monitor"
+    | "admin";
   client_version: string;
-  connection_status: 'connected' | 'disconnected' | 'connecting' | 'reconnecting' | 'error';
-  worker_status?: 'idle' | 'busy' | 'overloaded' | 'maintenance' | 'error';
+  connection_status:
+    | "connected"
+    | "disconnected"
+    | "connecting"
+    | "reconnecting"
+    | "error";
+  worker_status?: "idle" | "busy" | "overloaded" | "maintenance" | "error";
   capabilities?: string[];
   max_concurrent_tasks?: number;
   current_load?: number;
@@ -75,18 +86,29 @@ export interface Client {
 export interface Task {
   task_id: string;
   task_type: string;
-  status: 'pending' | 'assigned' | 'processing' | 'completed' | 'failed' | 'timeout' | 'retry' | 'cancelled';
-  priority: 'low' | 'normal' | 'high' | 'critical';
+  status:
+    | "pending"
+    | "assigned"
+    | "processing"
+    | "completed"
+    | "failed"
+    | "timeout"
+    | "retry"
+    | "cancelled";
+  priority: "low" | "normal" | "high" | "critical";
+  worker_id?: string;
+  client_id?: string;
   created_at: string;
   started_at?: string;
   completed_at?: string;
-  assigned_worker?: string;
-  retry_count: number;
+  execution_time?: number;
+  attempt: number;
   max_retries: number;
   timeout: number;
-  execution_time?: number;
-  error_message?: string;
-  task_data?: Record<string, any>;
+  is_expired: boolean;
+  can_retry: boolean;
+  task_data: Record<string, any>;
+  metadata: Record<string, any>;
 }
 
 export interface TaskQueueStats {
@@ -103,6 +125,17 @@ export interface TaskQueueStats {
     low: number;
   };
   worker_distribution: Record<string, number>;
+  active_tasks: number;
+  workers_count: number;
+  tasks: Task[];
+  pagination?: {
+    page: number;
+    limit: number;
+    total_items: number;
+    total_pages: number;
+    has_next: boolean;
+    has_prev: boolean;
+  };
 }
 
 export interface ClientsResponse {
@@ -122,7 +155,7 @@ export interface WebSocketMessage {
 
 export interface SystemAlert {
   id: string;
-  type: 'info' | 'warning' | 'error' | 'success';
+  type: "info" | "warning" | "error" | "success";
   title: string;
   message: string;
   timestamp: string;
@@ -163,7 +196,7 @@ export interface ApiResponse<T> {
     details?: Record<string, any>;
   };
   timestamp: string;
-  status: 'success' | 'error';
+  status: "success" | "error";
 }
 
 export interface DashboardData {

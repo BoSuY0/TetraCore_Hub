@@ -4,12 +4,13 @@ Unit tests for the core.auth_manager module.
 import pytest
 import jwt
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 import bcrypt
 from fastapi import HTTPException
 
-from core.auth_manager import AuthManager, TokenPair, UserCredentials, TokenData
+from core.auth_manager import AuthManager, TokenPair, UserCredentials, TokenData, SERVER_BOOT_ID
 
 
 class TestAuthManager:
@@ -40,6 +41,7 @@ class TestAuthManager:
         assert manager.redis_client == mock_redis_client
         assert manager.secret_key is not None
         assert manager.refresh_secret is not None
+        assert manager.server_boot_id == SERVER_BOOT_ID
 
     def test_initialization_without_redis(self):
         """Test AuthManager initialization without Redis client."""
@@ -48,6 +50,7 @@ class TestAuthManager:
         assert manager.redis_client is None
         assert manager.secret_key is not None
         assert manager.refresh_secret is not None
+        assert manager.server_boot_id == SERVER_BOOT_ID
 
     def test_password_hashing_and_verification(self, auth_manager):
         """Test password hashing and verification."""
@@ -721,28 +724,154 @@ class TestAuthManager:
 
     @pytest.mark.asyncio
     async def test_error_message_timing_leak(self, auth_manager):
-        """Test that error messages don't leak timing information."""
+        """Test potential timing leaks in error messages."""
         import time
+
+        # Test with completely invalid token
+        start_time = time.time()
+        try:
+            await auth_manager.decode_token("invalid_token", "access")
+        except HTTPException:
+            pass
+        invalid_time = time.time() - start_time
+
+        # Test with properly formatted but expired token  
+        expired_payload = {
+            "user_id": "123",
+            "token_type": "access",
+            "exp": int(time.time()) - 3600,
+            "iat": int(time.time()) - 3600
+        }
+        expired_token = jwt.encode(expired_payload, auth_manager.secret_key, algorithm="HS256")
         
-        # Test invalid token formats
-        test_tokens = [
-            "not.a.token",
-            "invalid.jwt.format",
-            "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9",  # Valid header only
-            "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyIjoiYWRtaW4ifQ",  # No signature
-        ]
+        start_time = time.time()
+        try:
+            await auth_manager.decode_token(expired_token, "access")
+        except HTTPException:
+            pass
+        expired_time = time.time() - start_time
+
+        # Timing should be similar (difference < 100ms)
+        time_difference = abs(invalid_time - expired_time)
+        assert time_difference < 0.1, f"Potential timing leak detected: {time_difference:.3f}s difference"
+
+    def test_server_boot_id_in_tokens(self, auth_manager):
+        """Test that server_boot_id is included in tokens."""
+        user_data = {"user_id": "123", "username": "test"}
         
-        times = []
-        for token in test_tokens:
-            start = time.perf_counter()
-            try:
-                for _ in range(10):
-                    await auth_manager.decode_token(token, "access")
-            except:
-                pass
-            elapsed = time.perf_counter() - start
-            times.append(elapsed)
+        access_token = auth_manager.create_access_token(user_data)
+        refresh_token = auth_manager.create_refresh_token(user_data)
         
-        # Check for significant timing differences
-        if max(times) / min(times) > 2.0:
-            print(f"WARNING: Token validation has timing differences: {times}")
+        # Decode without verification to check payload
+        access_payload = jwt.decode(access_token, options={"verify_signature": False})
+        refresh_payload = jwt.decode(refresh_token, options={"verify_signature": False})
+        
+        assert access_payload.get("boot_id") == auth_manager.server_boot_id
+        assert refresh_payload.get("boot_id") == auth_manager.server_boot_id
+
+    @pytest.mark.asyncio
+    async def test_token_invalidation_after_server_restart(self, auth_manager):
+        """Test that tokens from previous server boot are invalidated."""
+        user_data = {"user_id": "123", "username": "test"}
+        
+        # Create token with current boot_id
+        token = auth_manager.create_access_token(user_data)
+        
+        # Verify token works with current boot_id
+        decoded = await auth_manager.decode_token(token, "access")
+        assert decoded["user_id"] == "123"
+        
+        # Simulate server restart by changing boot_id
+        original_boot_id = auth_manager.server_boot_id
+        auth_manager.server_boot_id = str(uuid.uuid4())
+        
+        # Token should now be invalid
+        with pytest.raises(HTTPException) as exc_info:
+            await auth_manager.decode_token(token, "access")
+        
+        assert exc_info.value.status_code == 401
+        assert "Server restarted" in exc_info.value.detail
+        
+        # Restore original boot_id
+        auth_manager.server_boot_id = original_boot_id
+
+    @pytest.mark.asyncio
+    async def test_refresh_token_blocked_after_restart(self, auth_manager):
+        """Test that refresh tokens are blocked after server restart."""
+        user_data = {"user_id": "123", "username": "test"}
+        
+        # Create token pair
+        token_pair = await auth_manager.create_token_pair(user_data)
+        
+        # Simulate server restart
+        original_boot_id = auth_manager.server_boot_id
+        auth_manager.server_boot_id = str(uuid.uuid4())
+        
+        # Refresh should fail due to boot_id mismatch
+        with pytest.raises(HTTPException) as exc_info:
+            await auth_manager.refresh_access_token(token_pair.refresh_token)
+        
+        assert exc_info.value.status_code == 401
+        assert "Server restarted" in exc_info.value.detail
+        
+        # Restore original boot_id
+        auth_manager.server_boot_id = original_boot_id
+
+    @pytest.mark.asyncio
+    async def test_automatic_refresh_blocked(self, auth_manager):
+        """Test that automatic token refresh is blocked for security."""
+        user_data = {"user_id": "123", "username": "test"}
+        
+        # Create token pair
+        token_pair = await auth_manager.create_token_pair(user_data)
+        
+        # Mock Redis session exists
+        auth_manager.redis_client.exists.return_value = True
+        auth_manager.redis_client.get.return_value = '{"last_activity": "' + datetime.now(timezone.utc).isoformat() + '"}'
+        
+        # Refresh should be blocked even with valid tokens
+        with pytest.raises(HTTPException) as exc_info:
+            await auth_manager.refresh_access_token(token_pair.refresh_token)
+        
+        assert exc_info.value.status_code == 401
+        assert "disabled for security" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_session_not_restored_after_restart(self, auth_manager):
+        """Test that sessions are not automatically restored after server restart."""
+        user_data = {"user_id": "123", "username": "test"}
+        
+        # Create token with session
+        token = auth_manager.create_access_token(user_data)
+        
+        # Mock Redis session does not exist (simulating restart)
+        auth_manager.redis_client.exists.return_value = False
+        
+        # Token validation should fail without session restoration
+        with pytest.raises(HTTPException) as exc_info:
+            await auth_manager.decode_token(token, "access")
+        
+        assert exc_info.value.status_code == 401
+        assert "Session expired" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_logout_blacklists_tokens(self, auth_manager):
+        """Test that logout adds tokens to blacklist."""
+        session_id = "test_session_123"
+        
+        # Mock session data with token JTIs
+        session_data = {
+            "access_token_jti": "access_jti_123",
+            "refresh_token_jti": "refresh_jti_456"
+        }
+        auth_manager.redis_client.get.return_value = auth_manager.async_optimizer.json_dumps(session_data)
+        
+        # Logout should blacklist tokens
+        await auth_manager.logout(session_id)
+        
+        # Verify tokens were added to blacklist
+        assert "access_jti_123" in auth_manager._blocked_tokens
+        assert "refresh_jti_456" in auth_manager._blocked_tokens
+        
+        # Verify Redis setex was called for blacklisting
+        assert auth_manager.redis_client.setex.call_count >= 2

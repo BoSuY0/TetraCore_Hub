@@ -16,7 +16,7 @@ import structlog
 # Імпорт нового менеджера автентифікації
 from core.auth_manager import (
     get_auth_manager, get_current_user, UserCredentials,
-    TokenPair, require_permission, require_role
+    TokenPair, require_permission, require_role, SERVER_BOOT_ID
 )
 from core.secrets_manager import get_secrets_manager
 
@@ -105,7 +105,10 @@ async def login(request: Request, credentials: LoginRequest):
         )
 
     # Логування для діагностики
-    logger.info("Login attempt", username=credentials.username, ip=client_ip)
+    logger.info("Login attempt", 
+               username=credentials.username, 
+               ip=client_ip,
+               server_boot_id=SERVER_BOOT_ID[:8] + "...")
 
     # Отримання credentials через secrets manager
     secrets_mgr = get_secrets_manager()
@@ -151,7 +154,10 @@ async def login(request: Request, credentials: LoginRequest):
         # Створюємо токени
         token_pair = await auth_mgr.create_token_pair(user_data)
 
-        logger.info("Login successful", username=credentials.username, ip=client_ip)
+        logger.info("Login successful", 
+                   username=credentials.username, 
+                   ip=client_ip,
+                   server_boot_id=SERVER_BOOT_ID[:8] + "...")
 
         return {
             "success": True,
@@ -169,7 +175,8 @@ async def validate_token(credentials: HTTPAuthorizationCredentials = Security(se
 
     logger.info("🔍 Token validation started",
                 has_credentials=bool(credentials),
-                token_preview=credentials.credentials[:20] + "..." if credentials and len(credentials.credentials) > 20 else "no_token")
+                token_preview=credentials.credentials[:20] + "..." if credentials and len(credentials.credentials) > 20 else "no_token",
+                server_boot_id=SERVER_BOOT_ID[:8] + "...")
 
     try:
         token = credentials.credentials
@@ -181,7 +188,8 @@ async def validate_token(credentials: HTTPAuthorizationCredentials = Security(se
         logger.info("✅ Token validated successfully",
                     user_id=user_data["user_id"],
                     username=user_data["username"],
-                    role=user_data["role"])
+                    role=user_data["role"],
+                    server_boot_id=SERVER_BOOT_ID[:8] + "...")
 
         return {
             "valid": True,
@@ -189,33 +197,50 @@ async def validate_token(credentials: HTTPAuthorizationCredentials = Security(se
         }
 
     except HTTPException as he:
-        logger.error("❌ HTTP Exception during token validation",
-                     status_code=he.status_code,
-                     detail=he.detail)
+        # Не логуємо на error рівні для очікуваних помилок автентифікації
+        if he.status_code == 401:
+            logger.debug("🔒 Authentication failed (expected for invalid tokens)",
+                        status_code=he.status_code,
+                        detail=he.detail,
+                        server_boot_id=SERVER_BOOT_ID[:8] + "...")
+        else:
+            logger.error("❌ HTTP Exception during token validation",
+                         status_code=he.status_code,
+                         detail=he.detail,
+                         server_boot_id=SERVER_BOOT_ID[:8] + "...")
         raise
     except Exception as e:
         logger.error("❌ Unexpected error during token validation",
                      error=str(e),
                      error_type=type(e).__name__,
-                     token_preview=credentials.credentials[:20] + "..." if credentials and len(credentials.credentials) > 20 else "no_token")
+                     token_preview=credentials.credentials[:20] + "..." if credentials and len(credentials.credentials) > 20 else "no_token",
+                     server_boot_id=SERVER_BOOT_ID[:8] + "...")
         raise HTTPException(status_code=500, detail=f"Token validation failed: {str(e)}")
 
 @auth_router.post("/refresh")
 async def refresh_token(request: RefreshTokenRequest):
     """Оновлення access токена за допомогою refresh токена"""
 
+    # Логуємо всі спроби refresh для відстеження
+    logger.warning("🔄 Token refresh endpoint called - automatic token renewal attempt",
+                   refresh_token_preview=request.refresh_token[:20] + "..." if len(request.refresh_token) > 20 else request.refresh_token)
+
     try:
         token_pair = await get_auth_manager().refresh_access_token(request.refresh_token)
 
+        logger.warning("✅ Token refresh successful - user session extended automatically")
         return {
             "success": True,
             "tokens": token_pair.dict()
         }
 
-    except HTTPException:
+    except HTTPException as he:
+        logger.info("❌ Token refresh failed", 
+                   status_code=he.status_code, 
+                   detail=he.detail)
         raise
     except Exception as e:
-        logger.error("Token refresh error", error=str(e))
+        logger.error("❌ Token refresh error", error=str(e))
         raise HTTPException(status_code=401, detail="Could not refresh token")
 
 @auth_router.post("/logout")
@@ -265,7 +290,7 @@ async def get_active_sessions(user: Dict = Depends(get_current_user)):
     """Отримання списку активних сесій (тільки для адмінів)"""
 
     try:
-        sessions = get_auth_manager().get_active_sessions()
+        sessions = await get_auth_manager().get_active_sessions()
 
         sessions_info = []
         for session in sessions:

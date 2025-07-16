@@ -13,6 +13,7 @@ import { I18nProvider } from "./contexts/I18nContext";
 import { AuthProvider } from "./contexts/AuthContext";
 import { PageTransition } from "./components/PageTransition";
 import ConsoleLogs from "./components/ConsoleLogs";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 const AppContent: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -139,15 +140,17 @@ const AppContent: React.FC = () => {
 
 function App() {
   return (
-    <SettingsProvider>
-      <I18nProvider>
-        <AuthProvider>
-          <StatusProvider>
-            <AppContent />
-          </StatusProvider>
-        </AuthProvider>
-      </I18nProvider>
-    </SettingsProvider>
+    <ErrorBoundary>
+      <SettingsProvider>
+        <I18nProvider>
+          <AuthProvider>
+            <StatusProvider>
+              <AppContent />
+            </StatusProvider>
+          </AuthProvider>
+        </I18nProvider>
+      </SettingsProvider>
+    </ErrorBoundary>
   );
 }
 

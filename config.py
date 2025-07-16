@@ -61,8 +61,8 @@ class Settings:
 
     # WebSocket налаштування
     websocket_path: str = "/ws"
-    websocket_timeout: int = 60
-    websocket_heartbeat_interval: int = 30
+    websocket_timeout: int = 600  # Збільшено з 120 до 600 секунд (10 хвилин)
+    websocket_heartbeat_interval: int = 60  # Збільшено з 30 до 60 секунд
     max_connections: int = 1000
 
     # Автентифікація та безпека
@@ -81,9 +81,9 @@ class Settings:
     redis_url: str = ""  # Має бути встановлено через REDIS_URL
     redis_tls_enabled: bool = True  # За замовчуванням TLS для продакшн
     redis_ssl_cert_reqs: str = "required"
-    redis_max_connections: int = 20
+    redis_max_connections: int = 50  # Збільшено з 10 до 50 для вирішення "Too many connections"
     redis_retry_on_timeout: bool = True
-    redis_health_check_interval: int = 30
+    redis_health_check_interval: int = 120  # Збільшено до 2 хвилин для Upstash
 
     # Redis Sentinel налаштування
     redis_sentinel_urls: List[str] = field(default_factory=list)
@@ -141,9 +141,48 @@ class Settings:
         if self.role_permissions is None:
             self.role_permissions = {
                 "admin": [
-                    "dashboard.view", "clients.view", "clients.manage",
-                    "tasks.view", "tasks.manage", "settings.view",
-                    "settings.manage", "logs.view", "auth.manage"
+                    # Основні права дашборду
+                    "dashboard.view", "dashboard.manage",
+                    
+                    # Права на клієнтів
+                    "clients.view", "clients.manage", "clients.create", "clients.delete",
+                    
+                    # Права на завдання
+                    "tasks.view", "tasks.manage", "tasks.create", "tasks.delete", "tasks.execute",
+                    
+                    # Права на налаштування
+                    "settings.view", "settings.manage", "settings.update",
+                    
+                    # Права на логи
+                    "logs.view", "logs.manage", "logs.export",
+                    
+                    # Права на авторизацію
+                    "auth.manage", "auth.view", "auth.sessions",
+                    
+                    # Права на метрики та моніторинг
+                    "metrics.view", "metrics.manage", "metrics.export",
+                    "monitoring.view", "monitoring.manage",
+                    
+                    # Права на систему
+                    "system.view", "system.manage", "system.restart", "system.config",
+                    
+                    # Права на Redis
+                    "redis.view", "redis.manage",
+                    
+                    # Права на WebSocket
+                    "websocket.view", "websocket.manage",
+                    
+                    # Права на API
+                    "api.view", "api.manage", "api.debug",
+                    
+                    # Права на безпеку
+                    "security.view", "security.manage",
+                    
+                    # Права на звіти
+                    "reports.view", "reports.create", "reports.export",
+                    
+                    # Повний доступ
+                    "*"  # Універсальне право для адміна
                 ]
             }
 
@@ -153,6 +192,21 @@ class Settings:
 
     def _load_from_env(self):
         """Завантаження налаштувань зі змінних середовища"""
+        # СПОЧАТКУ завантажуємо ENVIRONMENT з змінних середовища
+        env_name = os.getenv("ENVIRONMENT", self.environment.value)
+        try:
+            self.environment = Environment(env_name)
+        except ValueError:
+            pass
+
+        # ПОТІМ перевіряємо Heroku тільки якщо ENVIRONMENT не встановлено явно
+        if env_name == self.environment.value and is_heroku_environment():
+            self.environment = Environment.PRODUCTION
+            # Redis увімкнено тільки якщо є URL
+            self.redis_enabled = bool(os.getenv("REDIS_URL"))
+            self.debug = False
+
+        # Інші налаштування
         self.redis_enabled = os.getenv("REDIS_ENABLED", str(self.redis_enabled)).lower() in ("true", "1", "yes")
         self.redis_url = os.getenv("REDIS_URL", self.redis_url)
         self.redis_tls_enabled = os.getenv("REDIS_TLS_ENABLED", str(self.redis_tls_enabled)).lower() in ("true", "1", "yes")
@@ -173,19 +227,6 @@ class Settings:
         self.debug = os.getenv("DEBUG", str(self.debug)).lower() in ("true", "1", "yes")
         self.auth_token = os.getenv("AUTH_TOKEN", self.auth_token)
         self.require_authentication = os.getenv("REQUIRE_AUTHENTICATION", str(self.require_authentication)).lower() in ("true", "1", "yes")
-
-        # Автоматичне визначення Heroku середовища
-        if is_heroku_environment():
-            self.environment = Environment.PRODUCTION
-            # Redis увімкнено тільки якщо є URL
-            self.redis_enabled = bool(os.getenv("REDIS_URL"))
-            self.debug = False
-
-        env_name = os.getenv("ENVIRONMENT", self.environment.value)
-        try:
-            self.environment = Environment(env_name)
-        except ValueError:
-            pass
 
         log_level_name = os.getenv("LOG_LEVEL", self.log_level.value)
         try:

@@ -26,6 +26,27 @@ class TaskType(str, Enum):
     CALCULATION = "calculation"
     CUSTOM = "custom"
 
+    # Типи завдань для бота
+    PING_BOT = "ping_bot"
+    GENERIC_BOT_TASK = "generic_bot_task"
+    SEND_MESSAGE = "send_message"
+    EDIT_MESSAGE = "edit_message"
+    DELETE_MESSAGE = "delete_message"
+    SEND_PHOTO = "send_photo"
+    SEND_DOCUMENT = "send_document"
+    MODULE_ACTIVATED = "module_activated"
+    MODULE_DEACTIVATED = "module_deactivated"
+
+    # Типи завдань для воркерів
+    WORKER_TASK = "worker_task"
+
+
+class ExecutorType(str, Enum):
+    """Типи виконавців завдань"""
+    BOT = "bot"
+    WORKER = "worker"
+    WORKER_API = "worker_api"
+
 
 class TaskMetadata(BaseModel):
     """Метадані завдання"""
@@ -78,6 +99,9 @@ class TaskContext(BaseModel):
     # Ідентифікатор клієнта, який відправив завдання
     client_id: Optional[str] = None
 
+    # Ідентифікатор кореляції для зв'язування запитів/відповідей
+    correlation_id: Optional[str] = None
+
     # Час створення завдання
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -119,7 +143,8 @@ class TaskContext(BaseModel):
 
     class Config:
         json_encoders = {
-            datetime: lambda v: v.isoformat()
+            datetime: lambda v: v.isoformat(),
+            set: lambda v: list(v)  # Конвертуємо set в list для JSON серіалізації
         }
 
     def add_status_change(self, new_status: TaskStatus, message: str = ""):
@@ -178,6 +203,13 @@ class TaskContext(BaseModel):
             TaskStatus.TIMEOUT
         ]
 
+    def reset_assignment(self):
+        """Скидання призначення воркеру при невдалому надсиланні"""
+        self.worker_id = None
+        self.assigned_at = None
+        self.started_at = None
+        self.add_status_change(TaskStatus.PENDING, "Assignment reset due to communication failure")
+
 
 class Task(BaseModel):
     """Основна модель завдання"""
@@ -203,6 +235,9 @@ class Task(BaseModel):
     # Затримка між спробами (секунди)
     retry_delay: int = 5
 
+    # Тип виконавця завдання
+    executor_type: ExecutorType = ExecutorType.WORKER
+
     # Вимоги до воркера
     worker_requirements: List[str] = Field(default_factory=list)
 
@@ -214,7 +249,8 @@ class Task(BaseModel):
 
     class Config:
         json_encoders = {
-            datetime: lambda v: v.isoformat()
+            datetime: lambda v: v.isoformat(),
+            set: lambda v: list(v)  # Конвертуємо set в list для JSON серіалізації
         }
 
     def __init__(self, **data):
@@ -228,6 +264,33 @@ class Task(BaseModel):
         """Створення нового завдання"""
         task_id = kwargs.get('task_id', str(uuid.uuid4()))
         context = TaskContext(task_id=task_id)
+
+        # Валідація та нормалізація executor_type
+        executor_type = kwargs.get('executor_type', ExecutorType.WORKER)
+        if isinstance(executor_type, str):
+            # Автоматичний мапінг строкових значень
+            executor_mapping = {
+                'bot': ExecutorType.BOT,
+                'worker': ExecutorType.WORKER,
+                'worker_api': ExecutorType.WORKER_API,
+                'api': ExecutorType.WORKER_API,  # Альтернативна назва
+                'api_worker': ExecutorType.WORKER_API  # Альтернативна назва
+            }
+            
+            executor_type_lower = executor_type.lower()
+            if executor_type_lower in executor_mapping:
+                executor_type = executor_mapping[executor_type_lower]
+            else:
+                # Невідомий тип - використовуємо WORKER за замовчуванням
+                from structlog import get_logger
+                logger = get_logger(__name__)
+                logger.warning("Unknown executor_type, using WORKER as default",
+                             provided_executor_type=executor_type,
+                             valid_types=list(executor_mapping.keys()))
+                executor_type = ExecutorType.WORKER
+        
+        # Встановлюємо executor_type в kwargs для передачі в конструктор
+        kwargs['executor_type'] = executor_type
 
         return cls(
             task_id=task_id,
@@ -327,6 +390,7 @@ class Task(BaseModel):
             "timeout": self.timeout,
             "is_expired": self.context.is_expired(),
             "can_retry": self.can_retry(),
+            "task_data": self.data,
             "metadata": self.metadata.model_dump()
         }
 

@@ -39,7 +39,7 @@ const loadLogsFromStorage = (): LogEntry[] => {
 
 const fetchBackendLogs = async (limit = 200): Promise<LogEntry[]> => {
   try {
-    const res = await fetch(`/dashboard/api/system-logs?limit=${limit}`);
+    const res = await fetch(`/api/frontend/system-logs?limit=${limit}`);
     if (!res.ok) return [];
     const { logs = [] } = await res.json();
     return (logs as any[]).map((l) => ({

@@ -46,7 +46,7 @@ export const ClientsView: React.FC = () => {
 
   const fetchClientsData = useCallback(async () => {
     try {
-      const response = await fetch("/dashboard/api/clients/detailed");
+      const response = await fetch("/api/clients/detailed");
       if (!response.ok) {
         throw new Error(`${t("errors.serverError")}: ${response.status}`);
       }
@@ -300,13 +300,18 @@ export const ClientsView: React.FC = () => {
 
   const { stats_by_type } = displayData;
 
+  // Безпечне отримання статистики з fallback значеннями
+  const getStatsSafe = (type: keyof typeof stats_by_type): ClientStats => {
+    return stats_by_type?.[type] || { count: 0, connected: 0, available: 0, busy: 0 };
+  };
+
   const clientTypes = [
-    { key: 'bot', title: t('clients.bot'), icon: <BotIcon size="lg" />, stats: stats_by_type.bot },
-    { key: 'worker', title: t('clients.worker'), icon: <WorkerIcon size="lg" />, stats: stats_by_type.worker },
-    { key: 'worker_api', title: t('clients.workerApi'), icon: <ApiWorkerIcon size="lg" />, stats: stats_by_type.worker_api },
-    { key: 'stream_hub', title: t('clients.streamHub'), icon: <StreamHubIcon size="lg" />, stats: stats_by_type.stream_hub },
-    { key: 'monitor', title: t('clients.monitor'), icon: <MonitorIcon size="lg" />, stats: stats_by_type.monitor },
-    { key: 'admin', title: t('clients.admin'), icon: <AdminIcon size="lg" />, stats: stats_by_type.admin },
+    { key: 'bot', title: t('clients.bot'), icon: <BotIcon size="lg" />, stats: getStatsSafe('bot') },
+    { key: 'worker', title: t('clients.worker'), icon: <WorkerIcon size="lg" />, stats: getStatsSafe('worker') },
+    { key: 'worker_api', title: t('clients.workerApi'), icon: <ApiWorkerIcon size="lg" />, stats: getStatsSafe('worker_api') },
+    { key: 'stream_hub', title: t('clients.streamHub'), icon: <StreamHubIcon size="lg" />, stats: getStatsSafe('stream_hub') },
+    { key: 'monitor', title: t('clients.monitor'), icon: <MonitorIcon size="lg" />, stats: getStatsSafe('monitor') },
+    { key: 'admin', title: t('clients.admin'), icon: <AdminIcon size="lg" />, stats: getStatsSafe('admin') },
   ];
 
   return (
@@ -390,7 +395,7 @@ export const ClientsView: React.FC = () => {
             
             <div className="space-y-4">
               {['worker', 'worker_api'].map((workerType, index) => {
-                const workerData = stats_by_type[workerType as keyof typeof stats_by_type];
+                const workerData = getStatsSafe(workerType as keyof typeof stats_by_type);
                 const title = workerType === 'worker' ? t('clients.standardWorkers') : t('clients.apiWorkers');
                 
                 return (

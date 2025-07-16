@@ -5,13 +5,16 @@ TetraCore StreamHub Client Models
 Включає інформацію про клієнтів, їх можливості та статистику.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, Set
 from enum import Enum
 from pydantic import BaseModel, Field
 import uuid
+import logging
 
 from models.messages import ClientType, TaskStatus
+
+logger = logging.getLogger(__name__)
 
 
 class ConnectionStatus(str, Enum):
@@ -61,6 +64,11 @@ class WorkerCapabilities(BaseModel):
 
     # Максимальна пріоритетність завдань
     max_priority: str = "critical"
+
+    # Alias для сумісності зі старим кодом
+    @property
+    def supported_actions(self) -> List[str]:
+        return self.supported_task_types
 
 
 class ClientStats(BaseModel):
@@ -159,7 +167,8 @@ class ClientInfo(BaseModel):
 
     class Config:
         json_encoders = {
-            datetime: lambda v: v.isoformat()
+            datetime: lambda v: v.isoformat(),
+            set: lambda v: list(v)  # Конвертуємо set в list для JSON серіалізації
         }
 
     def is_connected(self) -> bool:
@@ -174,28 +183,37 @@ class ClientInfo(BaseModel):
         """Перевірка чи це бот"""
         return self.client_type == ClientType.BOT
 
+    def can_execute_tasks(self) -> bool:
+        """Перевірка чи може клієнт виконувати завдання (уніфікований метод)"""
+        # Монітори та адміни не виконують таски
+        if self.client_type in [ClientType.MONITOR, ClientType.ADMIN]:
+            return False
+        
+        # Для всіх інших типів (BOT, WORKER, WORKER_API, STREAM_HUB) перевіряємо capabilities
+        return bool(self.capabilities and self.capabilities.supported_task_types)
+
     def can_handle_task(self, task_type: str) -> bool:
-        """Перевірка чи може воркер обробити завдання"""
-        if not self.is_worker() or not self.capabilities:
+        """Перевірка чи може клієнт обробити завдання"""
+        # Використовуємо новий уніфікований метод
+        if not self.can_execute_tasks():
             return False
         return task_type in self.capabilities.supported_task_types
 
     def is_available(self) -> bool:
-        """Перевірка чи доступний воркер для нових завдань"""
-        if not self.is_worker() or not self.is_connected():
+        """Перевірка чи доступний клієнт для нових завдань"""
+        # Використовуємо уніфікований метод та перевіряємо підключення
+        if not self.can_execute_tasks() or not self.is_connected():
             return False
 
-        if self.worker_status in [WorkerStatus.MAINTENANCE, WorkerStatus.ERROR]:
-            return False
-
-        if not self.capabilities:
+        # Для воркерів перевіряємо статус
+        if self.is_worker() and self.worker_status in [WorkerStatus.MAINTENANCE, WorkerStatus.ERROR]:
             return False
 
         return self.stats.active_tasks < self.capabilities.max_concurrent_tasks
 
     def get_load_percentage(self) -> float:
         """Отримання процентного навантаження"""
-        if not self.is_worker() or not self.capabilities:
+        if not self.can_execute_tasks():
             return 0.0
 
         if self.capabilities.max_concurrent_tasks == 0:
@@ -252,16 +270,19 @@ class Client(BaseModel):
     class Config:
         arbitrary_types_allowed = True
         json_encoders = {
-            datetime: lambda v: v.isoformat()
+            datetime: lambda v: v.isoformat(),
+            set: lambda v: list(v)  # Конвертуємо set в list для JSON серіалізації
         }
 
     @classmethod
-    def create_bot(cls, client_id: str, client_name: str, **kwargs) -> "Client":
+    def create_bot(cls, client_id: str, client_name: str, 
+                   capabilities: Optional[WorkerCapabilities] = None, **kwargs) -> "Client":
         """Створення клієнта-бота"""
         info = ClientInfo(
             client_id=client_id,
             client_type=ClientType.BOT,
             client_name=client_name,
+            capabilities=capabilities,
             **kwargs
         )
         return cls(info=info)
@@ -306,12 +327,14 @@ class Client(BaseModel):
         return cls(info=info)
 
     @classmethod
-    def create_stream_hub(cls, client_id: str, client_name: str, **kwargs) -> "Client":
+    def create_stream_hub(cls, client_id: str, client_name: str,
+                         capabilities: Optional[WorkerCapabilities] = None, **kwargs) -> "Client":
         """Створення Stream Hub клієнта"""
         info = ClientInfo(
             client_id=client_id,
             client_type=ClientType.STREAM_HUB,
             client_name=client_name,
+            capabilities=capabilities,
             **kwargs
         )
         return cls(info=info)
@@ -346,10 +369,34 @@ class Client(BaseModel):
             self.info.stats.total_connection_time += connection_time
 
     def assign_task(self, task_id: str):
-        """Призначення завдання воркеру"""
-        if self.info.is_worker() and self.info.is_available():
-            self.active_tasks[task_id] = datetime.utcnow()
+        """Призначення завдання клієнту"""
+        logger.info(f"[ASSIGN_TASK] Attempting to assign task {task_id} to client {self.info.client_id}")
+        logger.info(f"[ASSIGN_TASK] Client checks: can_execute_tasks={self.info.can_execute_tasks()}, client_type={self.info.client_type.value}, has_capabilities={bool(self.info.capabilities)}")
+        logger.info(f"[ASSIGN_TASK] Load: active_tasks={self.info.stats.active_tasks}, max_concurrent={self.info.capabilities.max_concurrent_tasks if self.info.capabilities else 0}")
+
+        # Використовуємо уніфікований метод замість перевірки окремих типів
+        if not self.info.can_execute_tasks():
+            logger.warning(f"[ASSIGN_TASK] Rejected: client cannot execute tasks (type: {self.info.client_type.value})")
+            return False
+
+        if self.info.stats.active_tasks >= self.info.capabilities.max_concurrent_tasks:
+            logger.warning(f"[ASSIGN_TASK] Rejected: max tasks reached ({self.info.stats.active_tasks}/{self.info.capabilities.max_concurrent_tasks})")
+            return False
+
+        self.active_tasks[task_id] = datetime.utcnow()
+        self.info.stats.active_tasks = len(self.active_tasks)
+        self.info.stats.total_tasks += 1
+        self.info.stats.last_activity = datetime.utcnow()
+        logger.info(f"[ASSIGN_TASK] Accepted: task {task_id} assigned successfully to {self.info.client_type.value}")
+        return True
+
+    def release_task(self, task_id: str):
+        """Скидання призначення завдання"""
+        if task_id in self.active_tasks:
+            self.active_tasks.pop(task_id)
             self.info.stats.active_tasks = len(self.active_tasks)
+            self.info.stats.last_activity = datetime.utcnow()
+            logger.info(f"[RELEASE_TASK] Task {task_id} released from client {self.info.client_id}")
             return True
         return False
 

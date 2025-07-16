@@ -482,6 +482,148 @@ code {
     z-index: 80 !important;
 }
 
+.z-105 {
+    z-index: 105 !important;
+}
+
+.z-110 {
+    z-index: 110 !important;
+}
+
+/* Модальні вікна - захист від overflow та покращене відображення */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    overflow-y: auto;
+    scroll-behavior: smooth;
+}
+
+.modal-content {
+    max-width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    margin: auto;
+    border-radius: 0.75rem;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    background: white;
+    position: relative;
+}
+
+/* Захист від прокрутки body коли модальне вікно відкрите */
+.modal-open {
+    overflow: hidden !important;
+    position: fixed !important;
+    width: 100% !important;
+    height: 100% !important;
+    top: 0 !important;
+    left: 0 !important;
+}
+
+/* Забезпечення правильного відображення модальних вікон */
+.modal-backdrop {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    z-index: 999999 !important;
+    background-color: rgba(0, 0, 0, 0.8) !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 0.5rem !important;
+}
+
+@media (min-width: 640px) {
+    .modal-backdrop {
+        padding: 1rem !important;
+    }
+}
+
+.modal-content-wrapper {
+    z-index: 1000000 !important;
+    position: relative !important;
+    max-width: 100% !important;
+    max-height: 90vh !important;
+    overflow-y: auto !important;
+    background: white !important;
+    border-radius: 0.75rem !important;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25) !important;
+}
+
+/* Покращення відображення на маленьких екранах */
+@media (max-width: 640px) {
+    .modal-overlay {
+        padding: 0.5rem;
+    }
+    
+    .modal-content {
+        max-height: 95vh;
+        border-radius: 0.5rem;
+    }
+}
+
+/* Покращення touch targets для мобільних пристроїв */
+.touch-manipulation {
+    touch-action: manipulation;
+    min-height: 44px;
+    min-width: 44px;
+}
+
+/* Покращення анімації для налаштувань панелі */
+.animation-settings-panel {
+    animation: modalFadeIn 0.3s ease-out forwards;
+    transform-origin: center center;
+}
+
+@keyframes modalFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.9) translateY(20px);
+        filter: blur(2px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+        filter: blur(0px);
+    }
+}
+
+/* Анімація закриття модального вікна */
+.modal-closing {
+    animation: modalFadeOut 0.2s ease-in forwards;
+}
+
+@keyframes modalFadeOut {
+    from {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+        filter: blur(0px);
+    }
+    to {
+        opacity: 0;
+        transform: scale(0.9) translateY(-20px);
+        filter: blur(2px);
+    }
+}
+
+/* Покращення відображення перемикачів */
+.toggle-switch {
+    transition: all 0.2s ease-in-out;
+}
+
+.toggle-switch:focus {
+    outline: 2px solid rgba(59, 130, 246, 0.5);
+    outline-offset: 2px;
+}
+
 /* Спеціальні анімації для сайд-бара */
 .sidebar-smooth {
     transition: all 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94) !important;
@@ -758,4 +900,19 @@ code {
         animation: none !important;
         will-change: auto !important;
     }
+}
+
+/* ФІКС ВИДИМОСТІ: Забезпечення того, що всі елементи видимі */
+.task-table,
+.task-table td,
+.task-table th,
+.task-table button,
+.task-table span,
+table tbody tr,
+table tbody td,
+tbody tr,
+tbody td {
+    opacity: 1 !important;
+    visibility: visible !important;
+    color: inherit !important;
 }

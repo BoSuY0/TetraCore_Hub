@@ -13,11 +13,82 @@ from typing import Dict, List, Optional, Set, Callable, Any
 from collections import defaultdict
 import structlog
 import orjson
+import uuid
 
 from config import Settings
 from models.task import Task, TaskType, TaskStatus, TaskPriority, TaskQueue
 from models.client import Client, ClientType
 from models.messages import BaseMessage, MessageType, create_message
+
+
+class RedisErrorHandler:
+    """Обробник помилок Redis з exponential backoff"""
+    
+    def __init__(self, max_retries: int = 3, base_delay: float = 0.5):
+        self.max_retries = max_retries
+        self.base_delay = base_delay
+        self.connection_errors = 0
+        self.last_error_time = None
+        self.logger = structlog.get_logger(__name__)
+    
+    async def execute_with_retry(self, operation, *args, **kwargs):
+        """Виконання Redis операції з retry логікою"""
+        last_exception = None
+        
+        for attempt in range(self.max_retries + 1):
+            try:
+                return await operation(*args, **kwargs)
+            
+            except Exception as e:
+                last_exception = e
+                error_str = str(e).lower()
+                
+                # Перевіряємо тип помилки
+                if "too many connections" in error_str:
+                    self.connection_errors += 1
+                    self.last_error_time = datetime.utcnow()
+                    
+                    if attempt < self.max_retries:
+                        delay = self.base_delay * (2 ** attempt)  # Exponential backoff
+                        self.logger.warning(
+                            "Redis connection limit reached, retrying",
+                            attempt=attempt + 1,
+                            delay=delay,
+                            error=str(e)
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                
+                elif "connection" in error_str or "timeout" in error_str:
+                    if attempt < self.max_retries:
+                        delay = self.base_delay * (2 ** attempt)
+                        self.logger.warning(
+                            "Redis connection error, retrying",
+                            attempt=attempt + 1,
+                            delay=delay,
+                            error=str(e)
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                
+                # Інші помилки не retry
+                break
+        
+        # Якщо всі спроби невдалі
+        self.logger.error(
+            "Redis operation failed after all retries",
+            attempts=self.max_retries + 1,
+            error=str(last_exception)
+        )
+        return None
+    
+    def should_skip_redis(self) -> bool:
+        """Перевірка чи слід пропустити Redis операції"""
+        if self.connection_errors > 10 and self.last_error_time:
+            # Пропускаємо Redis на 5 хвилин після багатьох помилок
+            if (datetime.utcnow() - self.last_error_time).total_seconds() < 300:
+                return True
+        return False
 
 
 class TaskRouter:
@@ -40,8 +111,14 @@ class TaskRouter:
         # Активні завдання (task_id -> task)
         self.active_tasks: Dict[str, Task] = {}
 
-        # Завдання, призначені воркерам (worker_id -> set of task_ids)
-        self.worker_tasks: Dict[str, Set[str]] = defaultdict(set)
+        # Історія всіх завдань (task_id -> task) - зберігає completed/failed/cancelled tasks
+        self.task_history: Dict[str, Task] = {}
+
+        # Максимальний розмір історії (для уникнення переповнення пам'яті)
+        self.max_history_size = 10000
+
+        # Завдання, призначені виконавцям (executor_id -> set of task_ids)
+        self.executor_tasks: Dict[str, Set[str]] = defaultdict(set)
 
         # Завдання, що очікують результату (task_id -> client_websocket)
         self.pending_results: Dict[str, Any] = {}
@@ -65,6 +142,19 @@ class TaskRouter:
 
         # Посилання на ClientManager (буде встановлено ззовні)
         self.client_manager = None
+
+        # Ініціалізація Redis клієнта
+        self.redis_manager = redis_manager
+        if self.redis_manager and hasattr(self.redis_manager, 'redis_client'):
+            self.redis_client = self.redis_manager.redis_client
+        elif settings.redis_enabled:
+            self.logger.warning("Redis enabled in settings but no Redis manager provided")
+            self.redis_client = None
+        else:
+            self.redis_client = None
+        
+        # Redis error handler
+        self.redis_error_handler = RedisErrorHandler(max_retries=3, base_delay=0.5)
 
     async def initialize(self):
         """Ініціалізація роутера"""
@@ -117,29 +207,94 @@ class TaskRouter:
     async def submit_task(self, task: Task) -> bool:
         """Подання нового завдання"""
         try:
+            # Критична перевірка наявності ClientManager
+            if not self.client_manager:
+                self.logger.error("[TASK_ROUTER] ClientManager not initialized! Cannot submit tasks.",
+                                task_id=task.task_id)
+                raise ValueError("ClientManager is not set. Call set_client_manager() first.")
+
+            self.logger.info("[TASK_ROUTER] Received task submission",
+                           task_id=task.task_id,
+                           task_type=task.task_type.value if hasattr(task.task_type, 'value') else task.task_type,
+                           executor_type=task.executor_type.value if hasattr(task, 'executor_type') else 'unknown',
+                           priority=task.priority.value)
+
             # Перевірка чи черга не переповнена
             queue = self.task_queues[task.priority]
             if queue.is_full():
-                self.logger.warning("Task queue is full",
+                queue_stats = queue.get_stats()
+                self.logger.warning("Task queue is full - rejecting task",
                                   priority=task.priority.value,
-                                  task_id=task.task_id)
+                                  task_id=task.task_id,
+                                  queue_size=queue_stats['total_tasks'],
+                                  max_size=queue_stats['max_size'],
+                                  utilization=f"{queue_stats['utilization']:.1f}%")
+                
+                # Додаємо помилку до контексту таску для кращої діагностики
+                task.context.add_error(
+                    "queue_full", 
+                    f"Task queue '{queue.name}' is full ({queue_stats['total_tasks']}/{queue_stats['max_size']})",
+                    None
+                )
                 return False
 
             # Додавання до черги
             if not queue.add_task(task):
-                self.logger.error("Failed to add task to queue",
+                self.logger.error("Failed to add task to queue - internal error",
                                 task_id=task.task_id,
                                 priority=task.priority.value)
+                task.context.add_error("queue_add_failed", "Internal error adding task to queue", None)
                 return False
 
-            # Додавання до активних завдань
-            self.active_tasks[task.task_id] = task
+            self.logger.info("[TASK_ROUTER] Task added to queue successfully",
+                           task_id=task.task_id,
+                           priority=task.priority.value,
+                           executor_type=task.executor_type.value if hasattr(task, 'executor_type') else 'unknown',
+                           queue_size=len(queue.tasks),
+                           active_tasks_count=len(self.active_tasks))
+
+            # Логування стану таску
+            self.logger.info("[TASK_STATE] ✅ Таск прийнято і поставлено в чергу",
+                           task_id=task.task_id,
+                           task_type=task.task_type.value if hasattr(task.task_type, 'value') else task.task_type,
+                           state="PENDING",
+                           priority=task.priority.value,
+                           executor_type=task.executor_type.value if hasattr(task, 'executor_type') else 'unknown',
+                           status="В очікуванні доступного виконавця",
+                           queue_position=len(queue.tasks),
+                           in_active_tasks=False)
 
             # Оновлення статистики
             self.total_submitted += 1
 
+            # Очищаємо кеш статистики при додаванні нового таску
+            await self._invalidate_stats_cache()
+
             # Спроба призначити завдання негайно
-            await self._try_assign_task(task)
+            assigned = await self._try_assign_task(task)
+
+            # Додавання до активних завдань тільки якщо таск було призначено
+            # Інакше він залишається тільки в черзі як PENDING
+            if assigned:
+                self.active_tasks[task.task_id] = task
+
+            self.logger.debug("[TASK_ROUTER] Task assignment attempt",
+                           task_id=task.task_id,
+                           assigned=assigned,
+                           executor_type=task.executor_type.value if hasattr(task, 'executor_type') else 'unknown')
+
+            if not assigned:
+                executor_desc = {
+                    'bot': 'бота',
+                    'worker': 'воркера',
+                    'worker_api': 'API воркера'
+                }
+                exec_type = task.executor_type.value if hasattr(task, 'executor_type') else 'unknown'
+                self.logger.info("[TASK_STATE] ⏳ Таск залишається в черзі",
+                               task_id=task.task_id,
+                               state="PENDING",
+                               reason="Немає доступних виконавців",
+                               status=f"Очікує вільного {executor_desc.get(exec_type, 'виконавця')}")
 
             self.logger.info("Task submitted successfully",
                            task_id=task.task_id,
@@ -158,18 +313,41 @@ class TaskRouter:
         """Спроба призначити завдання воркеру"""
         try:
             if not self.client_manager:
+                self.logger.warning("[TASK_ROUTER] No client manager available",
+                                  task_id=task.task_id)
                 return False
 
-            # Пошук найкращого воркера
+            executor_desc = {
+                'bot': 'bot',
+                'worker': 'worker',
+                'worker_api': 'API worker'
+            }
+            exec_type = task.executor_type.value if hasattr(task, 'executor_type') else 'unknown'
+            self.logger.debug(f"[TASK_ROUTER] Looking for {executor_desc.get(exec_type, 'executor')}",
+                           task_id=task.task_id,
+                           task_type=task.task_type.value,
+                           executor_type=exec_type,
+                           worker_requirements=task.worker_requirements)
+
+            # Пошук найкращого виконавця
             worker = self.client_manager.get_best_worker(
                 task_type=task.task_type.value,
-                worker_requirements=task.worker_requirements
+                worker_requirements=task.worker_requirements,
+                executor_type=task.executor_type.value
             )
 
             if not worker:
-                self.logger.debug("No available worker found",
-                                task_id=task.task_id,
-                                task_type=task.task_type.value)
+                executor_desc = {
+                    'bot': 'bot',
+                    'worker': 'worker',
+                    'worker_api': 'API worker'
+                }
+                exec_type = task.executor_type.value if hasattr(task, 'executor_type') else 'unknown'
+                self.logger.debug(f"[TASK_ROUTER] No available {executor_desc.get(exec_type, 'executor')} found",
+                                  task_id=task.task_id,
+                                  task_type=task.task_type.value,
+                                  executor_type=exec_type,
+                                  worker_requirements=task.worker_requirements)
                 return False
 
             # Призначення завдання
@@ -186,23 +364,20 @@ class TaskRouter:
         try:
             worker_id = worker.info.client_id
 
-            # Призначення завдання
+            # Призначення завдання БЕЗ зміни статусу на PROCESSING (тільки ASSIGNED)
             task.assign_to_worker(worker_id)
-            task.start_execution()
 
-            # Оновлення внутрішніх структур
-            self.worker_tasks[worker_id].add(task.task_id)
-
-            # Призначення завдання в клієнта
+            # Перевірка можливості воркера прийняти завдання
             if not worker.assign_task(task.task_id):
                 self.logger.error("Worker rejected task assignment",
                                 task_id=task.task_id,
                                 worker_id=worker_id)
+                # Додати більше логування
+                self.logger.error(f"Worker details: type={worker.info.client_type}, capabilities={worker.info.capabilities}, active_tasks={worker.info.stats.active_tasks}, max_tasks={worker.info.capabilities.max_concurrent_tasks if worker.info.capabilities else 0}")
+                
+                # Скидання призначення
+                task.context.reset_assignment()
                 return False
-
-            # Видалення з черги
-            queue = self.task_queues[task.priority]
-            queue.remove_task(task.task_id)
 
             # Створення повідомлення для воркера
             assignment_message = create_message(
@@ -216,9 +391,79 @@ class TaskRouter:
                 assigned_at=datetime.utcnow()
             )
 
-            # Відправка завдання воркеру
-            if worker.websocket:
-                await worker.websocket.send_json(assignment_message.model_dump(mode='json'))
+            # Відправка завдання воркеру з обробкою помилок та ретраями
+            send_success = False
+            max_send_attempts = 3
+            send_attempt = 0
+            
+            while send_attempt < max_send_attempts and not send_success:
+                send_attempt += 1
+                try:
+                    if worker.websocket and worker.websocket.client_state.name in ["CONNECTED", "CONNECTING"]:
+                        # Відправка з таймаутом
+                        await asyncio.wait_for(
+                            worker.websocket.send_json(assignment_message.model_dump(mode='json')),
+                            timeout=5.0  # 5 секунд таймаут
+                        )
+                        send_success = True
+                        self.logger.info("Task message sent successfully",
+                                       task_id=task.task_id,
+                                       worker_id=worker_id,
+                                       attempt=send_attempt)
+                    else:
+                        self.logger.warning("Worker websocket not available",
+                                          task_id=task.task_id,
+                                          worker_id=worker_id,
+                                          websocket_state=worker.websocket.client_state.name if worker.websocket else "None")
+                        break
+                        
+                except asyncio.TimeoutError:
+                    self.logger.warning("WebSocket send timeout",
+                                      task_id=task.task_id,
+                                      worker_id=worker_id,
+                                      attempt=send_attempt)
+                    if send_attempt < max_send_attempts:
+                        await asyncio.sleep(0.5 * send_attempt)  # Exponential backoff
+                        
+                except Exception as e:
+                    self.logger.error("WebSocket send error",
+                                    task_id=task.task_id,
+                                    worker_id=worker_id,
+                                    attempt=send_attempt,
+                                    error=str(e))
+                    if send_attempt < max_send_attempts:
+                        await asyncio.sleep(0.5 * send_attempt)  # Exponential backoff
+
+            # Якщо надсилання не вдалося після всіх спроб
+            if not send_success:
+                self.logger.error("Failed to send task after all attempts",
+                                task_id=task.task_id,
+                                worker_id=worker_id,
+                                attempts=max_send_attempts)
+                
+                # Скидання призначення та повернення таску в чергу
+                worker.release_task(task.task_id)
+                task.context.reset_assignment()
+                return False
+
+            # ТІЛЬКИ ТЕПЕР встановлюємо статус PROCESSING після успішного надсилання
+            task.start_execution()
+
+            # Оновлення внутрішніх структур після успішного надсилання
+            self.executor_tasks[worker_id].add(task.task_id)
+
+            # Видалення з черги
+            queue = self.task_queues[task.priority]
+            queue.remove_task(task.task_id)
+
+            # Додавання до активних завдань після успішного призначення
+            self.active_tasks[task.task_id] = task
+            
+            # Логування додавання в active_tasks
+            self.logger.info("[TASK_STATE] ✅ Таск додано в active_tasks після успішного надсилання",
+                           task_id=task.task_id,
+                           worker_id=worker_id,
+                           active_tasks_count=len(self.active_tasks))
 
             # Виклик callback
             if self.on_task_assigned:
@@ -234,8 +479,16 @@ class TaskRouter:
         except Exception as e:
             self.logger.error("Failed to assign task to worker",
                             task_id=task.task_id,
-                            worker_id=worker.info.client_id,
+                            worker_id=worker.info.client_id if 'worker' in locals() else "unknown",
                             error=str(e))
+            
+            # Скидання призначення при будь-якій помилці
+            if 'worker' in locals() and 'task' in locals():
+                try:
+                    worker.release_task(task.task_id)
+                    task.context.reset_assignment()
+                except:
+                    pass
             return False
 
     async def handle_task_result(self, task_id: str, worker_id: str,
@@ -270,36 +523,23 @@ class TaskRouter:
                     worker.complete_task(task_id, status, execution_time)
 
             # Видалення з активних завдань воркера
-            self.worker_tasks[worker_id].discard(task_id)
+            self.executor_tasks[worker_id].discard(task_id)
 
-            # Збереження результату в Redis для API воркера або бота
-            if self.redis_client:
-                try:
-                    result_key = f"task_result:{task_id}"
-                    result_data = {
-                        "success": status == TaskStatus.COMPLETED,
-                        "result": result,
-                        "error": error_message,
-                        "status": status.value,
-                        "worker_id": worker_id,
-                        "execution_time": execution_time,
-                        "timestamp": datetime.utcnow().isoformat()
-                    }
-                    # Зберігаємо результат на 5 хвилин
-                    await self.redis_client.set(
-                        result_key,
-                        orjson.dumps(result_data),
-                        ex=300
-                    )
-                    self.logger.debug(f"Результат завдання {task_id} збережено в Redis")
-                except Exception as e:
-                    self.logger.error(f"Не вдалося зберегти результат в Redis: {e}")
+            # Результати тепер відправляються тільки через WebSocket, не зберігаємо в Redis
+            self.logger.info(f"[WS_RESULT] Task result will be sent to client via WebSocket only",
+                           task_id=task_id,
+                           status=status.value,
+                           client_id=task.context.client_id)
 
             # Відправка результату боту
             await self._send_result_to_client(task)
 
-            # Видалення з активних завдань
+            # Переміщення з активних завдань в історію
             del self.active_tasks[task_id]
+            self._add_to_history(task)
+
+            # Очищаємо кеш статистики при зміні статусу таску
+            await self._invalidate_stats_cache()
 
             # Виклик callbacks
             if status == TaskStatus.COMPLETED and self.on_task_completed:
@@ -313,7 +553,7 @@ class TaskRouter:
             self.logger.info("Task result processed",
                            task_id=task_id,
                            worker_id=worker_id,
-                           status=status.value,
+                           status=status.value if hasattr(status, 'value') else str(status),
                            execution_time=execution_time)
 
         except Exception as e:
@@ -325,14 +565,30 @@ class TaskRouter:
     async def _send_result_to_client(self, task: Task):
         """Відправка результату завдання клієнту"""
         try:
+            self.logger.info(f"[WS_RESULT_SEND] Attempting to send result to client",
+                           task_id=task.task_id,
+                           client_id=task.context.client_id,
+                           has_client_manager=self.client_manager is not None)
+
             if not task.context.client_id:
+                self.logger.warning(f"[WS_RESULT_SEND] No client_id for task {task.task_id}")
                 return
 
             if not self.client_manager:
+                self.logger.warning(f"[WS_RESULT_SEND] No client_manager available")
                 return
 
             client = self.client_manager.get_client(task.context.client_id)
+            self.logger.info(f"[WS_RESULT_SEND] Client lookup result",
+                           task_id=task.task_id,
+                           client_id=task.context.client_id,
+                           client_found=client is not None,
+                           has_websocket=client.websocket is not None if client else False)
+
             if not client or not client.websocket:
+                self.logger.warning(f"[WS_RESULT_SEND] Client not found or no websocket",
+                                  task_id=task.task_id,
+                                  client_id=task.context.client_id)
                 return
 
             # Створення повідомлення з результатом
@@ -347,7 +603,17 @@ class TaskRouter:
                 completed_at=datetime.utcnow()
             )
 
+            self.logger.info(f"[WS_RESULT_SEND] Sending result message to client",
+                           task_id=task.task_id,
+                           client_id=task.context.client_id,
+                           message_type=result_message.message_type,
+                           has_result=task.context.result is not None)
+
             await client.websocket.send_json(result_message.model_dump(mode='json'))
+
+            self.logger.info(f"[WS_RESULT_SEND] ✅ Result successfully sent to client",
+                           task_id=task.task_id,
+                           client_id=task.context.client_id)
 
         except Exception as e:
             self.logger.error("Failed to send result to client",
@@ -358,29 +624,140 @@ class TaskRouter:
     async def _process_next_task(self):
         """Обробка наступного завдання з черги"""
         try:
-            if not self.client_manager:
-                return
-
-            # Пошук завдання в порядку пріоритету
+            # Пошук наступного завдання в черзі за пріоритетом
             for priority in [TaskPriority.CRITICAL, TaskPriority.HIGH, TaskPriority.NORMAL, TaskPriority.LOW]:
                 queue = self.task_queues[priority]
-
-                if queue.is_empty():
-                    continue
-
-                # Пошук доступного воркера
-                available_workers = self.client_manager.get_available_workers()
-                if not available_workers:
-                    break
-
-                # Отримання наступного завдання
-                next_task = queue.get_next_task()
-                if next_task:
-                    await self._try_assign_task(next_task)
-                    break
+                if queue.tasks:
+                    # Беремо перше завдання
+                    task_id = next(iter(queue.tasks))
+                    task = queue.tasks[task_id]
+                    
+                    # Спроба призначити завдання
+                    if await self._try_assign_task(task):
+                        # Завдання успішно призначено
+                        break
 
         except Exception as e:
             self.logger.error("Error processing next task", error=str(e))
+
+    async def process_pending_tasks_for_client(self, client: 'Client') -> int:
+        """
+        Обробка pending tasks для нового клієнта
+        
+        Args:
+            client: Новий клієнт, що з'єднався з хабом
+            
+        Returns:
+            Кількість призначених завдань
+        """
+        try:
+            assigned_count = 0
+            client_id = client.info.client_id
+            client_type = client.info.client_type.value
+            
+            self.logger.info("Processing pending tasks for new client",
+                           client_id=client_id,
+                           client_type=client_type)
+            
+            # Перевіряємо чи клієнт може виконувати завдання
+            if client_type not in ['bot', 'worker', 'worker_api']:
+                self.logger.debug("Client type cannot execute tasks",
+                                client_id=client_id,
+                                client_type=client_type)
+                return 0
+            
+            # Проходимо по чергах за пріоритетом
+            for priority in [TaskPriority.CRITICAL, TaskPriority.HIGH, TaskPriority.NORMAL, TaskPriority.LOW]:
+                queue = self.task_queues[priority]
+                
+                if not queue.tasks:
+                    continue
+                    
+                # Копіюємо список task_id для безпечної ітерації
+                task_ids = list(queue.tasks.keys())
+                
+                for task_id in task_ids:
+                    task = queue.tasks.get(task_id)
+                    if not task:
+                        continue
+                    
+                    # Перевіряємо чи цей клієнт може виконати завдання
+                    if self._can_client_execute_task(client, task):
+                        # Спробуємо призначити завдання
+                        if await self._assign_task_to_worker(task, client):
+                            assigned_count += 1
+                            self.logger.info("Assigned pending task to new client",
+                                           task_id=task_id,
+                                           client_id=client_id,
+                                           priority=priority.value)
+                            
+                            # Обмежуємо кількість одночасно призначених завдань
+                            if assigned_count >= 5:  # Максимум 5 завдань за раз
+                                break
+                
+                # Якщо досягли ліміту, зупиняємося
+                if assigned_count >= 5:
+                    break
+            
+            self.logger.info("Completed processing pending tasks for new client",
+                           client_id=client_id,
+                           assigned_count=assigned_count)
+            
+            return assigned_count
+            
+        except Exception as e:
+            self.logger.error("Error processing pending tasks for new client",
+                            client_id=client.info.client_id if client else "unknown",
+                            error=str(e))
+            return 0
+
+    def _can_client_execute_task(self, client: 'Client', task: Task) -> bool:
+        """
+        Перевіряє чи може клієнт виконати конкретне завдання
+        
+        Args:
+            client: Клієнт для перевірки
+            task: Завдання для перевірки
+            
+        Returns:
+            True якщо клієнт може виконати завдання
+        """
+        try:
+            # Перевірка типу клієнта
+            client_type = client.info.client_type.value
+            task_executor_type = task.executor_type.value if hasattr(task, 'executor_type') else 'worker'
+            
+            if client_type != task_executor_type:
+                return False
+            
+            # Перевірка можливостей клієнта
+            if hasattr(client.info, 'capabilities') and client.info.capabilities:
+                # Перевірка підтримуваних типів завдань
+                if hasattr(client.info.capabilities, 'supported_task_types'):
+                    supported_types = client.info.capabilities.supported_task_types
+                    if supported_types and task.task_type.value not in supported_types:
+                        return False
+                
+                # Перевірка максимальної кількості одночасних завдань
+                if hasattr(client.info.capabilities, 'max_concurrent_tasks'):
+                    max_tasks = client.info.capabilities.max_concurrent_tasks
+                    current_tasks = client.info.stats.active_tasks if hasattr(client.info, 'stats') else 0
+                    if max_tasks and current_tasks >= max_tasks:
+                        return False
+            
+            # Перевірка вимог до воркера
+            if task.worker_requirements:
+                # Тут можна додати додаткові перевірки вимог
+                pass
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error("Error checking if client can execute task",
+                            client_id=client.info.client_id if client else "unknown",
+                            task_id=task.task_id,
+                            error=str(e))
+            return False
 
     async def cancel_task(self, task_id: str, reason: str = "Cancelled by user") -> bool:
         """Скасування завдання"""
@@ -391,6 +768,7 @@ class TaskRouter:
                     task = queue.remove_task(task_id)
                     if task:
                         task.cancel(reason)
+                        self._add_to_history(task)
                         self.total_cancelled += 1
                         return True
                 return False
@@ -410,7 +788,7 @@ class TaskRouter:
                         await worker.websocket.send_json(cancel_message.model_dump(mode='json'))
 
                 # Видалення з завдань воркера
-                self.worker_tasks[task.context.worker_id].discard(task_id)
+                self.executor_tasks[task.context.worker_id].discard(task_id)
 
             # Скасування завдання
             task.cancel(reason)
@@ -418,8 +796,9 @@ class TaskRouter:
             # Відправка результату клієнту
             await self._send_result_to_client(task)
 
-            # Видалення з активних завдань
+            # Переміщення з активних завдань в історію
             del self.active_tasks[task_id]
+            self._add_to_history(task)
 
             self.total_cancelled += 1
 
@@ -435,25 +814,28 @@ class TaskRouter:
                             error=str(e))
             return False
 
-    async def reassign_worker_tasks(self, worker_id: str):
-        """Переназначення завдань від відключеного воркера"""
+    async def reassign_executor_tasks(self, executor_id: str):
+        """Переназначення завдань від відключеного виконавця"""
         try:
-            if worker_id not in self.worker_tasks:
+            if executor_id not in self.executor_tasks:
                 return
 
-            task_ids = list(self.worker_tasks[worker_id])
-            self.worker_tasks[worker_id].clear()
+            task_ids = list(self.executor_tasks[executor_id])
+            self.executor_tasks[executor_id].clear()
 
             for task_id in task_ids:
                 if task_id in self.active_tasks:
                     task = self.active_tasks[task_id]
+
+                    # Видалення з активних завдань
+                    del self.active_tasks[task_id]
 
                     # Повернення завдання в чергу
                     queue = self.task_queues[task.priority]
                     if not queue.is_full():
                         task.context.worker_id = None
                         task.context.assigned_at = None
-                        task.context.add_status_change(TaskStatus.PENDING, f"Reassigned from worker {worker_id}")
+                        task.context.add_status_change(TaskStatus.PENDING, f"Reassigned from executor {executor_id}")
 
                         queue.add_task(task)
 
@@ -461,45 +843,18 @@ class TaskRouter:
                         await self._try_assign_task(task)
                     else:
                         # Якщо черга переповнена, скасовуємо завдання
-                        await self.cancel_task(task_id, f"Worker {worker_id} disconnected and queue is full")
+                        await self.cancel_task(task_id, f"Executor {executor_id} disconnected and queue is full")
 
-            self.logger.info("Worker tasks reassigned",
-                           worker_id=worker_id,
+            self.logger.info("Executor tasks reassigned",
+                           executor_id=executor_id,
                            task_count=len(task_ids))
 
         except Exception as e:
-            self.logger.error("Failed to reassign worker tasks",
-                            worker_id=worker_id,
+            self.logger.error("Failed to reassign executor tasks",
+                            executor_id=executor_id,
                             error=str(e))
 
-    async def get_queue_stats(self) -> Dict[str, Any]:
-        """Отримання статистики черг"""
-        try:
-            stats = {
-                "queue_sizes": {},
-                "total_active": len(self.active_tasks),
-                "total_submitted": self.total_submitted,
-                "total_completed": self.total_completed,
-                "total_failed": self.total_failed,
-                "total_timeout": self.total_timeout,
-                "total_cancelled": self.total_cancelled,
-                "worker_assignments": {
-                    worker_id: len(task_ids)
-                    for worker_id, task_ids in self.worker_tasks.items()
-                    if task_ids
-                }
-            }
 
-            # Статистика черг
-            for priority, queue in self.task_queues.items():
-                queue_stats = queue.get_stats()
-                stats["queue_sizes"][priority.value] = queue_stats["total_tasks"]
-
-            return stats
-
-        except Exception as e:
-            self.logger.error("Failed to get queue stats", error=str(e))
-            return {}
 
     def is_healthy(self) -> bool:
         """Перевірка здоров'я маршрутизатора"""
@@ -555,6 +910,292 @@ class TaskRouter:
                 self.logger.error("Error in cleanup loop", error=str(e))
                 await asyncio.sleep(60)
 
+    async def _invalidate_stats_cache(self):
+        """Очищення кешу статистики при зміні тасків"""
+        if not self.redis_client or self.redis_error_handler.should_skip_redis():
+            return
+        
+        async def _clear_cache():
+            # Очищаємо всі ключі статистики
+            pattern = "task_stats:*"
+            keys = []
+            async for key in self.redis_client.scan_iter(match=pattern):
+                keys.append(key)
+            
+            if keys:
+                await self.redis_client.delete(*keys)
+                return len(keys)
+            return 0
+        
+        keys_count = await self.redis_error_handler.execute_with_retry(_clear_cache)
+        if keys_count is not None:
+            self.logger.debug("Stats cache invalidated", keys_count=keys_count)
+        else:
+            self.logger.warning("Failed to invalidate stats cache after retries")
+
+    def _add_to_history(self, task: Task):
+        """Додавання завершеного завдання до історії"""
+        self.task_history[task.task_id] = task
+        
+        # Обмеження розміру історії
+        if len(self.task_history) > self.max_history_size:
+            # Видаляємо найстаріші tasks (за created_at)
+            sorted_tasks = sorted(
+                self.task_history.items(), 
+                key=lambda x: x[1].context.created_at
+            )
+            # Видаляємо 10% найстаріших tasks
+            to_remove = int(self.max_history_size * 0.1)
+            for i in range(to_remove):
+                task_id, _ = sorted_tasks[i]
+                del self.task_history[task_id]
+            
+            self.logger.debug("Task history cleaned up", 
+                            removed_count=to_remove, 
+                            current_size=len(self.task_history))
+
     def set_client_manager(self, client_manager):
         """Встановлення посилання на ClientManager"""
+        self.logger.info("[TASK_ROUTER] Setting client_manager",
+                        client_manager_exists=client_manager is not None,
+                        client_manager_type=type(client_manager).__name__ if client_manager else None)
         self.client_manager = client_manager
+        self.logger.info("[TASK_ROUTER] Client manager set successfully",
+                        has_client_manager=self.client_manager is not None)
+
+    async def get_queue_stats(
+        self,
+        sort: str = "created_at",
+        order: str = "desc",
+        status: Optional[str] = None,
+        priority: Optional[str] = None,
+        task_type: Optional[str] = None,
+        search: Optional[str] = None,
+        worker: Optional[str] = None,
+        include_tasks: bool = True,
+        use_cache: bool = True
+    ) -> Dict[str, Any]:
+        """Отримання статистики черг завдань з підтримкою фільтрації та сортування"""
+        try:
+            # Генеруємо ключ кешу на основі параметрів
+            cache_key = None
+            if use_cache and self.redis_client and not self.redis_error_handler.should_skip_redis():
+                cache_params = {
+                    "sort": sort,
+                    "order": order,
+                    "status": status,
+                    "priority": priority,
+                    "task_type": task_type,
+                    "search": search,
+                    "worker": worker,
+                    "include_tasks": include_tasks
+                }
+                cache_key = f"task_stats:{hash(str(sorted(cache_params.items())))}"
+                
+                # Спробуємо отримати з кешу з retry логікою
+                async def _get_cached():
+                    cached_data = await self.redis_client.get(cache_key)
+                    if cached_data:
+                        return orjson.loads(cached_data)
+                    return None
+                
+                cached_result = await self.redis_error_handler.execute_with_retry(_get_cached)
+                if cached_result:
+                    self.logger.debug("Queue stats retrieved from cache", cache_key=cache_key)
+                    return cached_result
+            # Підрахунок завдань в чергах
+            queue_sizes = {}
+            pending_count = 0
+
+            for priority in TaskPriority:
+                queue = self.task_queues.get(priority)
+                if queue:
+                    size = len(queue.tasks)
+                    queue_sizes[priority.value] = size
+                    pending_count += size
+                else:
+                    queue_sizes[priority.value] = 0
+
+            # Підрахунок активних завдань
+            processing_count = 0
+            for task in self.active_tasks.values():
+                if task.context.current_status == TaskStatus.PROCESSING:
+                    processing_count += 1
+
+            # Розподіл по виконавцях
+            executor_distribution = {}
+            for executor_id, task_ids in self.executor_tasks.items():
+                if task_ids:
+                    executor_distribution[executor_id] = len(task_ids)
+
+            # Розрахунок середнього часу обробки
+            avg_processing_time = 0
+            completed_tasks = [task for task in self.active_tasks.values()
+                             if task.context.current_status == TaskStatus.COMPLETED]
+
+            if completed_tasks:
+                total_time = sum(task.context.get_execution_time() or 0 for task in completed_tasks)
+                avg_processing_time = total_time / len(completed_tasks) if completed_tasks else 0
+
+            # Додаємо список всіх тасків для фронтенду (якщо потрібно)
+            all_tasks = []
+
+            if include_tasks:
+                # Додаємо активні таски
+                active_tasks_count = len(self.active_tasks)
+                for task in self.active_tasks.values():
+                    all_tasks.append(task.to_dict())
+
+                # Додаємо таски з черг
+                queue_tasks_count = 0
+                for priority_level in TaskPriority:
+                    queue = self.task_queues.get(priority_level)
+                    if queue:
+                        queue_tasks_count += len(queue.tasks)
+                        for task in queue.tasks.values():
+                            task_dict = task.to_dict()
+                            all_tasks.append(task_dict)
+                            # Додаткове логування для діагностики
+                            self.logger.info("[TASK_DEBUG] Adding task from queue to list",
+                                           task_id=task.task_id,
+                                           task_type=task.task_type.value,
+                                           priority=task.priority.value,
+                                           status=task.context.current_status.value,
+                                           task_dict_keys=list(task_dict.keys()))
+
+                # Додаємо таски з історії (completed/failed/cancelled)
+                history_tasks_count = len(self.task_history)
+                for task in self.task_history.values():
+                    all_tasks.append(task.to_dict())
+
+                # Логування для діагностики
+                self.logger.info("[QUEUE_STATS] Task collection summary",
+                                active_tasks_count=active_tasks_count,
+                                queue_tasks_count=queue_tasks_count,
+                                history_tasks_count=history_tasks_count,
+                                total_collected=len(all_tasks),
+                                pending_count=pending_count,
+                                processing_count=processing_count)
+
+                # Додаткове логування списку всіх зібраних завдань
+                self.logger.info("[TASK_DEBUG] All collected tasks summary",
+                                total_tasks_in_list=len(all_tasks),
+                                task_ids=[t.get('task_id', 'NO_ID') for t in all_tasks],
+                                task_statuses=[t.get('status', 'NO_STATUS') for t in all_tasks])
+
+                # Застосовуємо фільтри
+                # ТИМЧАСОВО ВІДКЛЮЧЕНО ДЛЯ ДІАГНОСТИКИ
+                if False and status and status != "all":
+                    before_filter = len(all_tasks)
+                    all_tasks = [t for t in all_tasks if t.get('status') == status]
+                    self.logger.info("[FILTER_DEBUG] Status filter applied",
+                                   filter_status=status,
+                                   before_count=before_filter,
+                                   after_count=len(all_tasks))
+
+                if False and priority and priority != "all":
+                    before_filter = len(all_tasks)
+                    all_tasks = [t for t in all_tasks if t.get('priority') == priority]
+                    self.logger.info("[FILTER_DEBUG] Priority filter applied",
+                                   filter_priority=priority,
+                                   before_count=before_filter,
+                                   after_count=len(all_tasks))
+
+                if False and task_type and task_type != "all":
+                    all_tasks = [t for t in all_tasks if t.get('task_type') == task_type]
+
+                if False and worker and worker != "all":
+                    all_tasks = [t for t in all_tasks if t.get('worker_id') == worker]
+
+                # Застосовуємо пошук
+                if False and search:
+                    search_lower = search.lower()
+                    all_tasks = [t for t in all_tasks if
+                                search_lower in t.get('task_id', '').lower() or
+                                search_lower in t.get('task_type', '').lower()]
+
+                # Застосовуємо сортування
+                if sort in ["created_at", "priority", "status", "task_type", "started_at", "completed_at"]:
+                    reverse_order = order.lower() == "desc"
+
+                    if sort == "priority":
+                        # Сортування за пріоритетом: critical > high > normal > low
+                        priority_order = {"critical": 4, "high": 3, "normal": 2, "low": 1}
+                        all_tasks.sort(key=lambda t: priority_order.get(t.get("priority", "normal"), 2), reverse=reverse_order)
+                    elif sort in ["created_at", "started_at", "completed_at"]:
+                        # Сортування за датою з правильним парсингом
+                        from datetime import datetime
+                        def parse_date(date_str):
+                            if not date_str:
+                                return datetime.min
+                            try:
+                                return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                            except (ValueError, AttributeError):
+                                return datetime.min
+                        all_tasks.sort(key=lambda t: parse_date(t.get(sort)), reverse=reverse_order)
+                    else:
+                        # Сортування за строковими полями
+                        all_tasks.sort(key=lambda t: t.get(sort, ""), reverse=reverse_order)
+
+            result = {
+                "total_tasks": self.total_submitted,
+                "pending_tasks": pending_count,
+                "processing_tasks": processing_count,
+                "completed_tasks": self.total_completed,
+                "failed_tasks": self.total_failed,
+                "average_processing_time": avg_processing_time,
+                "queue_sizes": queue_sizes,
+                "executor_distribution": executor_distribution,
+                "active_tasks": len(self.active_tasks),
+                "executors_count": len([e for e in self.executor_tasks if self.executor_tasks[e]]),
+                "tasks": all_tasks
+            }
+
+            # Зберігаємо в кеш (на 60 секунд для статистики з тасками, 30 секунд для статистики без тасків)
+            if cache_key and self.redis_client and not self.redis_error_handler.should_skip_redis():
+                async def _save_to_cache():
+                    cache_ttl = 30 if not include_tasks else 60
+                    # Конвертуємо всі множини в списки для JSON серіалізації
+                    serializable_result = self._convert_sets_to_lists(result)
+                    await self.redis_client.set(
+                        cache_key,
+                        orjson.dumps(serializable_result),
+                        ex=cache_ttl
+                    )
+                    return cache_ttl
+                
+                ttl = await self.redis_error_handler.execute_with_retry(_save_to_cache)
+                if ttl:
+                    self.logger.debug("Queue stats cached", cache_key=cache_key, ttl=ttl)
+                else:
+                    self.logger.warning("Failed to cache queue stats after retries")
+
+            return result
+        except Exception as e:
+            self.logger.error("Error getting queue stats", error=str(e))
+            return {"error": str(e)}
+
+    def _convert_sets_to_lists(self, obj):
+        """Рекурсивно конвертує всі множини (set) в списки для JSON серіалізації"""
+        if isinstance(obj, set):
+            return list(obj)
+        elif isinstance(obj, dict):
+            return {key: self._convert_sets_to_lists(value) for key, value in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [self._convert_sets_to_lists(item) for item in obj]
+        else:
+            return obj
+
+    def _add_to_history(self, task: Task):
+        """Додавання завдання до історії"""
+        # Обмежуємо розмір історії
+        if len(self.task_history) >= 1000:
+            # Видаляємо найстарші 100 завдань
+            oldest_tasks = sorted(
+                self.task_history.keys(),
+                key=lambda tid: self.task_history[tid].context.created_at
+            )[:100]
+            for tid in oldest_tasks:
+                del self.task_history[tid]
+
+        self.task_history[task.task_id] = task

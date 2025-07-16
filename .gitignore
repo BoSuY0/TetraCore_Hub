@@ -50,3 +50,6 @@ htmlcov/
 # Environment
 .env.*
 !.env.example
+
+test_hub.py
+secrets_backup/

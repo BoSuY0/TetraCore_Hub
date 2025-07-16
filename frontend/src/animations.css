@@ -1,553 +1,1850 @@
 /* Анімації для сторінки метрик воркерів */
 
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
 }
 
 @keyframes slideDown {
-  from {
-    opacity: 0;
-    transform: translateY(-20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 @keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 @keyframes bounceIn {
-  0% {
-    opacity: 0;
-    transform: scale(0.3);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.1);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
+    0% {
+        opacity: 0;
+        transform: scale(0.3);
+    }
+    50% {
+        opacity: 1;
+        transform: scale(1.1);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
 }
 
 @keyframes numberChange {
-  0% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.1);
-    color: #3b82f6;
-  }
-  100% {
-    transform: scale(1);
-  }
+    0% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.1);
+        color: #3b82f6;
+    }
+    100% {
+        transform: scale(1);
+    }
 }
 
 @keyframes progressFill {
-  from {
-    width: 0%;
-  }
+    from {
+        width: 0%;
+    }
 }
 
 @keyframes pulseSoft {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.8;
-  }
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.8;
+    }
 }
 
 @keyframes pingSoft {
-  0% {
-    transform: scale(1);
-    opacity: 1;
-  }
-  75%, 100% {
-    transform: scale(1.2);
-    opacity: 0.8;
-  }
+    0% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    75%,
+    100% {
+        transform: scale(1.2);
+        opacity: 0.8;
+    }
 }
 
 @keyframes drawLine {
-  to {
-    stroke-dashoffset: 0;
-  }
+    to {
+        stroke-dashoffset: 0;
+    }
 }
 
 /* Нові анімації для іконок */
 @keyframes iconGlow {
-  0%, 100% {
-    filter: drop-shadow(0 0 0 transparent);
-  }
-  50% {
-    filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.6));
-  }
+    0%,
+    100% {
+        filter: drop-shadow(0 0 0 transparent);
+    }
+    50% {
+        filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.6));
+    }
 }
 
 @keyframes iconFloat {
-  0%, 100% {
-    transform: translateY(0px);
-  }
-  50% {
-    transform: translateY(-4px);
-  }
+    0%,
+    100% {
+        transform: translateY(0px);
+    }
+    50% {
+        transform: translateY(-4px);
+    }
 }
 
 @keyframes iconWobble {
-  0% { transform: translateX(0%); }
-  15% { transform: translateX(-25%) rotate(-5deg); }
-  30% { transform: translateX(20%) rotate(3deg); }
-  45% { transform: translateX(-15%) rotate(-3deg); }
-  60% { transform: translateX(10%) rotate(2deg); }
-  75% { transform: translateX(-5%) rotate(-1deg); }
-  100% { transform: translateX(0%); }
+    0% {
+        transform: translateX(0%);
+    }
+    15% {
+        transform: translateX(-25%) rotate(-5deg);
+    }
+    30% {
+        transform: translateX(20%) rotate(3deg);
+    }
+    45% {
+        transform: translateX(-15%) rotate(-3deg);
+    }
+    60% {
+        transform: translateX(10%) rotate(2deg);
+    }
+    75% {
+        transform: translateX(-5%) rotate(-1deg);
+    }
+    100% {
+        transform: translateX(0%);
+    }
 }
 
 @keyframes iconHeartbeat {
-  0% { transform: scale(1); }
-  14% { transform: scale(1.1); }
-  28% { transform: scale(1); }
-  42% { transform: scale(1.1); }
-  70% { transform: scale(1); }
-  100% { transform: scale(1); }
+    0% {
+        transform: scale(1);
+    }
+    14% {
+        transform: scale(1.1);
+    }
+    28% {
+        transform: scale(1);
+    }
+    42% {
+        transform: scale(1.1);
+    }
+    70% {
+        transform: scale(1);
+    }
+    100% {
+        transform: scale(1);
+    }
 }
 
 @keyframes iconRotateIn {
-  from {
-    opacity: 0;
-    transform: rotate(-180deg) scale(0.5);
-  }
-  to {
-    opacity: 1;
-    transform: rotate(0deg) scale(1);
-  }
+    from {
+        opacity: 0;
+        transform: rotate(-180deg) scale(0.5);
+    }
+    to {
+        opacity: 1;
+        transform: rotate(0deg) scale(1);
+    }
 }
 
 @keyframes iconSlideInLeft {
-  from {
-    opacity: 0;
-    transform: translateX(-100%);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
+    from {
+        opacity: 0;
+        transform: translateX(-100%);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
 }
 
 @keyframes iconSlideInRight {
-  from {
-    opacity: 0;
-    transform: translateX(100%);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
+    from {
+        opacity: 0;
+        transform: translateX(100%);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
 }
 
 @keyframes iconZoomIn {
-  from {
-    opacity: 0;
-    transform: scale(0);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.2);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
+    from {
+        opacity: 0;
+        transform: scale(0);
+    }
+    50% {
+        opacity: 1;
+        transform: scale(1.2);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
 }
 
 /* Класи анімацій */
 .animate-fade-in {
-  animation: fadeIn 0.8s ease-out forwards;
-  opacity: 0;
+    animation: fadeIn 0.8s ease-out forwards;
+    opacity: 0;
 }
 
 .animate-slide-down {
-  animation: slideDown 0.8s ease-out forwards;
-  opacity: 0;
+    animation: slideDown 0.8s ease-out forwards;
+    opacity: 0;
 }
 
 .animate-slide-up {
-  animation: slideUp 0.8s ease-out forwards;
-  opacity: 0;
+    animation: slideUp 0.8s ease-out forwards;
+    opacity: 0;
 }
 
 .animate-bounce-in {
-  animation: bounceIn 0.8s ease-out forwards;
-  opacity: 0;
+    animation: bounceIn 0.8s ease-out forwards;
+    opacity: 0;
 }
 
 .animate-number-change {
-  transition: all 0.3s ease-out;
+    transition: all 0.3s ease-out;
 }
 
 .animate-number-change:hover {
-  animation: numberChange 0.6s ease-out;
+    animation: numberChange 0.6s ease-out;
 }
 
 .animate-progress-fill {
-  animation: progressFill 1s ease-out;
+    animation: progressFill 1s ease-out;
 }
 
 .animate-pulse-soft {
-  animation: pulseSoft 2s ease-in-out infinite;
+    animation: pulseSoft 2s ease-in-out infinite;
 }
 
 .animate-ping-soft {
-  animation: pingSoft 2s ease-in-out infinite;
+    animation: pingSoft 2s ease-in-out infinite;
 }
 
 .animate-draw-line {
-  stroke-dasharray: 1000;
-  stroke-dashoffset: 1000;
-  animation: drawLine 2s ease-out forwards;
+    stroke-dasharray: 1000;
+    stroke-dashoffset: 1000;
+    animation: drawLine 2s ease-out forwards;
 }
 
 /* Нові класи для іконок */
 .animate-icon-glow {
-  animation: iconGlow 2s ease-in-out infinite;
+    animation: iconGlow 2s ease-in-out infinite;
 }
 
 .animate-icon-float {
-  animation: iconFloat 3s ease-in-out infinite;
+    animation: iconFloat 3s ease-in-out infinite;
 }
 
 .animate-icon-wobble {
-  animation: iconWobble 1s ease-in-out;
+    animation: iconWobble 1s ease-in-out;
 }
 
 .animate-icon-heartbeat {
-  animation: iconHeartbeat 2s ease-in-out infinite;
+    animation: iconHeartbeat 2s ease-in-out infinite;
 }
 
 .animate-icon-rotate-in {
-  animation: iconRotateIn 0.6s ease-out forwards;
-  opacity: 0;
+    animation: iconRotateIn 0.6s ease-out forwards;
+    opacity: 0;
 }
 
 .animate-icon-slide-in-left {
-  animation: iconSlideInLeft 0.6s ease-out forwards;
-  opacity: 0;
+    animation: iconSlideInLeft 0.6s ease-out forwards;
+    opacity: 0;
 }
 
 .animate-icon-slide-in-right {
-  animation: iconSlideInRight 0.6s ease-out forwards;
-  opacity: 0;
+    animation: iconSlideInRight 0.6s ease-out forwards;
+    opacity: 0;
 }
 
 .animate-icon-zoom-in {
-  animation: iconZoomIn 0.6s ease-out forwards;
-  opacity: 0;
+    animation: iconZoomIn 0.6s ease-out forwards;
+    opacity: 0;
 }
 
 /* Додаткові ефекти наведення */
 .hover-glow:hover {
-  box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
-  transition: box-shadow 0.3s ease-out;
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+    transition: box-shadow 0.3s ease-out;
 }
 
 .hover-lift:hover {
-  transform: translateY(-4px);
-  transition: transform 0.3s ease-out;
+    transform: translateY(-4px);
+    transition: transform 0.3s ease-out;
 }
 
 .hover-icon-glow:hover {
-  filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.6));
-  transition: filter 0.3s ease-out;
+    filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.6));
+    transition: filter 0.3s ease-out;
 }
 
 .hover-icon-scale:hover {
-  transform: scale(1.1);
-  transition: transform 0.3s ease-out;
+    transform: scale(1.1);
+    transition: transform 0.3s ease-out;
 }
 
 .hover-icon-rotate:hover {
-  transform: rotate(10deg);
-  transition: transform 0.3s ease-out;
+    transform: rotate(10deg);
+    transition: transform 0.3s ease-out;
 }
 
 /* Анімація для SVG елементів */
 svg .animate-bounce-in {
-  animation: bounceIn 0.6s ease-out forwards;
-  opacity: 0;
+    animation: bounceIn 0.6s ease-out forwards;
+    opacity: 0;
 }
 
 /* Анімація для міні-графіків */
 .mini-chart-line {
-  stroke-dasharray: 200;
-  stroke-dashoffset: 200;
-  animation: drawLine 1.5s ease-out forwards;
+    stroke-dasharray: 200;
+    stroke-dashoffset: 200;
+    animation: drawLine 1.5s ease-out forwards;
 }
 
 /* Градієнтна анімація для фону */
 @keyframes gradientShift {
-  0% {
-    background-position: 0% 50%;
-  }
-  50% {
-    background-position: 100% 50%;
-  }
-  100% {
-    background-position: 0% 50%;
-  }
+    0% {
+        background-position: 0% 50%;
+    }
+    50% {
+        background-position: 100% 50%;
+    }
+    100% {
+        background-position: 0% 50%;
+    }
 }
 
 .animate-gradient {
-  background: linear-gradient(-45deg, #f3f4f6, #e5e7eb, #f9fafb, #f3f4f6);
-  background-size: 400% 400%;
-  animation: gradientShift 3s ease infinite;
+    background: linear-gradient(-45deg, #f3f4f6, #e5e7eb, #f9fafb, #f3f4f6);
+    background-size: 400% 400%;
+    animation: gradientShift 3s ease infinite;
 }
 
 /* Анімація завантаження */
 @keyframes loading {
-  0% {
-    transform: rotate(0deg);
-  }
-  100% {
-    transform: rotate(360deg);
-  }
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
+        transform: rotate(360deg);
+    }
 }
 
 .animate-loading {
-  animation: loading 1s linear infinite;
+    animation: loading 1s linear infinite;
 }
 
 /* Анімація для статусних індикаторів */
 .status-indicator {
-  position: relative;
-  overflow: hidden;
+    position: relative;
+    overflow: hidden;
 }
 
 .status-indicator::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
-  animation: shimmer 2s infinite;
+    content: "";
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(
+        90deg,
+        transparent,
+        rgba(255, 255, 255, 0.4),
+        transparent
+    );
+    animation: shimmer 2s infinite;
 }
 
 @keyframes shimmer {
-  0% { left: -100%; }
-  100% { left: 100%; }
+    0% {
+        left: -100%;
+    }
+    100% {
+        left: 100%;
+    }
 }
 
 .smooth-transition {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .card-entrance {
-  animation: slideUp 0.6s ease-out forwards;
-  opacity: 0;
+    animation: slideUp 0.6s ease-out forwards;
+    opacity: 0;
 }
 
-.card-entrance:nth-child(1) { animation-delay: 0.1s; }
-.card-entrance:nth-child(2) { animation-delay: 0.2s; }
-.card-entrance:nth-child(3) { animation-delay: 0.3s; }
-.card-entrance:nth-child(4) { animation-delay: 0.4s; }
-.card-entrance:nth-child(5) { animation-delay: 0.5s; }
-.card-entrance:nth-child(6) { animation-delay: 0.6s; }
+.card-entrance:nth-child(1) {
+    animation-delay: 0.1s;
+}
+.card-entrance:nth-child(2) {
+    animation-delay: 0.2s;
+}
+.card-entrance:nth-child(3) {
+    animation-delay: 0.3s;
+}
+.card-entrance:nth-child(4) {
+    animation-delay: 0.4s;
+}
+.card-entrance:nth-child(5) {
+    animation-delay: 0.5s;
+}
+.card-entrance:nth-child(6) {
+    animation-delay: 0.6s;
+}
 
 /* Покращені ефекти для карток */
 .card-hover {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .card-hover:hover {
-  transform: translateY(-8px) scale(1.02);
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    transform: translateY(-8px) scale(1.02);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
 }
 
 /* Анімація для кнопок */
 .button-press {
-  transition: all 0.1s ease-in-out;
+    transition: all 0.1s ease-in-out;
 }
 
 .button-press:active {
-  transform: scale(0.95);
+    transform: scale(0.95);
 }
 
 /* Анімація для прогрес-барів */
 @keyframes progressPulse {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.7;
-  }
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.7;
+    }
 }
 
 .animate-progress-pulse {
-  animation: progressPulse 2s ease-in-out infinite;
+    animation: progressPulse 2s ease-in-out infinite;
 }
 
 /* Анімація для тексту */
 @keyframes textGlow {
-  0%, 100% {
-    text-shadow: 0 0 5px rgba(59, 130, 246, 0.5);
-  }
-  50% {
-    text-shadow: 0 0 20px rgba(59, 130, 246, 0.8);
-  }
+    0%,
+    100% {
+        text-shadow: 0 0 5px rgba(59, 130, 246, 0.5);
+    }
+    50% {
+        text-shadow: 0 0 20px rgba(59, 130, 246, 0.8);
+    }
 }
 
 .animate-text-glow {
-  animation: textGlow 2s ease-in-out infinite;
+    animation: textGlow 2s ease-in-out infinite;
 }
 
 /* Анімації входу на сторінки */
 @keyframes pageSlideInFromRight {
-  0% {
-    opacity: 0;
-    transform: translateX(50px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateX(0);
-  }
+    0% {
+        opacity: 0;
+        transform: translateX(50px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateX(0);
+    }
 }
 
 @keyframes pageSlideInFromLeft {
-  0% {
-    opacity: 0;
-    transform: translateX(-50px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateX(0);
-  }
+    0% {
+        opacity: 0;
+        transform: translateX(-50px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateX(0);
+    }
 }
 
 @keyframes pageSlideInFromBottom {
-  0% {
-    opacity: 0;
-    transform: translateY(30px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
+    0% {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 @keyframes pageSlideInFromTop {
-  0% {
-    opacity: 0;
-    transform: translateY(-30px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
+    0% {
+        opacity: 0;
+        transform: translateY(-30px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 @keyframes pageFadeInScale {
-  0% {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
+    0% {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
 }
 
 @keyframes pageZoomIn {
-  0% {
-    opacity: 0;
-    transform: scale(0.8) rotateY(10deg);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1) rotateY(0deg);
-  }
+    0% {
+        opacity: 0;
+        transform: scale(0.8) rotateY(10deg);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1) rotateY(0deg);
+    }
 }
 
 @keyframes pageFlipIn {
-  0% {
-    opacity: 0;
-    transform: perspective(1000px) rotateX(-90deg);
-  }
-  50% {
-    opacity: 0.5;
-    transform: perspective(1000px) rotateX(-45deg);
-  }
-  100% {
-    opacity: 1;
-    transform: perspective(1000px) rotateX(0deg);
-  }
+    0% {
+        opacity: 0;
+        transform: perspective(1000px) rotateX(-90deg);
+    }
+    50% {
+        opacity: 0.5;
+        transform: perspective(1000px) rotateX(-45deg);
+    }
+    100% {
+        opacity: 1;
+        transform: perspective(1000px) rotateX(0deg);
+    }
 }
 
 @keyframes pageSlideUpFade {
-  0% {
-    opacity: 0;
-    transform: translateY(40px) scale(0.98);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+    0% {
+        opacity: 0;
+        transform: translateY(40px) scale(0.98);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
 }
 
 /* Класи для анімацій входу на сторінку */
 .page-enter {
-  animation: pageSlideUpFade 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  opacity: 0;
+    animation: pageSlideUpFade 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    opacity: 0;
 }
 
 .page-enter-dashboard {
-  animation: pageFadeInScale 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
-  opacity: 0;
+    animation: pageFadeInScale 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94)
+        forwards;
+    opacity: 0;
 }
 
 .page-enter-clients {
-  animation: pageSlideInFromLeft 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
-  opacity: 0;
+    animation: pageSlideInFromLeft 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94)
+        forwards;
+    opacity: 0;
 }
 
 .page-enter-tasks {
-  animation: pageSlideInFromRight 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
-  opacity: 0;
+    animation: pageSlideInFromRight 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94)
+        forwards;
+    opacity: 0;
 }
 
 .page-enter-metrics {
-  animation: pageZoomIn 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
-  opacity: 0;
+    animation: pageZoomIn 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+    opacity: 0;
 }
 
 .page-enter-settings {
-  animation: pageFlipIn 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
-  opacity: 0;
+    animation: pageFlipIn 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+    opacity: 0;
 }
 
 /* Анімації для елементів всередині сторінок */
 .page-content-stagger {
-  animation: pageSlideInFromBottom 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
-  opacity: 0;
+    animation: pageSlideInFromBottom 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94)
+        forwards;
+    opacity: 0;
+    /* Fallback для випадків, коли анімація не спрацьовує */
+    animation-fill-mode: forwards;
 }
 
+/* Fallback для забезпечення видимості після завантаження */
+.page-content-stagger.loaded,
+.page-content-stagger:not([style*="animation"]) {
+    opacity: 1 !important;
+    transform: translateY(0) !important;
+}
+
+/* Додатковий fallback через CSS custom property */
+.page-content-stagger {
+    --fallback-opacity: 1;
+    opacity: var(--animation-opacity, var(--fallback-opacity));
+}
+
+/* Анімація завжди повинна закінчуватися з opacity: 1 */
+@keyframes pageSlideInFromBottom {
+    0% {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Анімації для заголовків сторінок */
+.page-header-enter {
+    animation: pageSlideInFromTop 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94)
+        forwards;
+    opacity: 0;
+}
+
+/* Анімації для карток з затримкою */
+.page-card-enter {
+    animation: pageSlideUpFade 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94)
+        forwards;
+    opacity: 0;
+}
+
+.page-card-enter-1 {
+    animation-delay: 0.1s;
+}
+.page-card-enter-2 {
+    animation-delay: 0.2s;
+}
+.page-card-enter-3 {
+    animation-delay: 0.3s;
+}
+.page-card-enter-4 {
+    animation-delay: 0.4s;
+}
+.page-card-enter-5 {
+    animation-delay: 0.5s;
+}
+.page-card-enter-6 {
+    animation-delay: 0.6s;
+}
+
+/* Спеціальні анімації для різних типів контенту */
+.page-grid-enter {
+    animation: pageFadeInScale 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94)
+        forwards;
+    opacity: 0;
+}
+
+.page-list-enter {
+    animation: pageSlideInFromLeft 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94)
+        forwards;
+    opacity: 0;
+}
+
+.page-chart-enter {
+    animation: pageZoomIn 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+    opacity: 0;
+}
+
+/* Анімації переходів між сторінками */
+.page-transition-out {
+    animation: pageSlideUpFade 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) reverse
+        forwards;
+}
+
+/* Responsive анімації */
+@media (prefers-reduced-motion: reduce) {
+    .page-enter,
+    .page-enter-dashboard,
+    .page-enter-clients,
+    .page-enter-tasks,
+    .page-enter-metrics,
+    .page-enter-settings,
+    .page-content-stagger,
+    .page-header-enter,
+    .page-card-enter,
+    .page-grid-enter,
+    .page-list-enter,
+    .page-chart-enter {
+        animation: none !important;
+        opacity: 1 !important;
+    }
+}
+
+/* Анімації для мобільних пристроїв (більш швидкі) */
+@media (max-width: 768px) {
+    .page-enter,
+    .page-enter-dashboard,
+    .page-enter-clients,
+    .page-enter-tasks,
+    .page-enter-metrics,
+    .page-enter-settings {
+        animation-duration: 0.4s !important;
+    }
+
+    .page-content-stagger {
+        animation-duration: 0.4s !important;
+    }
+
+    .page-content-stagger:nth-child(n + 5) {
+        animation-delay: 0.4s !important;
+    }
+}
+
+/* Анімації для секцій метрик */
+@keyframes slideInFromBottom {
+    0% {
+        opacity: 0;
+        transform: translateY(50px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes expandIn {
+    0% {
+        opacity: 0;
+        transform: scaleY(0) translateY(-20px);
+        max-height: 0;
+    }
+    50% {
+        opacity: 0.5;
+        transform: scaleY(0.5) translateY(-10px);
+    }
+    100% {
+        opacity: 1;
+        transform: scaleY(1) translateY(0);
+        max-height: 1000px;
+    }
+}
+
+@keyframes fadeInScale {
+    0% {
+        opacity: 0;
+        transform: scale(0.9);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes slideInFromLeft {
+    0% {
+        opacity: 0;
+        transform: translateX(-30px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes slideInFromRight {
+    0% {
+        opacity: 0;
+        transform: translateX(30px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes cascadeIn {
+    0% {
+        opacity: 0;
+        transform: translateY(20px) scale(0.95);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* Класи анімацій для метрик */
+.metrics-section-enter {
+    animation: slideInFromBottom 0.6s ease-out forwards;
+    opacity: 0;
+}
+
+.metrics-charts-enter {
+    animation: expandIn 0.8s ease-out forwards;
+    opacity: 0;
+    overflow: hidden;
+}
+
+.metrics-chart-item {
+    animation: cascadeIn 0.5s ease-out forwards;
+    opacity: 0;
+}
+
+.metrics-chart-item:nth-child(1) {
+    animation-delay: 0.1s;
+}
+.metrics-chart-item:nth-child(2) {
+    animation-delay: 0.2s;
+}
+.metrics-chart-item:nth-child(3) {
+    animation-delay: 0.3s;
+}
+.metrics-chart-item:nth-child(4) {
+    animation-delay: 0.4s;
+}
+
+.metrics-system-monitor {
+    animation: slideInFromLeft 0.6s ease-out forwards;
+    opacity: 0;
+}
+
+.metrics-system-info {
+    animation: slideInFromRight 0.6s ease-out forwards;
+    animation-delay: 0.2s;
+    opacity: 0;
+}
+
+.metrics-client-selection {
+    animation: fadeInScale 0.6s ease-out forwards;
+    animation-delay: 0.3s;
+    opacity: 0;
+}
+
+/* Покращена анімація для кнопок вибору */
+.client-select-button {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.client-select-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+}
+
+.client-select-button.selected {
+    transform: scale(1.02);
+    box-shadow: 0 8px 25px rgba(59, 130, 246, 0.2);
+}
+
+/* Анімації для Dashboard */
+
+/* Базові анімації появи */
+@keyframes slideInFromBottom {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes expandIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes fadeInScale {
+    from {
+        opacity: 0;
+        transform: scale(0.9);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes cascadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* Анімації для інтерактивних елементів */
+@keyframes pulseGlow {
+    0%,
+    100% {
+        box-shadow: 0 0 10px rgba(59, 130, 246, 0.3);
+    }
+    50% {
+        box-shadow: 0 0 20px rgba(59, 130, 246, 0.6);
+    }
+}
+
+@keyframes shimmer {
+    0% {
+        background-position: -200px 0;
+    }
+    100% {
+        background-position: calc(200px + 100%) 0;
+    }
+}
+
+@keyframes floatAnimation {
+    0%,
+    100% {
+        transform: translateY(0px);
+    }
+    50% {
+        transform: translateY(-10px);
+    }
+}
+
+/* Анімації для статусних індикаторів */
+@keyframes statusPulse {
+    0%,
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.7;
+        transform: scale(1.1);
+    }
+}
+
+@keyframes progressFill {
+    from {
+        width: 0%;
+    }
+    to {
+        width: var(--progress-width, 0%);
+    }
+}
+
+/* Класи для застосування анімацій */
+.slide-in-bottom {
+    animation: slideInFromBottom 0.6s ease-out;
+}
+
+.expand-in {
+    animation: expandIn 0.4s ease-out;
+}
+
+.fade-in-scale {
+    animation: fadeInScale 0.5s ease-out;
+}
+
+.cascade-in {
+    animation: cascadeIn 0.6s ease-out;
+}
+
+.cascade-in-delay-1 {
+    animation: cascadeIn 0.6s ease-out 0.1s both;
+}
+
+.cascade-in-delay-2 {
+    animation: cascadeIn 0.6s ease-out 0.2s both;
+}
+
+.cascade-in-delay-3 {
+    animation: cascadeIn 0.6s ease-out 0.3s both;
+}
+
+.pulse-glow {
+    animation: pulseGlow 2s infinite;
+}
+
+.shimmer-effect {
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(255, 255, 255, 0.4) 50%,
+        transparent 100%
+    );
+    background-size: 200px 100%;
+    animation: shimmer 1.5s infinite;
+}
+
+.float-animation {
+    animation: floatAnimation 3s ease-in-out infinite;
+}
+
+.status-pulse {
+    animation: statusPulse 2s infinite;
+}
+
+/* Hover ефекти */
+.card-hover {
+    transition: all 0.3s ease;
+}
+
+.card-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+}
+
+/* Градієнти для кнопок та карток */
+.gradient-primary {
+    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+}
+
+.gradient-success {
+    background: linear-gradient(135deg, #10b981 0%, #047857 100%);
+}
+
+.gradient-warning {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+}
+
+.gradient-error {
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+}
+
+.gradient-secondary {
+    background: linear-gradient(135deg, #6b7280 0%, #374151 100%);
+}
+
+.gradient-info {
+    background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+}
+
+.gradient-purple {
+    background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+}
+
+/* Статусні індикатори */
+.status-online {
+    background: linear-gradient(135deg, #10b981 0%, #047857 100%);
+    animation: statusPulse 2s infinite;
+}
+
+.status-offline {
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+}
+
+.status-warning {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    animation: statusPulse 2s infinite;
+}
+
+/* Анімації для прогрес-барів */
+.progress-animated {
+    animation: progressFill 1s ease-out;
+}
+
+/* Responsive анімації */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+/* Додаткові утиліти */
+.text-gradient {
+    background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 50%, #06b6d4 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.backdrop-blur-glass {
+    backdrop-filter: blur(10px);
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+/* Анімації для живої активності */
+.activity-item {
+    animation: slideInFromBottom 0.4s ease-out;
+}
+
+.activity-item:nth-child(1) {
+    animation-delay: 0s;
+}
+.activity-item:nth-child(2) {
+    animation-delay: 0.1s;
+}
+.activity-item:nth-child(3) {
+    animation-delay: 0.2s;
+}
+.activity-item:nth-child(4) {
+    animation-delay: 0.3s;
+}
+.activity-item:nth-child(5) {
+    animation-delay: 0.4s;
+}
+
+/* Анімації для швидких дій */
+.quick-action {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.quick-action:hover {
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+}
+
+.quick-action:active {
+    transform: translateY(0) scale(0.98);
+    transition-duration: 0.1s;
+}
+
+/* Анімації для WebSocket оновлень завдань */
+@keyframes taskHighlight {
+    0% {
+        background-color: rgba(59, 130, 246, 0.1);
+        transform: scale(1);
+    }
+    50% {
+        background-color: rgba(59, 130, 246, 0.3);
+        transform: scale(1.02);
+    }
+    100% {
+        background-color: transparent;
+        transform: scale(1);
+    }
+}
+
+@keyframes taskUpdated {
+    0% {
+        background-color: rgba(59, 130, 246, 0.2);
+        border-left: 4px solid #3b82f6;
+    }
+    100% {
+        background-color: transparent;
+        border-left: 4px solid transparent;
+    }
+}
+
+@keyframes taskCreated {
+    0% {
+        opacity: 0;
+        transform: translateY(-20px) scale(0.95);
+        background-color: rgba(16, 185, 129, 0.3);
+    }
+    50% {
+        opacity: 0.8;
+        transform: translateY(-5px) scale(1.02);
+        background-color: rgba(16, 185, 129, 0.2);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        background-color: transparent;
+    }
+}
+
+@keyframes taskCompleted {
+    0% {
+        background-color: rgba(16, 185, 129, 0.2);
+        transform: scale(1);
+    }
+    25% {
+        background-color: rgba(16, 185, 129, 0.4);
+        transform: scale(1.03);
+    }
+    50% {
+        background-color: rgba(16, 185, 129, 0.3);
+        transform: scale(1.01);
+    }
+    100% {
+        background-color: transparent;
+        transform: scale(1);
+    }
+}
+
+@keyframes taskFailed {
+    0% {
+        background-color: rgba(239, 68, 68, 0.2);
+        transform: scale(1);
+        box-shadow: 0 0 0 rgba(239, 68, 68, 0.4);
+    }
+    25% {
+        background-color: rgba(239, 68, 68, 0.3);
+        transform: scale(1.02);
+        box-shadow: 0 0 10px rgba(239, 68, 68, 0.3);
+    }
+    50% {
+        background-color: rgba(239, 68, 68, 0.25);
+        transform: scale(1.01);
+        box-shadow: 0 0 5px rgba(239, 68, 68, 0.2);
+    }
+    100% {
+        background-color: transparent;
+        transform: scale(1);
+        box-shadow: 0 0 0 rgba(239, 68, 68, 0);
+    }
+}
+
+@keyframes taskDeleted {
+    0% {
+        opacity: 1;
+        transform: scale(1);
+        background-color: rgba(239, 68, 68, 0.1);
+    }
+    50% {
+        opacity: 0.5;
+        transform: scale(0.98);
+        background-color: rgba(239, 68, 68, 0.2);
+    }
+    100% {
+        opacity: 0;
+        transform: scale(0.95);
+        background-color: transparent;
+    }
+}
+
+@keyframes statusPulse {
+    0% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    50% {
+        transform: scale(1.1);
+        opacity: 0.8;
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+@keyframes priorityPulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+        transform: scale(1);
+    }
+    25% {
+        box-shadow: 0 0 0 8px rgba(239, 68, 68, 0.3);
+        transform: scale(1.02);
+    }
+    50% {
+        box-shadow: 0 0 0 12px rgba(239, 68, 68, 0.1);
+        transform: scale(1.05);
+    }
+    75% {
+        box-shadow: 0 0 0 8px rgba(239, 68, 68, 0.3);
+        transform: scale(1.02);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+        transform: scale(1);
+    }
+}
+
+@keyframes workerIndicator {
+    0% {
+        background-color: rgba(59, 130, 246, 0.1);
+        border-color: rgba(59, 130, 246, 0.3);
+    }
+    50% {
+        background-color: rgba(59, 130, 246, 0.2);
+        border-color: rgba(59, 130, 246, 0.6);
+    }
+    100% {
+        background-color: rgba(59, 130, 246, 0.1);
+        border-color: rgba(59, 130, 246, 0.3);
+    }
+}
+
+@keyframes tableRowHover {
+    0% {
+        background-color: transparent;
+        transform: translateX(0);
+    }
+    100% {
+        background-color: rgba(59, 130, 246, 0.05);
+        transform: translateX(2px);
+    }
+}
+
+@keyframes statusChanged {
+    0% {
+        transform: scale(1);
+        filter: brightness(1);
+    }
+    50% {
+        transform: scale(1.1);
+        filter: brightness(1.2);
+    }
+    100% {
+        transform: scale(1);
+        filter: brightness(1);
+    }
+}
+
+@keyframes priorityPulse {
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7);
+    }
+    70% {
+        box-shadow: 0 0 0 6px rgba(59, 130, 246, 0);
+    }
+}
+
+@keyframes newTaskSlideIn {
+    0% {
+        opacity: 0;
+        transform: translateX(-100%) rotateY(-90deg);
+        max-height: 0;
+        padding: 0;
+        margin: 0;
+    }
+    50% {
+        opacity: 0.5;
+        transform: translateX(-20%) rotateY(-30deg);
+        max-height: 100px;
+    }
+    100% {
+        opacity: 1;
+        transform: translateX(0) rotateY(0deg);
+        max-height: 200px;
+        padding: initial;
+        margin: initial;
+    }
+}
+
+@keyframes websocketConnected {
+    0% {
+        background-color: rgba(16, 185, 129, 0.1);
+        border-color: rgba(16, 185, 129, 0.3);
+    }
+    50% {
+        background-color: rgba(16, 185, 129, 0.2);
+        border-color: rgba(16, 185, 129, 0.5);
+    }
+    100% {
+        background-color: rgba(16, 185, 129, 0.1);
+        border-color: rgba(16, 185, 129, 0.3);
+    }
+}
+
+@keyframes websocketDisconnected {
+    0% {
+        background-color: rgba(239, 68, 68, 0.1);
+        border-color: rgba(239, 68, 68, 0.3);
+    }
+    50% {
+        background-color: rgba(239, 68, 68, 0.2);
+        border-color: rgba(239, 68, 68, 0.5);
+    }
+    100% {
+        background-color: rgba(239, 68, 68, 0.1);
+        border-color: rgba(239, 68, 68, 0.3);
+    }
+}
+
+/* Класи для застосування WebSocket анімацій */
+.task-updated {
+    animation: taskUpdated 2s ease-out;
+}
+
+.task-created {
+    animation: taskCreated 1.5s ease-out;
+}
+
+.task-completed {
+    animation: taskCompleted 2s ease-out;
+}
+
+.task-failed {
+    animation: taskFailed 2s ease-out;
+}
+
+.task-deleted {
+    animation: taskDeleted 0.8s ease-out forwards;
+}
+
+.task-highlight {
+    animation: taskHighlight 2s ease-out;
+}
+
+.status-changed {
+    animation: statusChanged 1s ease-out;
+}
+
+.priority-pulse {
+    animation: priorityPulse 2s infinite;
+}
+
+.new-task-slide-in {
+    animation: newTaskSlideIn 1s ease-out;
+}
+
+.websocket-connected {
+    animation: websocketConnected 2s ease-in-out infinite;
+}
+
+.websocket-disconnected {
+    animation: websocketDisconnected 1s ease-in-out infinite;
+}
+
+/* Кольорові схеми для різних статусів */
+.task-status-pending {
+    border-left: 4px solid #f59e0b;
+    animation: statusPending 3s ease-in-out infinite;
+    will-change: border-color, background-color;
+}
+
+.task-status-processing {
+    border-left: 4px solid #3b82f6;
+    animation: statusProcessing 2s linear infinite;
+    will-change: border-color, background-color;
+}
+
+.task-status-completed {
+    border-left: 4px solid #10b981;
+    animation: statusCompleted 0.8s ease-out;
+    will-change: transform, background-color;
+}
+
+.task-status-failed {
+    border-left: 4px solid #ef4444;
+    animation: statusFailed 1s ease-in-out;
+    will-change: transform, box-shadow;
+}
+
+.task-status-cancelled {
+    border-left: 4px solid #6b7280;
+    animation: statusCancelled 0.6s ease-out;
+    will-change: opacity, transform;
+}
+
+/* Анімації для priority badges */
+.priority-critical {
+    animation: priorityCritical 2s ease-in-out infinite;
+    --priority-color: #ef4444;
+    will-change: transform, background-color, box-shadow;
+}
+
+.priority-high {
+    animation: priorityHigh 3s ease-in-out infinite;
+    --priority-color: #f59e0b;
+    will-change: transform, background-color;
+}
+
+.priority-normal {
+    animation: priorityNormal 4s ease-in-out infinite;
+    --priority-color: #3b82f6;
+    will-change: background-color;
+}
+
+.priority-low {
+    animation: priorityLow 5s ease-in-out infinite;
+    --priority-color: #6b7280;
+    will-change: opacity;
+}
+
+/* Hover ефекти для task rows */
+.task-row {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.task-row:hover {
+    background-color: rgba(59, 130, 246, 0.05);
+    transform: translate3d(2px, 0, 0);
+    animation: smoothGlow 2s ease-in-out infinite;
+    will-change: transform, background-color;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.task-row.table-row-hover {
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    will-change: transform, background-color;
+}
+
+.slide-in-right {
+    animation: slideInFromRight 0.5s ease-out;
+}
+
+.slide-in-left {
+    animation: slideInFromLeft 0.5s ease-out;
+}
+
+.smooth-glow {
+    animation: smoothGlow 3s ease-in-out infinite;
+}
+
+/* Анімації для лоадерів */
+@keyframes taskTableSkeleton {
+    0% {
+        background-position: -200px 0;
+    }
+    100% {
+        background-position: calc(200px + 100%) 0;
+    }
+}
+
+@keyframes smoothGlow {
+    0% {
+        box-shadow: 0 0 5px rgba(59, 130, 246, 0.2);
+        transform: translateZ(0);
+    }
+    50% {
+        box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
+        transform: translateZ(0);
+    }
+    100% {
+        box-shadow: 0 0 5px rgba(59, 130, 246, 0.2);
+        transform: translateZ(0);
+    }
+}
+
+@keyframes slideInFromRight {
+    0% {
+        opacity: 0;
+        transform: translate3d(30px, 0, 0);
+    }
+    100% {
+        opacity: 1;
+        transform: translate3d(0, 0, 0);
+    }
+}
+
+@keyframes slideInFromLeft {
+    0% {
+        opacity: 0;
+        transform: translate3d(-30px, 0, 0);
+    }
+    100% {
+        opacity: 1;
+        transform: translate3d(0, 0, 0);
+    }
+}
+
+@keyframes statusPending {
+    0% {
+        border-color: #f59e0b;
+        background-color: rgba(245, 158, 11, 0.05);
+        transform: translateZ(0);
+    }
+    50% {
+        border-color: #fbbf24;
+        background-color: rgba(245, 158, 11, 0.1);
+        transform: translateZ(0);
+    }
+    100% {
+        border-color: #f59e0b;
+        background-color: rgba(245, 158, 11, 0.05);
+        transform: translateZ(0);
+    }
+}
+
+@keyframes statusProcessing {
+    0% {
+        border-color: #3b82f6;
+        background-color: rgba(59, 130, 246, 0.05);
+    }
+    25% {
+        border-color: #60a5fa;
+        background-color: rgba(59, 130, 246, 0.08);
+    }
+    50% {
+        border-color: #2563eb;
+        background-color: rgba(59, 130, 246, 0.1);
+    }
+    75% {
+        border-color: #60a5fa;
+        background-color: rgba(59, 130, 246, 0.08);
+    }
+    100% {
+        border-color: #3b82f6;
+        background-color: rgba(59, 130, 246, 0.05);
+    }
+}
+
+@keyframes statusCompleted {
+    0% {
+        transform: scale3d(1, 1, 1);
+        background-color: rgba(16, 185, 129, 0.1);
+    }
+    50% {
+        transform: scale3d(1.02, 1.02, 1);
+        background-color: rgba(16, 185, 129, 0.2);
+    }
+    100% {
+        transform: scale3d(1, 1, 1);
+        background-color: rgba(16, 185, 129, 0.05);
+    }
+}
+
+@keyframes statusFailed {
+    0% {
+        transform: scale(1);
+        box-shadow: 0 0 0 rgba(239, 68, 68, 0.4);
+    }
+    25% {
+        transform: scale(1.01);
+        box-shadow: 0 0 8px rgba(239, 68, 68, 0.3);
+    }
+    75% {
+        transform: scale(0.99);
+        box-shadow: 0 0 4px rgba(239, 68, 68, 0.2);
+    }
+    100% {
+        transform: scale(1);
+        box-shadow: 0 0 0 rgba(239, 68, 68, 0);
+    }
+}
+
+@keyframes statusCancelled {
+    0% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.7;
+        transform: scale(0.98);
+    }
+    100% {
+        opacity: 0.8;
+        transform: scale(1);
+    }
+}
+
+@keyframes priorityCritical {
+    0% {
+        transform: scale(1);
+        box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
+        background-color: rgba(239, 68, 68, 0.05);
+    }
+    33% {
+        transform: scale(1.03);
+        box-shadow: 0 0 15px rgba(239, 68, 68, 0.6);
+        background-color: rgba(239, 68, 68, 0.1);
+    }
+    66% {
+        transform: scale(1.01);
+        box-shadow: 0 0 12px rgba(239, 68, 68, 0.5);
+        background-color: rgba(239, 68, 68, 0.08);
+    }
+    100% {
+        transform: scale(1);
+        box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
+        background-color: rgba(239, 68, 68, 0.05);
+    }
+}
+
+@keyframes priorityHigh {
+    0% {
+        transform: scale(1);
+        background-color: rgba(245, 158, 11, 0.05);
+    }
+    50% {
+        transform: scale(1.01);
+        background-color: rgba(245, 158, 11, 0.08);
+    }
+    100% {
+        transform: scale(1);
+        background-color: rgba(245, 158, 11, 0.05);
+    }
+}
+
+@keyframes priorityNormal {
+    0%,
+    100% {
+        background-color: rgba(107, 114, 128, 0.03);
+    }
+    50% {
+        background-color: rgba(107, 114, 128, 0.05);
+    }
+}
+
+/* Додаткові performance оптимізації */
+.task-table-loading {
+    contain: layout style paint;
+}
+
+.task-row {
+    contain: layout style;
+}
+
+/* Intersection Observer оптимізації для великих списків */
+.virtualized-item {
+    will-change: contents;
+    contain: strict;
+}
+
+.virtualized-item.visible {
+    will-change: auto;
+}
+
+/* Оптимізація для touch пристроїв */
+@media (hover: none) and (pointer: coarse) {
+    .task-row:hover {
+        animation: none !important;
+        transform: none !important;
+    }
+
+    .priority-critical,
+    .priority-high {
+        animation-duration: 2s !important;
+    }
+}
+
+/* Зменшення анімацій для слабких пристроїв */
+@media (max-width: 480px) {
+    .task-updated,
+    .task-created {
+        animation-duration: 0.2s !important;
+        animation-iteration-count: 1 !important;
+    }
+
+    .priority-critical {
+        animation: none !important;
+        border-left: 6px solid #ef4444 !important;
+    }
+}
+
+@keyframes priorityLow {
+    0%,
+    100% {
+        opacity: 0.8;
+    }
+    50% {
+        opacity: 0.6;
+    }
+}
+
+.task-table-loading {
+    background: linear-gradient(
+        90deg,
+        #f0f0f0 25%,
+        transparent 37%,
+        #f0f0f0 63%
+    );
+    background-size: 400px 100%;
+    animation: taskTableSkeleton 1.5s ease-in-out infinite;
+}
+
+/* Анімації для статистичних карток при WebSocket оновленнях */
+.stats-card-update {
+    animation: bounceIn 0.6s ease-out;
+    border: 2px solid rgba(59, 130, 246, 0.3);
+}
+
+.stats-number-change {
+    animation: numberChange 0.8s ease-out;
+    display: inline-block;
+}
+
+/* Спеціальні ефекти для реального часу */
+.realtime-indicator {
+    position: relative;
+}
+
+.realtime-indicator::after {
+    content: "";
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    width: 8px;
+    height: 8px;
+    background: #10b981;
+    border-radius: 50%;
+    animation: statusPulse 2s infinite;
+}
+
+/* Анімації для модального вікна з деталями завдання */
+.task-modal-enter {
+    animation: fadeInScale 0.3s ease-out;
+}
+
+.task-modal-exit {
+    animation: fadeInScale 0.2s ease-out reverse;
+}
+
+/* Responsive оптимізації для WebSocket анімацій */
+@media (prefers-reduced-motion: reduce) {
+    .task-updated,
+    .task-created,
+    .task-completed,
+    .task-failed,
+    .task-highlight,
+    .status-changed,
+    .priority-pulse,
+    .new-task-slide-in,
+    .websocket-connected,
+    .websocket-disconnected {
+        animation: none !important;
+    }
+}
+
+@media (max-width: 768px) {
+    .task-updated,
+    .task-created,
+    .task-completed,
+    .task-failed {
+        animation-duration: 1s !important;
+    }
+
+    .task-row:hover {
+        transform: none;
+        box-shadow: none;
+    }
+}
+
+/* ФІКС: Забезпечення видимості контенту в списку завдань */
+.page-content-stagger {
+    opacity: 1 !important; /* Форсуємо видимість */
+}
+
+/* Додаткова перевірка для елементів таблиці */
+.task-row,
+.task-row td,
+.task-row button,
+.task-row span {
+    opacity: 1 !important;
+    visibility: visible !important;
+}
+
+/* Фікс для анімацій, що можуть зламатися */
 .page-content-stagger:nth-child(1) { animation-delay: 0.1s; }
 .page-content-stagger:nth-child(2) { animation-delay: 0.2s; }
 .page-content-stagger:nth-child(3) { animation-delay: 0.3s; }
@@ -557,464 +1854,16 @@ svg .animate-bounce-in {
 .page-content-stagger:nth-child(7) { animation-delay: 0.7s; }
 .page-content-stagger:nth-child(8) { animation-delay: 0.8s; }
 
-/* Анімації для заголовків сторінок */
-.page-header-enter {
-  animation: pageSlideInFromTop 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
-  opacity: 0;
-}
-
-/* Анімації для карток з затримкою */
-.page-card-enter {
-  animation: pageSlideUpFade 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
-  opacity: 0;
-}
-
-.page-card-enter-1 { animation-delay: 0.1s; }
-.page-card-enter-2 { animation-delay: 0.2s; }
-.page-card-enter-3 { animation-delay: 0.3s; }
-.page-card-enter-4 { animation-delay: 0.4s; }
-.page-card-enter-5 { animation-delay: 0.5s; }
-.page-card-enter-6 { animation-delay: 0.6s; }
-
-/* Спеціальні анімації для різних типів контенту */
-.page-grid-enter {
-  animation: pageFadeInScale 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
-  opacity: 0;
-}
-
-.page-list-enter {
-  animation: pageSlideInFromLeft 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
-  opacity: 0;
-}
-
+/* Фікси для інших класів анімацій */
+.animate-fade-in,
+.animate-slide-down,
+.animate-slide-up,
+.animate-bounce-in,
+.card-entrance,
+.page-header-enter,
+.page-card-enter,
+.page-grid-enter,
+.page-list-enter,
 .page-chart-enter {
-  animation: pageZoomIn 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
-  opacity: 0;
+    opacity: 1 !important; /* Форсуємо видимість для всіх анімованих елементів */
 }
-
-/* Анімації переходів між сторінками */
-.page-transition-out {
-  animation: pageSlideUpFade 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) reverse forwards;
-}
-
-/* Responsive анімації */
-@media (prefers-reduced-motion: reduce) {
-  .page-enter,
-  .page-enter-dashboard,
-  .page-enter-clients,
-  .page-enter-tasks,
-  .page-enter-metrics,
-  .page-enter-settings,
-  .page-content-stagger,
-  .page-header-enter,
-  .page-card-enter,
-  .page-grid-enter,
-  .page-list-enter,
-  .page-chart-enter {
-    animation: none !important;
-    opacity: 1 !important;
-  }
-}
-
-/* Анімації для мобільних пристроїв (більш швидкі) */
-@media (max-width: 768px) {
-  .page-enter,
-  .page-enter-dashboard,
-  .page-enter-clients,
-  .page-enter-tasks,
-  .page-enter-metrics,
-  .page-enter-settings {
-    animation-duration: 0.4s !important;
-  }
-  
-  .page-content-stagger {
-    animation-duration: 0.4s !important;
-  }
-  
-  .page-content-stagger:nth-child(n+5) {
-    animation-delay: 0.4s !important;
-  }
-}
-
-/* Анімації для секцій метрик */
-@keyframes slideInFromBottom {
-  0% {
-    opacity: 0;
-    transform: translateY(50px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes expandIn {
-  0% {
-    opacity: 0;
-    transform: scaleY(0) translateY(-20px);
-    max-height: 0;
-  }
-  50% {
-    opacity: 0.5;
-    transform: scaleY(0.5) translateY(-10px);
-  }
-  100% {
-    opacity: 1;
-    transform: scaleY(1) translateY(0);
-    max-height: 1000px;
-  }
-}
-
-@keyframes fadeInScale {
-  0% {
-    opacity: 0;
-    transform: scale(0.9);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-@keyframes slideInFromLeft {
-  0% {
-    opacity: 0;
-    transform: translateX(-30px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-@keyframes slideInFromRight {
-  0% {
-    opacity: 0;
-    transform: translateX(30px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-@keyframes cascadeIn {
-  0% {
-    opacity: 0;
-    transform: translateY(20px) scale(0.95);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-/* Класи анімацій для метрик */
-.metrics-section-enter {
-  animation: slideInFromBottom 0.6s ease-out forwards;
-  opacity: 0;
-}
-
-.metrics-charts-enter {
-  animation: expandIn 0.8s ease-out forwards;
-  opacity: 0;
-  overflow: hidden;
-}
-
-.metrics-chart-item {
-  animation: cascadeIn 0.5s ease-out forwards;
-  opacity: 0;
-}
-
-.metrics-chart-item:nth-child(1) { animation-delay: 0.1s; }
-.metrics-chart-item:nth-child(2) { animation-delay: 0.2s; }
-.metrics-chart-item:nth-child(3) { animation-delay: 0.3s; }
-.metrics-chart-item:nth-child(4) { animation-delay: 0.4s; }
-
-.metrics-system-monitor {
-  animation: slideInFromLeft 0.6s ease-out forwards;
-  opacity: 0;
-}
-
-.metrics-system-info {
-  animation: slideInFromRight 0.6s ease-out forwards;
-  animation-delay: 0.2s;
-  opacity: 0;
-}
-
-.metrics-client-selection {
-  animation: fadeInScale 0.6s ease-out forwards;
-  animation-delay: 0.3s;
-  opacity: 0;
-}
-
-/* Покращена анімація для кнопок вибору */
-.client-select-button {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.client-select-button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
-}
-
-.client-select-button.selected {
-  transform: scale(1.02);
-  box-shadow: 0 8px 25px rgba(59, 130, 246, 0.2);
-}
-
-/* Анімації для Dashboard */
-
-/* Базові анімації появи */
-@keyframes slideInFromBottom {
-  from {
-    opacity: 0;
-    transform: translateY(30px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes expandIn {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-@keyframes fadeInScale {
-  from {
-    opacity: 0;
-    transform: scale(0.9);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-@keyframes cascadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(20px) scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-/* Анімації для інтерактивних елементів */
-@keyframes pulseGlow {
-  0%, 100% {
-    box-shadow: 0 0 10px rgba(59, 130, 246, 0.3);
-  }
-  50% {
-    box-shadow: 0 0 20px rgba(59, 130, 246, 0.6);
-  }
-}
-
-@keyframes shimmer {
-  0% {
-    background-position: -200px 0;
-  }
-  100% {
-    background-position: calc(200px + 100%) 0;
-  }
-}
-
-@keyframes floatAnimation {
-  0%, 100% {
-    transform: translateY(0px);
-  }
-  50% {
-    transform: translateY(-10px);
-  }
-}
-
-/* Анімації для статусних індикаторів */
-@keyframes statusPulse {
-  0%, 100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.7;
-    transform: scale(1.1);
-  }
-}
-
-@keyframes progressFill {
-  from {
-    width: 0%;
-  }
-  to {
-    width: var(--progress-width, 0%);
-  }
-}
-
-/* Класи для застосування анімацій */
-.slide-in-bottom {
-  animation: slideInFromBottom 0.6s ease-out;
-}
-
-.expand-in {
-  animation: expandIn 0.4s ease-out;
-}
-
-.fade-in-scale {
-  animation: fadeInScale 0.5s ease-out;
-}
-
-.cascade-in {
-  animation: cascadeIn 0.6s ease-out;
-}
-
-.cascade-in-delay-1 {
-  animation: cascadeIn 0.6s ease-out 0.1s both;
-}
-
-.cascade-in-delay-2 {
-  animation: cascadeIn 0.6s ease-out 0.2s both;
-}
-
-.cascade-in-delay-3 {
-  animation: cascadeIn 0.6s ease-out 0.3s both;
-}
-
-.pulse-glow {
-  animation: pulseGlow 2s infinite;
-}
-
-.shimmer-effect {
-  background: linear-gradient(90deg, 
-    transparent 0%, 
-    rgba(255, 255, 255, 0.4) 50%, 
-    transparent 100%);
-  background-size: 200px 100%;
-  animation: shimmer 1.5s infinite;
-}
-
-.float-animation {
-  animation: floatAnimation 3s ease-in-out infinite;
-}
-
-.status-pulse {
-  animation: statusPulse 2s infinite;
-}
-
-/* Hover ефекти */
-.card-hover {
-  transition: all 0.3s ease;
-}
-
-.card-hover:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
-}
-
-/* Градієнти для кнопок та карток */
-.gradient-primary {
-  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-}
-
-.gradient-success {
-  background: linear-gradient(135deg, #10b981 0%, #047857 100%);
-}
-
-.gradient-warning {
-  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-}
-
-.gradient-error {
-  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-}
-
-.gradient-secondary {
-  background: linear-gradient(135deg, #6b7280 0%, #374151 100%);
-}
-
-.gradient-info {
-  background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
-}
-
-.gradient-purple {
-  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
-}
-
-/* Статусні індикатори */
-.status-online {
-  background: linear-gradient(135deg, #10b981 0%, #047857 100%);
-  animation: statusPulse 2s infinite;
-}
-
-.status-offline {
-  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-}
-
-.status-warning {
-  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-  animation: statusPulse 2s infinite;
-}
-
-/* Анімації для прогрес-барів */
-.progress-animated {
-  animation: progressFill 1s ease-out;
-}
-
-/* Responsive анімації */
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
-}
-
-/* Додаткові утиліти */
-.text-gradient {
-  background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 50%, #06b6d4 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.backdrop-blur-glass {
-  backdrop-filter: blur(10px);
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-}
-
-/* Анімації для живої активності */
-.activity-item {
-  animation: slideInFromBottom 0.4s ease-out;
-}
-
-.activity-item:nth-child(1) { animation-delay: 0s; }
-.activity-item:nth-child(2) { animation-delay: 0.1s; }
-.activity-item:nth-child(3) { animation-delay: 0.2s; }
-.activity-item:nth-child(4) { animation-delay: 0.3s; }
-.activity-item:nth-child(5) { animation-delay: 0.4s; }
-
-/* Анімації для швидких дій */
-.quick-action {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.quick-action:hover {
-  transform: translateY(-2px) scale(1.02);
-  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
-}
-
-.quick-action:active {
-  transform: translateY(0) scale(0.98);
-  transition-duration: 0.1s;
-} 

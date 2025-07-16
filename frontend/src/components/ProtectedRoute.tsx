@@ -83,6 +83,12 @@ const hasRequiredPermissions = (
   userPermissions: string[],
   requiredPermissions: string[],
 ): boolean => {
+  // Якщо у користувача є універсальне право "*", він має доступ до всього
+  if (userPermissions.includes("*")) {
+    return true;
+  }
+  
+  // Інакше перевіряємо кожен необхідний дозвіл
   return requiredPermissions.every((permission) =>
     userPermissions.includes(permission),
   );

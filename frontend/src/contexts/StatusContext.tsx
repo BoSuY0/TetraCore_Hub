@@ -85,7 +85,7 @@ const initialState: StatusState = {
   websocketError: null,
   reconnectInfo: {
     attempts: 0,
-    maxAttempts: 5,
+    maxAttempts: 20, // Збільшено з 10 до 20 для кращої стійкості
     nextAttemptIn: 0,
     lastAttemptAt: null,
     totalFailures: 0,
@@ -169,6 +169,7 @@ interface StatusContextType {
   refreshData: () => Promise<void>;
   connectWebSocket: () => void;
   disconnectWebSocket: () => void;
+  resetReconnectionAttempts: () => void;
 }
 
 const StatusContext = createContext<StatusContextType | undefined>(undefined);
@@ -190,7 +191,7 @@ interface StatusProviderProps {
 export const StatusProvider: React.FC<StatusProviderProps> = ({
   children,
   apiBaseUrl = config.api.baseUrl,
-  refreshInterval = 10000,
+  refreshInterval = 15000, // Збільшено з 10 до 15 секунд для зменшення навантаження
 }) => {
   const [state, dispatch] = useReducer(statusReducer, initialState);
   const [socket, setSocket] = React.useState<WebSocket | null>(null);
@@ -202,18 +203,25 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
   // the latest timeout ID inside asynchronous WebSocket callbacks without relying
   // on React's asynchronous state updates.
   const connectionTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
-  const { auth: authState, refreshToken } = useAuth();
+  const { auth: authState } = useAuth();
 
   // Додаємо рефи для відстеження стану підключення
   const isConnectingRef = useRef(false);
   const mountedRef = useRef(true);
   const lastAuthStateRef = useRef(authState.isAuthenticated);
   const dataRefreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const sessionSyncAttemptsRef = useRef(0);
+  const maxSessionSyncAttempts = 3;
+  
+  // Додаємо відстеження останнього WebSocket update
+  const lastWebSocketUpdateRef = useRef<Date | null>(null);
+  const websocketTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const websocketUpdateTimeoutMs = 30000; // 30 секунд без updates = форсуємо HTTP refresh
 
   const maxReconnectAttempts = 5;
   const reconnectDelay = 5000;
   const connectionTimeoutMs = 30000; // Збільшено до 30 секунд
-  const heartbeatIntervalMs = 30000;
+  const heartbeatIntervalMs = 60000; // Збільшено з 30000 до 60000 мс (60 секунд)
 
   // Enhanced error classification
   const classifyWebSocketError = (event: CloseEvent): WebSocketError => {
@@ -459,13 +467,19 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
   const startHeartbeat = (ws: WebSocket) => {
     const interval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
-        console.log("💓 Sending heartbeat ping...");
-        ws.send(
-          JSON.stringify({
-            type: "ping",
-            timestamp: new Date().toISOString(),
-          }),
-        );
+        const pingMsg = {
+          type: "ping",
+          timestamp: new Date().toISOString(),
+        };
+        if (!pingMsg.type) {
+          console.error(
+            "❌ Відправка WebSocket-повідомлення без type!",
+            pingMsg,
+          );
+          return;
+        }
+        // Замість ws.send(JSON.stringify(pingMsg)), використовуємо safeSend
+        safeSend(ws, pingMsg);
       } else {
         console.warn("💔 WebSocket not open, stopping heartbeat");
         clearInterval(interval);
@@ -482,6 +496,38 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
     }
   };
 
+  const startWebSocketTimeout = () => {
+    // Очищуємо попередній timeout
+    if (websocketTimeoutRef.current) {
+      clearTimeout(websocketTimeoutRef.current);
+    }
+    
+    // Встановлюємо новий timeout для форсування HTTP refresh
+    websocketTimeoutRef.current = setTimeout(() => {
+      console.log("⏰ WebSocket timeout - no updates received, forcing HTTP refresh");
+      refreshData();
+    }, websocketUpdateTimeoutMs);
+  };
+
+  const stopWebSocketTimeout = () => {
+    if (websocketTimeoutRef.current) {
+      clearTimeout(websocketTimeoutRef.current);
+      websocketTimeoutRef.current = null;
+    }
+  };
+
+  // Universal safe send for WebSocket
+  const safeSend = (ws: WebSocket, msg: any) => {
+    if (!msg || typeof msg !== "object" || !msg.type) {
+      console.error(
+        "❌ Спроба відправити WebSocket-повідомлення без type!",
+        msg,
+      );
+      return;
+    }
+    ws.send(JSON.stringify(msg));
+  };
+
   // API calls з кращим обробленням помилок
   const createApiHeaders = (): HeadersInit => {
     const headers: HeadersInit = {
@@ -490,49 +536,127 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       "Cache-Control": "no-cache",
     };
 
-    if (authState.sessionId) {
-      headers.Authorization = `Bearer ${authState.sessionId}`;
+    // Додаємо токен авторизації.
+    const token = authState.sessionId || localStorage.getItem("sessionId");
+    if (
+      token &&
+      token !== "undefined" &&
+      token !== "null" &&
+      token.length > 10
+    ) {
+      headers.Authorization = `Bearer ${token}`;
     }
 
     return headers;
   };
 
-  const authenticatedFetch = async (url: string, options: RequestInit = {}): Promise<Response> => {
-    let response = await fetch(url, { ...options, headers: { ...createApiHeaders(), ...options.headers } });
-    if (response.status === 401) {
-        const refreshed = await refreshToken();
-        if (refreshed) {
-            response = await fetch(url, { ...options, headers: { ...createApiHeaders(), ...options.headers } });
-        }
-    }
-    return response;
-};
+  const authenticatedFetch = async (
+    url: string,
+    options: RequestInit = {},
+    retries: number = 1, // Зменшено з 3 до 1 для запобігання спаму при 429
+    delay: number = 1000,
+  ): Promise<Response> => {
+    let lastError: Error | null = null;
 
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        console.log(`📤 API Request: ${options.method || "GET"} ${url} (attempt ${attempt}/${retries})`);
+        
+        let response = await fetch(url, {
+          ...options,
+          headers: { ...createApiHeaders(), ...options.headers },
+        });
+        
+        console.log(`📥 API Response: ${response.status} ${url}`);
+
+        if (response.status === 401) {
+          console.log(`🔒 Authentication failed for ${url} - redirecting to login`);
+          // Видаляємо автоматичний refresh, натомість очищаємо дані та перенаправляємо
+          localStorage.removeItem("sessionId");
+          localStorage.removeItem("accessToken");
+          localStorage.removeItem("refreshToken");
+          window.location.href = "/login";
+          throw new Error("Authentication required");
+        } else if (response.status === 429) {
+          // Rate limit - не робимо retries, тільки логуємо
+          console.warn(`⏳ Rate limited for ${url} - skipping retries to prevent spam`);
+          throw new Error("Rate limited - too many requests");
+        } else if (response.status === 503) {
+          // Backend недоступний через Vite proxy fallback
+          console.log(`⚠️ Backend unavailable (503) for ${url} - backend may be starting`);
+          if (attempt < retries) {
+            console.log(`⏳ Waiting ${delay * attempt}ms before retry...`);
+            await new Promise((resolve) => setTimeout(resolve, delay * attempt));
+            continue; // Повторити запит
+          }
+        } else if (response.status === 500) {
+          console.log(
+            `⚠️ Server error ${response.status} for ${url} - server may have restarted`,
+          );
+          if (attempt < retries) {
+            console.log(`⏳ Waiting ${delay * attempt}ms before retry...`);
+            await new Promise((resolve) => setTimeout(resolve, delay * attempt));
+            continue; // Повторити запит
+          }
+        } else if (response.status === 404 && url.includes('/api/')) {
+          // API ендпоінт не знайдено - можливо proxy проблема
+          console.log(`❌ API endpoint not found (404) for ${url} - proxy may not be working`);
+          if (attempt < retries) {
+            console.log(`⏳ Waiting ${delay * attempt}ms before retry...`);
+            await new Promise((resolve) => setTimeout(resolve, delay * attempt));
+            continue; // Повторити запит
+          }
+        }
+
+        // Успішний запит або неретраяльна помилка
+        return response;
+
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        console.error(`❌ API Request failed (attempt ${attempt}/${retries}): ${url}`, error);
+        
+        // Якщо це мережева помилка і не останній запит (але тільки не 429)
+        if (attempt < retries && !(error instanceof Error && error.message.includes("Rate limited"))) {
+          console.log(`⏳ Network error, waiting ${delay * attempt}ms before retry...`);
+          await new Promise((resolve) => setTimeout(resolve, delay * attempt));
+          continue;
+        }
+      }
+    }
+
+    // Всі спроби не вдалися
+    throw lastError || new Error(`Failed to fetch ${url} after ${retries} attempts`);
+  };
+
+  // Покращуємо handleApiError для правильного парсингу помилок
   const handleApiError = async (response: Response, endpoint: string) => {
-    if (response.status === 401) {
-      console.warn(
-        `🔒 Authentication failed for ${endpoint}, redirecting to login`,
-      );
-      window.location.href = "/";
+    let errorMessage = `HTTP ${response.status}`;
+    
+    // Спеціальна обробка для 429 (Rate Limiting)
+    if (response.status === 429) {
+      console.warn(`⚠️ Rate limit для ${endpoint} - зменшуємо частоту запитів`);
+      // Повертаємо null замість викидання помилки для graceful handling
       return null;
     }
-
-    let errorMessage = `HTTP ${response.status}`;
+    
     try {
       const errorBody = await response.text();
       if (errorBody) {
         try {
           const parsed = JSON.parse(errorBody);
-          errorMessage = parsed.error || parsed.message || errorMessage;
-        } catch {
-          errorMessage = errorBody;
+          // Якщо detail - масив, перетворюємо в рядок
+          errorMessage = parsed.detail ? JSON.stringify(parsed.detail) : (parsed.message || parsed.error || errorMessage);
+        } catch (parseError) {
+          errorMessage = errorBody.length > 100 ? errorBody.substring(0, 100) + "..." : errorBody;
         }
       }
-    } catch {
-      // Ignore parsing errors
+    } catch (textError) {
+      console.warn(`Failed to read response body for ${endpoint}:`, textError);
     }
 
-    throw new Error(`${endpoint} failed: ${errorMessage}`);
+    const error = new Error(`${endpoint} failed: ${response.status} - ${errorMessage}`);
+    console.error(`❌ ${error.message}`);
+    throw error;
   };
 
   const fetchWithTimeout = async (
@@ -558,12 +682,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
   const fetchHealth = async (): Promise<StreamHubHealth | null> => {
     try {
-      const response = await fetchWithTimeout(
-        buildUrl("/health"),
-        {
-          headers: createApiHeaders(),
-        },
-      );
+      const response = await authenticatedFetch(buildUrl("/api/health"));
 
       if (!response.ok) {
         return await handleApiError(response, "Health check");
@@ -585,12 +704,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
   const fetchMetrics = async (): Promise<StreamHubMetrics | null> => {
     try {
-      const response = await fetchWithTimeout(
-        buildUrl("/metrics"),
-        {
-          headers: createApiHeaders(),
-        },
-      );
+      const response = await authenticatedFetch(buildUrl("/api/metrics"));
 
       if (!response.ok) {
         return await handleApiError(response, "Metrics");
@@ -612,33 +726,76 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
   const fetchClients = async (): Promise<Client[]> => {
     try {
-        const response = await authenticatedFetch(`${apiBaseUrl}/clients`);
-        if (!response.ok) {
-            throw new Error(`Failed to fetch clients: ${response.status}`);
-        }
-        const data: Client[] = await response.json();
-        return data;
-    } catch (error) {
-        console.error('❌ Error fetching clients:', error);
+      const response = await authenticatedFetch(buildUrl("/api/clients"));
+      if (!response.ok) {
+        await handleApiError(response, "Clients");
         return [];
+      }
+      const data: Client[] = await response.json();
+      return data;
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.includes("Authentication failed")
+      ) {
+        return []; // Handled by handleApiError
+      }
+      console.error("❌ Error fetching clients:", error);
+      return [];
     }
-};
+  };
 
+  // Кеш для task stats
+  const taskStatsCache = useRef<{
+    data: TaskQueueStats | null;
+    timestamp: number;
+    ttl: number; // Time To Live в мілісекундах
+  }>({
+    data: null,
+    timestamp: 0,
+    ttl: 15000 // 15 секунд кеш
+  });
+
+  // У функції fetchTaskStats додаємо default params та кешування
   const fetchTaskStats = async (): Promise<TaskQueueStats | null> => {
     try {
-        const response = await authenticatedFetch(`${apiBaseUrl}/tasks`);
-        if (!response.ok) {
-            throw new Error(`Failed to fetch task stats: ${response.status}`);
-        }
-        const data: TaskQueueStats = await response.json();
-        return data;
-    } catch (error) {
-        console.error('❌ Error fetching task stats:', error);
-        return null;
-    }
-};
+      // Перевіряємо кеш
+      const now = Date.now();
+      const cache = taskStatsCache.current;
+      
+      if (cache.data && (now - cache.timestamp) < cache.ttl) {
+        console.log("📋 Використовуємо кешовані task stats");
+        return cache.data;
+      }
 
-  const connectWebSocket = useCallback(() => {
+      const url = buildUrl("/api/tasks?page=1&limit=50&sort=created_at&order=desc");
+      const response = await authenticatedFetch(url);
+      if (!response.ok) {
+        return await handleApiError(response, "Task stats");
+      }
+      const data: TaskQueueStats = await response.json();
+      
+      // Оновлюємо кеш
+      taskStatsCache.current = {
+        data,
+        timestamp: now,
+        ttl: 15000
+      };
+      
+      return data;
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.includes("Authentication failed")
+      ) {
+        return null; // Handled by handleApiError
+      }
+      console.error("❌ Error fetching task stats:", error);
+      return null;
+    }
+  };
+
+  const connectWebSocket = useCallback(async () => {
     // Перевіряємо чи компонент все ще змонтований
     if (!mountedRef.current) {
       console.log("🚫 Component unmounted, skipping WebSocket connection");
@@ -664,58 +821,107 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       return;
     }
 
+    // Отримуємо токен із localStorage або auth state
+    let sessionId = localStorage.getItem("sessionId");
+    let tokenToCheck = sessionId || authState.sessionId;
+    
+    // Якщо токен відсутній, не можемо підключитися
+    if (!tokenToCheck) {
+      console.warn("🔒 No authentication token available, skipping WebSocket connection");
+      dispatch({ type: "SET_CONNECTION_STATUS", payload: "disconnected" });
+      dispatch({ type: "RESET_RECONNECT_INFO" });
+      return;
+    }
+    
+    // Перевіряємо чи access_token протух (JWT exp)
+    let isExpired = false;
+    try {
+      const payload = JSON.parse(atob(tokenToCheck.split(".")[1]));
+      if (payload.exp && Date.now() / 1000 > payload.exp) {
+        isExpired = true;
+      }
+    } catch (e) {
+      console.warn("⚠️ Не вдалося декодувати JWT для перевірки exp", e);
+      isExpired = true; // На всякий випадок вважаємо протерміновим
+    }
+    
+    if (isExpired) {
+      console.warn("🔒 Access token протух, WebSocket підключення неможливе");
+      dispatch({ type: "SET_CONNECTION_STATUS", payload: "error" });
+      dispatch({
+        type: "SET_WEBSOCKET_ERROR",
+        payload: {
+          type: "authentication",
+          code: 401,
+          reason: "Token expired",
+          message: "Токен автентифікації протерміновий, потрібен повторний вхід",
+          timestamp: new Date(),
+          isRetryable: false,
+        },
+      });
+      // Очищаємо токени та перенаправляємо на логін
+      localStorage.removeItem("sessionId");
+      localStorage.removeItem("accessToken");
+      localStorage.removeItem("refreshToken");
+      window.location.href = "/login";
+      return;
+    }
+
     console.log("🔌 Initiating WebSocket connection...");
     isConnectingRef.current = true;
     dispatch({ type: "SET_CONNECTION_STATUS", payload: "connecting" });
     dispatch({ type: "SET_WEBSOCKET_ERROR", payload: null });
 
-    // Отримуємо токен із localStorage
-    const sessionId = localStorage.getItem("sessionId");
-    if (!sessionId) {
-      console.warn("❌ No session ID found, skipping WebSocket connection");
-      isConnectingRef.current = false;
-      const authError: WebSocketError = {
-        type: "authentication",
-        code: 4000,
-        reason: "No session ID",
-        message: "Відсутній ідентифікатор сесії",
-        timestamp: new Date(),
-        isRetryable: false,
-      };
-
-      dispatch({ type: "SET_WEBSOCKET_ERROR", payload: authError });
-      dispatch({ type: "SET_CONNECTION_STATUS", payload: "disconnected" });
-      dispatch({ type: "ADD_ALERT", payload: createWebSocketAlert(authError) });
-      dispatch({ type: "RESET_RECONNECT_INFO" });
-      return;
-    }
-
     // Перевіряємо, чи sessionId відповідає sessionId із auth стану
     if (authState.sessionId && sessionId !== authState.sessionId) {
-      console.warn("⚠️ Session ID mismatch, skipping WebSocket connection");
-      isConnectingRef.current = false;
-      const authError: WebSocketError = {
-        type: "authentication",
-        code: 4002,
-        reason: "Session ID mismatch",
-        message: "Невідповідність ідентифікатора сесії",
-        timestamp: new Date(),
-        isRetryable: false,
-      };
+      // Захист від нескінченної петлі session sync
+      sessionSyncAttemptsRef.current += 1;
 
-      dispatch({ type: "SET_WEBSOCKET_ERROR", payload: authError });
-      dispatch({ type: "SET_CONNECTION_STATUS", payload: "disconnected" });
-      dispatch({ type: "ADD_ALERT", payload: createWebSocketAlert(authError) });
-      dispatch({ type: "RESET_RECONNECT_INFO" });
+      if (sessionSyncAttemptsRef.current > maxSessionSyncAttempts) {
+        console.error(
+          "❌ Too many session sync attempts, stopping WebSocket connection",
+        );
+        isConnectingRef.current = false;
+        const syncError: WebSocketError = {
+          type: "authentication",
+          code: 4002,
+          reason: "Session sync loop detected",
+          message: "Забагато спроб синхронізації сесії, з'єднання припинено",
+          timestamp: new Date(),
+          isRetryable: false,
+        };
+
+        dispatch({ type: "SET_WEBSOCKET_ERROR", payload: syncError });
+        dispatch({ type: "SET_CONNECTION_STATUS", payload: "error" });
+        dispatch({
+          type: "ADD_ALERT",
+          payload: createWebSocketAlert(syncError),
+        });
+        return;
+      }
+
+      console.warn(
+        `⚠️ Session ID mismatch (attempt ${sessionSyncAttemptsRef.current}/${maxSessionSyncAttempts}), updating localStorage with current sessionId`,
+      );
+      // Оновлюємо localStorage з поточним sessionId з auth стану
+      localStorage.setItem("sessionId", authState.sessionId);
+      // Повторно викликаємо connectWebSocket з оновленим токеном після короткої затримки
+      isConnectingRef.current = false;
+      setTimeout(() => connectWebSocket(), 500);
       return;
     }
 
     // Будуємо URL з токеном
-    const wsUrl = `${buildWsUrl("/ws")}?token=${encodeURIComponent(sessionId)}`;
+    const wsUrl = `${buildWsUrl("/ws")}?token=${encodeURIComponent(sessionId || "")}`;
     console.log(
       "🔌 Connecting to WebSocket:",
       wsUrl.replace(/token=[^&]+/, "token=***"),
     );
+    console.log("🔍 WebSocket URL details:", {
+      baseWsUrl: buildWsUrl("/ws"),
+      hasToken: !!sessionId,
+      environment: process.env.NODE_ENV,
+    });
 
     // Встановлюємо таймаут з'єднання
     const timeoutId = setTimeout(handleConnectionTimeout, connectionTimeoutMs);
@@ -737,7 +943,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
         return;
       }
 
-      console.log("✅ WebSocket connected successfully");
+      console.log("✅ WebSocket connected successfully (onopen)");
       isConnectingRef.current = false;
 
       // Очищаємо таймаут з'єднання
@@ -749,6 +955,9 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       dispatch({ type: "SET_CONNECTION_STATUS", payload: "connected" });
       dispatch({ type: "SET_WEBSOCKET_ERROR", payload: null });
       dispatch({ type: "RESET_RECONNECT_INFO" });
+
+      // Скидаємо лічильник session sync при успішному підключенні
+      sessionSyncAttemptsRef.current = 0;
 
       // Запускаємо heartbeat
       startHeartbeat(ws);
@@ -768,29 +977,13 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
           timestamp: new Date().toISOString(),
         },
       };
-
-      try {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify(registrationMessage));
-          console.log("📝 Registration message sent successfully");
-        }
-      } catch (error) {
-        console.error("❌ Failed to send registration message:", error);
-        const regError: WebSocketError = {
-          type: "registration",
-          code: 4001,
-          reason: "Failed to send registration",
-          message: "Не вдалося відправити повідомлення реєстрації",
-          timestamp: new Date(),
-          isRetryable: true,
-        };
-
-        dispatch({ type: "SET_WEBSOCKET_ERROR", payload: regError });
-        dispatch({
-          type: "ADD_ALERT",
-          payload: createWebSocketAlert(regError),
-        });
-      }
+      console.log(
+        "➡️ Готуюсь відправити client_registration:",
+        registrationMessage,
+      );
+      // Замість ws.send(JSON.stringify(registrationMessage)), використовуємо safeSend
+      safeSend(ws, registrationMessage);
+      console.log("✅ Відправлено client_registration");
     };
 
     ws.onmessage = (event) => {
@@ -866,7 +1059,18 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
           case "metrics_update":
             console.log("📊 Received metrics update:", message);
             if (message.data) {
-              dispatch({ type: "SET_METRICS", payload: message.data });
+              // Фільтруємо метрики для клієнтів, які їх підтримують
+              const validMetrics = { ...message.data };
+              if (validMetrics.clients) {
+                // Логуємо тільки якщо є проблемні клієнти
+                const problematicClients = Object.keys(validMetrics.clients).filter(
+                  clientId => !validMetrics.clients[clientId] || Object.keys(validMetrics.clients[clientId]).length === 0
+                );
+                if (problematicClients.length > 0) {
+                  console.debug("📊 Клієнти без метрик:", problematicClients);
+                }
+              }
+              dispatch({ type: "SET_METRICS", payload: validMetrics });
             }
             break;
 
@@ -881,6 +1085,94 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
             console.log("📋 Received task stats update:", message);
             if (message.data) {
               dispatch({ type: "SET_TASK_STATS", payload: message.data });
+              // Оновлюємо час останнього WebSocket update
+              lastWebSocketUpdateRef.current = new Date();
+              startWebSocketTimeout();
+            }
+            break;
+
+          case "task_updated":
+            console.log("📝 Received task update:", message);
+            if (message.data) {
+              // Перевіряємо чи змінився статус завдання на finalized (completed/failed/cancelled)
+              const statusChanged = ["completed", "failed", "cancelled"].includes(message.data.status);
+              
+              if (statusChanged) {
+                // Якщо статус змінився на фінальний, оновлюємо всю статистику
+                fetchTaskStats().then((taskStats) => {
+                  if (taskStats) {
+                    dispatch({ type: "SET_TASK_STATS", payload: taskStats });
+                  }
+                });
+              } else if (state.taskStats) {
+                // Інакше просто оновлюємо конкретне завдання в списку
+                const updatedTasks =
+                  state.taskStats.tasks?.map((task) =>
+                    task.task_id === message.data.task_id
+                      ? { ...task, ...message.data }
+                      : task,
+                  ) || [];
+
+                const updatedTaskStats = {
+                  ...state.taskStats,
+                  tasks: updatedTasks,
+                };
+                dispatch({ type: "SET_TASK_STATS", payload: updatedTaskStats });
+              }
+              
+              // Оновлюємо час останнього WebSocket update
+              lastWebSocketUpdateRef.current = new Date();
+              startWebSocketTimeout();
+            }
+            break;
+
+          case "task_created":
+            console.log("➕ Received task created:", message);
+            // При створенні нового завдання принудительно оновлюємо статистику завдань
+            if (message.data) {
+              // Негайно перезавантажуємо актуальні статистики завдань
+              fetchTaskStats().then((taskStats) => {
+                if (taskStats) {
+                  dispatch({ type: "SET_TASK_STATS", payload: taskStats });
+                }
+              });
+              
+              dispatch({ type: "UPDATE_LAST_UPDATED" });
+              // Оновлюємо час останнього WebSocket update
+              lastWebSocketUpdateRef.current = new Date();
+              startWebSocketTimeout();
+            }
+            break;
+
+          case "task_completed":
+            console.log("✅ Received task completed:", message);
+            if (message.data) {
+              // Оновлюємо статистики завдань після завершення
+              fetchTaskStats().then((taskStats) => {
+                if (taskStats) {
+                  dispatch({ type: "SET_TASK_STATS", payload: taskStats });
+                }
+              });
+              
+              // Оновлюємо час останнього WebSocket update
+              lastWebSocketUpdateRef.current = new Date();
+              startWebSocketTimeout();
+            }
+            break;
+
+          case "task_failed":
+            console.log("❌ Received task failed:", message);
+            if (message.data) {
+              // Оновлюємо статистики завдань після збою
+              fetchTaskStats().then((taskStats) => {
+                if (taskStats) {
+                  dispatch({ type: "SET_TASK_STATS", payload: taskStats });
+                }
+              });
+              
+              // Оновлюємо час останнього WebSocket update
+              lastWebSocketUpdateRef.current = new Date();
+              startWebSocketTimeout();
             }
             break;
 
@@ -962,7 +1254,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
     ws.onclose = (event) => {
       isConnectingRef.current = false;
-      console.log("🔌 WebSocket closed:", event.code, event.reason);
+      console.log("🔌 WebSocket closed (onclose):", event.code, event.reason);
 
       // Очищаємо таймаут з'єднання
       if (connectionTimeoutRef.current) {
@@ -973,6 +1265,133 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       // Зупиняємо heartbeat
       stopHeartbeat();
 
+      // ПОКРАЩЕННЯ: Спеціальна обробка для timeout від хабу (code 1001)
+      const isHubTimeout = event.code === 1001 && 
+        (event.reason === "Connection timeout" || event.reason === "Client inactive" || event.reason === "");
+      
+      if (isHubTimeout) {
+        console.log("⏰ Hub timeout detected - attempting token refresh before reconnect");
+        
+        // Спробуємо оновити токен перед реконнектом
+        const attemptTokenRefreshAndReconnect = async () => {
+          try {
+            // Отримуємо refresh token
+            const refreshToken = localStorage.getItem("refreshToken");
+            if (!refreshToken) {
+              console.warn("🔒 No refresh token available for timeout recovery");
+              handleWebSocketAuthError();
+              return;
+            }
+            
+            // Спробуємо оновити токени
+            const response = await fetch(buildUrl("/auth/refresh"), {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ refresh_token: refreshToken }),
+            });
+            
+            if (response.ok) {
+              const data = await response.json();
+              
+              // Оновлюємо токени в localStorage
+              localStorage.setItem("sessionId", data.access_token);
+              localStorage.setItem("refreshToken", data.refresh_token);
+              
+              console.log("✅ Token refreshed successfully - attempting reconnect");
+              
+              // Скидаємо лічильник реконнектів для свіжого старту
+              dispatch({ type: "RESET_RECONNECT_INFO" });
+              
+              // Спробуємо реконнект через коротку затримку
+              setTimeout(() => {
+                if (mountedRef.current && authState.isAuthenticated) {
+                  connectWebSocket();
+                }
+              }, 1000);
+              
+              return; // Не продовжуємо стандартну обробку
+              
+            } else {
+              console.warn("⚠️ Token refresh failed during timeout recovery");
+              // Продовжуємо зі стандартною обробкою timeout
+            }
+            
+          } catch (error) {
+            console.error("❌ Error during token refresh for timeout recovery:", error);
+            // Продовжуємо зі стандартною обробкою timeout
+          }
+          
+          // Якщо token refresh не вдався, обробляємо як звичайний timeout
+          handleStandardTimeoutReconnect();
+        };
+        
+        const handleStandardTimeoutReconnect = () => {
+          console.log("🔄 Handling hub timeout with standard reconnect logic");
+          
+          const timeoutError: WebSocketError = {
+            type: "connection",
+            code: event.code,
+            reason: event.reason || "Hub timeout",
+            message: "Хаб закрив з'єднання через неактивність - спроба реконнекту",
+            timestamp: new Date(),
+            isRetryable: true,
+          };
+          
+          dispatch({ type: "SET_WEBSOCKET_ERROR", payload: timeoutError });
+          dispatch({ type: "SET_CONNECTION_STATUS", payload: "disconnected" });
+          
+          // Не додаємо alert для timeout - це нормальна поведінка
+          setSocket(null);
+          
+          // Швидкий реконнект для timeout
+          if (mountedRef.current && 
+              authState.isAuthenticated && 
+              localStorage.getItem("sessionId") &&
+              state.reconnectInfo.attempts < 3) { // Обмежуємо кількість спроб для timeout
+            
+            const nextAttempt = state.reconnectInfo.attempts + 1;
+            const delay = 2000; // Швидкий реконнект для timeout
+            
+            console.log(`⏰ Scheduling quick timeout reconnection attempt ${nextAttempt}/3 in ${delay}ms`);
+            
+            dispatch({
+              type: "UPDATE_RECONNECT_INFO",
+              payload: {
+                attempts: nextAttempt,
+                nextAttemptIn: delay,
+              },
+            });
+            
+            const timeoutId = setTimeout(() => {
+              if (mountedRef.current && 
+                  !socket && 
+                  !isConnectingRef.current && 
+                  authState.isAuthenticated &&
+                  localStorage.getItem("sessionId")) {
+                
+                console.log(`🔄 Attempting timeout reconnection (${nextAttempt}/3)`);
+                connectWebSocket();
+              }
+              setReconnectTimeout(null);
+            }, delay);
+            
+            setReconnectTimeout(timeoutId);
+          }
+        };
+        
+        // Запускаємо спробу оновлення токена
+        attemptTokenRefreshAndReconnect();
+        return; // Не продовжуємо стандартну обробку
+      }
+
+      // Додаю обробку протухлого токена (окрім timeout)
+      if (event.code === 4002 || event.code === 4003) {
+        handleWebSocketAuthError();
+        return;
+      }
+
       const error = classifyWebSocketError(event);
       dispatch({ type: "SET_WEBSOCKET_ERROR", payload: error });
       dispatch({ type: "SET_CONNECTION_STATUS", payload: "disconnected" });
@@ -980,34 +1399,51 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
       setSocket(null);
 
-      // Детальне логування тільки для важливих помилок
-      if (error.type !== "connection" || error.code !== 1000) {
-        console.log(`🔍 WebSocket Error Details:
-          Type: ${error.type}
-          Code: ${error.code}
-          Reason: ${error.reason}
-          Message: ${error.message}
-          Retryable: ${error.isRetryable}
-        `);
-      }
+      // ПОКРАЩЕННЯ: Більш детальне логування для всіх помилок
+      console.log(`🔍 WebSocket Error Details:
+        Type: ${error.type}
+        Code: ${error.code}
+        Reason: ${error.reason}
+        Message: ${error.message}
+        Retryable: ${error.isRetryable}
+        Connection State: connected=${authState.isAuthenticated}, sessionId=${!!localStorage.getItem("sessionId")}
+        Attempts: ${state.reconnectInfo.attempts}/${state.reconnectInfo.maxAttempts}
+      `);
 
-      // Attempt to reconnect with exponential backoff
+      // ПОКРАЩЕННЯ: Спеціальна обробка для code 1006 (мережева помилка)
+      const isNetworkError = error.type === "network" || error.code === 1006;
+      const isTemporaryError = [1012, 1013, 1014].includes(error.code); // Виключаємо 1001 з тимчасових
+      
+      // Для code 1006 завжди намагаємося реконнектитися
       const shouldReconnect =
         mountedRef.current &&
         authState.isAuthenticated &&
         localStorage.getItem("sessionId") &&
         state.reconnectInfo.attempts < state.reconnectInfo.maxAttempts &&
-        error.isRetryable;
+        (error.isRetryable || isNetworkError || isTemporaryError);
 
       if (shouldReconnect) {
         const nextAttempt = state.reconnectInfo.attempts + 1;
-        const delay = Math.min(
-          reconnectDelay * Math.pow(2, state.reconnectInfo.attempts),
-          30000,
-        ); // Max 30 seconds
+        
+        // ПОКРАЩЕННЯ: Інтелектуальний backoff з особливою обробкою мережевих помилок
+        let delay;
+        if (isNetworkError && error.code === 1006) {
+          // Для code 1006 (мережева помилка) - агресивніший retry
+          delay = Math.min(500 * Math.pow(1.2, state.reconnectInfo.attempts), 5000); // Max 5 seconds
+          console.log("🌐 Network error (1006) detected - using aggressive retry strategy");
+        } else if (isTemporaryError) {
+          // Для тимчасових помилок - швидший retry
+          delay = Math.min(1000 * Math.pow(1.5, state.reconnectInfo.attempts), 10000); // Max 10 seconds
+        } else {
+          // Стандартний exponential backoff
+          delay = Math.min(
+            reconnectDelay * Math.pow(2, state.reconnectInfo.attempts),
+            30000,
+          ); // Max 30 seconds
+        }
 
         console.log(
-          `⏰ Scheduling WebSocket reconnection attempt ${nextAttempt}/${state.reconnectInfo.maxAttempts} in ${delay}ms...`,
+          `⏰ Scheduling WebSocket reconnection attempt ${nextAttempt}/${state.reconnectInfo.maxAttempts} in ${delay}ms... (${error.type} error, code ${error.code})`,
         );
 
         dispatch({
@@ -1029,12 +1465,19 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
             localStorage.getItem("sessionId")
           ) {
             console.log(
-              `🔄 Attempting WebSocket reconnection (${nextAttempt}/${state.reconnectInfo.maxAttempts})...`,
+              `🔄 Attempting WebSocket reconnection (${nextAttempt}/${state.reconnectInfo.maxAttempts})... (Previous error: ${error.type}, code ${error.code})`,
             );
             connectWebSocket();
           } else {
             console.log(
               "🚫 Skipping WebSocket reconnection - conditions no longer met",
+              {
+                mounted: mountedRef.current,
+                hasSocket: !!socket,
+                connecting: isConnectingRef.current,
+                authenticated: authState.isAuthenticated,
+                hasSession: !!localStorage.getItem("sessionId")
+              }
             );
           }
           setReconnectTimeout(null);
@@ -1062,19 +1505,32 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
           });
         } else if (!error.isRetryable) {
           console.log(
-            `🚫 Not scheduling WebSocket reconnection - error not retryable (${error.type})`,
+            `🚫 Not scheduling WebSocket reconnection - error not retryable (${error.type}, code ${error.code})`,
           );
         } else {
           console.log(
             "🚫 Not scheduling WebSocket reconnection - user not authenticated or component unmounted",
+            {
+              authenticated: authState.isAuthenticated,
+              mounted: mountedRef.current,
+              hasSession: !!localStorage.getItem("sessionId")
+            }
           );
         }
+
+        // Автоматичне скидання лічильника через деякий час
+        setTimeout(() => {
+          if (mountedRef.current && authState.isAuthenticated) {
+            dispatch({ type: "RESET_RECONNECT_INFO" });
+            console.log("🔄 Auto-reset reconnection attempts after delay");
+          }
+        }, 60000); // Скидаємо через 1 хвилину
       }
     };
 
-    ws.onerror = (error) => {
+    ws.onerror = (event) => {
       isConnectingRef.current = false;
-      console.error("❌ WebSocket error event:", error);
+      console.error("❌ WebSocket error (onerror):", event);
 
       // Очищаємо таймаут з'єднання
       if (connectionTimeoutRef.current) {
@@ -1105,7 +1561,6 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
   ]);
 
   const disconnectWebSocket = useCallback(() => {
-    console.log("🔌 Disconnecting WebSocket...");
     isConnectingRef.current = false;
 
     if (socket) {
@@ -1126,22 +1581,48 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
     stopHeartbeat();
 
-    // Reset reconnect info
+    // Reset reconnect info and session sync attempts
     dispatch({ type: "RESET_RECONNECT_INFO" });
     dispatch({ type: "SET_WEBSOCKET_ERROR", payload: null });
+    sessionSyncAttemptsRef.current = 0;
   }, [socket, reconnectTimeout]);
 
-  // Покращена функція refreshData з меншим логуванням
+  // Рефи для контролю помилок та пауз
+  const errorCountRef = useRef(0);
+  const isPausedRef = useRef(false);
+  const maxErrorsBeforePause = 3;
+  const pauseDuration = 30000; // 30 секунд пауза при багатьох помилках
+  const rateLimitPauseDuration = 60000; // 1 хвилина пауза при rate limit
+
   const refreshData = useCallback(async () => {
-    if (!authState.isAuthenticated) {
-      console.log('Skipping data refresh - user not authenticated');
+    if (!authState.isAuthenticated || isPausedRef.current) {
+      return;
+    }
+
+    // Якщо WebSocket підключений, зменшуємо частоту HTTP запитів
+    if (state.connectionStatus === "connected" && state.lastUpdated) {
+      const timeSinceLastUpdate = Date.now() - state.lastUpdated.getTime();
+      if (timeSinceLastUpdate < 30000) { // 30 секунд
+        console.log("📡 WebSocket активний - пропускаємо HTTP refresh");
+        return;
+      }
+    }
+
+    if (errorCountRef.current >= maxErrorsBeforePause) {
+      console.warn(`⏸️ Pausing data refresh due to repeated errors. Resuming in ${pauseDuration / 1000} seconds`);
+      isPausedRef.current = true;
+      setTimeout(() => {
+        errorCountRef.current = 0;
+        isPausedRef.current = false;
+        console.log("📡 Resuming data refresh after error pause");
+      }, pauseDuration);
       return;
     }
 
     dispatch({ type: "SET_LOADING", payload: true });
 
     try {
-      const [health, metrics, clients, taskStats] = await Promise.all([
+      const [healthData, metricsData, clientsData, taskStatsData] = await Promise.all([
         fetchHealth(),
         fetchMetrics(),
         fetchClients(),
@@ -1150,24 +1631,34 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
       if (!mountedRef.current) return;
 
-      if (health) dispatch({ type: "SET_HEALTH", payload: health });
-      if (metrics) dispatch({ type: "SET_METRICS", payload: metrics });
-      dispatch({ type: "SET_CLIENTS", payload: clients });
-      if (taskStats) dispatch({ type: "SET_TASK_STATS", payload: taskStats });
+      if (healthData) dispatch({ type: "SET_HEALTH", payload: healthData });
+      if (metricsData) dispatch({ type: "SET_METRICS", payload: metricsData });
+      dispatch({ type: "SET_CLIENTS", payload: clientsData });
+      if (taskStatsData) dispatch({ type: "SET_TASK_STATS", payload: taskStatsData });
 
-      dispatch({ type: "SET_ERROR", payload: null });
+      dispatch({ type: "UPDATE_LAST_UPDATED" });
+      errorCountRef.current = 0; // Скидаємо лічільник помилок при успіху
     } catch (error) {
-      if (!mountedRef.current) return;
-
-      console.error("Error fetching data:", error);
-      dispatch({
-        type: "SET_ERROR",
-        payload: error instanceof Error ? error.message : "Unknown error",
-      });
-    } finally {
-      if (mountedRef.current) {
-        dispatch({ type: "SET_LOADING", payload: false });
+      errorCountRef.current++;
+      const errorMsg = error instanceof Error ? error.message : "Unknown error";
+      
+      // Спеціальна обробка rate limit помилок
+      if (errorMsg.includes("Rate limited") || errorMsg.includes("429")) {
+        console.warn(`⏸️ Rate limited! Pausing requests for ${rateLimitPauseDuration / 1000} seconds to prevent further limiting`);
+        isPausedRef.current = true;
+        setTimeout(() => {
+          errorCountRef.current = 0;
+          isPausedRef.current = false;
+          console.log("📡 Resuming after rate limit pause");
+        }, rateLimitPauseDuration);
+        
+        dispatch({ type: "SET_ERROR", payload: "Занадто багато запитів. Зачекайте хвилину..." });
+      } else {
+        dispatch({ type: "SET_ERROR", payload: errorMsg });
       }
+      console.error("Error fetching data:", error);
+    } finally {
+      dispatch({ type: "SET_LOADING", payload: false });
     }
   }, [authState.isAuthenticated]);
 
@@ -1175,7 +1666,6 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
   useEffect(() => {
     mountedRef.current = true;
     return () => {
-      console.log("🧹 StatusProvider unmounting - cleaning up");
       mountedRef.current = false;
       isConnectingRef.current = false;
 
@@ -1184,6 +1674,9 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
         clearInterval(dataRefreshIntervalRef.current);
         dataRefreshIntervalRef.current = null;
       }
+      
+      // Очищаємо WebSocket timeout
+      stopWebSocketTimeout();
     };
   }, []);
 
@@ -1195,47 +1688,64 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       dataRefreshIntervalRef.current = null;
     }
 
-    if (authState.isAuthenticated && mountedRef.current && !authState.isLoading) {
-      console.log("📊 Starting data refresh interval");
-
+    if (
+      authState.isAuthenticated &&
+      mountedRef.current &&
+      !authState.isLoading
+    ) {
       // Додаємо невелику затримку щоб дати час сесії встановитися
       const startDataRefresh = () => {
         refreshData(); // Виконуємо одразу
 
+        // Адаптивний інтервал залежно від стану WebSocket
+        const getRefreshInterval = () => {
+          if (state.connectionStatus === "connected") {
+            return refreshInterval * 2; // Подвоюємо інтервал при активному WebSocket
+          }
+          return refreshInterval;
+        };
+
         const interval = setInterval(() => {
-          if (mountedRef.current && authState.isAuthenticated && !authState.isLoading) {
+          if (
+            mountedRef.current &&
+            authState.isAuthenticated &&
+            !authState.isLoading
+          ) {
             refreshData();
           }
-        }, refreshInterval);
+        }, getRefreshInterval());
 
         dataRefreshIntervalRef.current = interval;
       };
 
-      // Якщо сесія вже є, запускаємо одразу, інакше чекаємо 1 секунду
+      // Додаємо невелику затримку щоб дати час сесії встановитися та уникнути race conditions
       const sessionId = localStorage.getItem("sessionId");
-      if (sessionId) {
-        startDataRefresh();
-      } else {
-        setTimeout(() => {
-          if (
-            mountedRef.current &&
-            authState.isAuthenticated &&
-            localStorage.getItem("sessionId")
-          ) {
-            startDataRefresh();
-          }
-        }, 1000);
-      }
+      const delay = sessionId ? 500 : 1500; // Менша затримка якщо сесія вже є
+      
+      setTimeout(() => {
+        if (
+          mountedRef.current &&
+          authState.isAuthenticated &&
+          !isPausedRef.current &&
+          localStorage.getItem("sessionId")
+        ) {
+          startDataRefresh();
+        }
+      }, delay);
     }
 
     return () => {
       if (dataRefreshIntervalRef.current) {
-        console.log("📊 Stopping data refresh interval");
         clearInterval(dataRefreshIntervalRef.current);
         dataRefreshIntervalRef.current = null;
       }
     };
-  }, [authState.isAuthenticated, authState.isLoading, refreshInterval, refreshData]);
+  }, [
+    authState.isAuthenticated,
+    authState.isLoading,
+    refreshInterval,
+    refreshData,
+  ]);
 
   // Connect WebSocket when authenticated - покращена логіка
   useEffect(() => {
@@ -1244,12 +1754,10 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
     if (authState.isAuthenticated && localStorage.getItem("sessionId")) {
       if (authChanged || !socket) {
-        console.log("🔐 User authenticated, connecting WebSocket");
         connectWebSocket();
       }
     } else {
       if (socket || isConnectingRef.current) {
-        console.log("🔒 User not authenticated, disconnecting WebSocket");
         disconnectWebSocket();
       }
     }
@@ -1260,12 +1768,46 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
     disconnectWebSocket,
   ]);
 
+  // Функція для ручного скидання лічильника переподключень
+  const resetReconnectionAttempts = useCallback(() => {
+    dispatch({ type: "RESET_RECONNECT_INFO" });
+    dispatch({ type: "SET_WEBSOCKET_ERROR", payload: null });
+    console.log("🔄 Reconnection attempts reset manually");
+  }, []);
+
+  // Обробка помилки автентифікації WebSocket - logout замість refresh
+  const handleWebSocketAuthError = useCallback(async () => {
+    console.warn("🔒 WebSocket authentication failed - logging out");
+    
+    // Очищаємо всі токени
+    localStorage.removeItem("sessionId");
+    localStorage.removeItem("accessToken");
+    localStorage.removeItem("refreshToken");
+    
+    dispatch({ type: "SET_CONNECTION_STATUS", payload: "error" });
+    dispatch({
+      type: "SET_WEBSOCKET_ERROR",
+      payload: {
+        type: "authentication",
+        code: 401,
+        reason: "Authentication failed",
+        message: "Помилка автентифікації, потрібен повторний вхід",
+        timestamp: new Date(),
+        isRetryable: false,
+      },
+    });
+    
+    // Перенаправляємо на логін
+    window.location.href = "/login";
+  }, [dispatch]);
+
   const value: StatusContextType = {
     state,
     dispatch,
     refreshData,
     connectWebSocket,
     disconnectWebSocket,
+    resetReconnectionAttempts,
   };
 
   return (

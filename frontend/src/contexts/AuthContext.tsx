@@ -5,6 +5,7 @@ import React, {
   useEffect,
   useCallback,
 } from "react";
+import { logDevError, logDevWarning } from "../utils/devtools-filter";
 
 // Типи даних для авторизації
 export interface AuthUser {
@@ -31,6 +32,7 @@ export interface AuthContextType {
   validateSession: () => Promise<boolean>;
   clearError: () => void;
   refreshToken: () => Promise<boolean>;
+  refreshAccessToken: () => Promise<string | null>;
 }
 
 // Ініціалізація контексту з початковими значеннями
@@ -49,6 +51,7 @@ const AuthContext = createContext<AuthContextType>({
   validateSession: async () => false,
   clearError: () => {},
   refreshToken: async () => false,
+  refreshAccessToken: async () => null,
 });
 
 // Провайдер контексту авторизації
@@ -100,13 +103,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           throw new Error(data.message || "Login failed");
         }
       } catch (error) {
-        console.error("Помилка входу:", error);
-        setAuth((prev) => ({
-          ...prev,
-          error:
-            error instanceof Error ? error.message : "Невідома помилка входу",
-          isLoading: false,
-        }));
+        // Більш м'яка обробка мережевих помилок
+        if (error instanceof TypeError && error.message.includes("NetworkError")) {
+          logDevWarning("⚠️ Мережева помилка при вході:", error.message);
+          setAuth((prev) => ({
+            ...prev,
+            error: "Проблема з мережею. Перевірте підключення до інтернету.",
+            isLoading: false,
+          }));
+        } else {
+          logDevError("❌ Помилка входу:", error);
+          setAuth((prev) => ({
+            ...prev,
+            error:
+              error instanceof Error ? error.message : "Невідома помилка входу",
+            isLoading: false,
+          }));
+        }
         return false;
       }
     },
@@ -115,7 +128,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
   // Функція для очищення всіх даних авторизації
   const clearAuthData = useCallback(() => {
-    console.log("🧹 Clearing all auth data");
     setAuth(initialAuthState);
     localStorage.removeItem("sessionId");
     localStorage.removeItem("accessToken");
@@ -144,69 +156,79 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       });
 
       if (!response.ok) {
-        console.warn("Помилка при виході з системи", response.status);
+        logDevWarning("Помилка при виході з системи", response.status);
       }
 
       // Очищення стану в будь-якому випадку
       clearAuthData();
     } catch (error) {
-      console.error("Помилка при виході:", error);
+      logDevError("Помилка при виході:", error);
       // Очищаємо стан навіть при помилці
       clearAuthData();
     }
   }, []);
 
+  // Функція оновлення токена (БЛОКОВАНА для автоматичного виклику)
+  // Залишена тільки для ручного виклику через UI (кнопка "Оновити сесію")
   const refreshToken = useCallback(async (): Promise<boolean> => {
-    console.log("🔄 Attempting token refresh");
+    logDevWarning("⚠️ Automatic token refresh is disabled for security");
+    logDevWarning("⚠️ Please login again to continue");
+    
+    // Блокуємо автоматичне оновлення для безпеки
+    await logout();
+    return false;
+    
+    /* ПРИМІТКА: Код нижче закоментовано для безпеки
+    
     const refresh = localStorage.getItem("refreshToken");
     if (!refresh) {
-      console.log("❌ No refresh token available");
+      logDevWarning("⚠️ Відсутній refresh token для оновлення");
       return false;
     }
     try {
-      console.log(
-        "📤 Sending refresh request with token:",
-        refresh.substring(0, 20) + "...",
-      );
       const response = await fetch("/api/auth/refresh", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refresh_token: refresh }),
       });
-      console.log("📥 Refresh response status:", response.status);
+      
       if (!response.ok) {
-        console.log("❌ Refresh failed with status:", response.status);
+        logDevWarning("⚠️ Не вдалося оновити токен, потрібен релогін");
         return false;
       }
+      
       const data = await response.json();
-      console.log("✅ Refresh successful, new access token received");
       if (data.tokens?.access_token) {
-        localStorage.setItem("accessToken", data.tokens.access_token);
-        localStorage.setItem("sessionId", data.tokens.access_token);
-        setAuth((prev) => ({ ...prev, sessionId: data.tokens.access_token }));
+        const newSessionId = data.tokens.access_token;
+        localStorage.setItem("accessToken", newSessionId);
+        localStorage.setItem("sessionId", newSessionId);
+        setAuth((prev) => ({
+          ...prev,
+          sessionId: newSessionId,
+          user: prev.user ? { ...prev.user, sessionId: newSessionId } : prev.user,
+        }));
+        logDevWarning("✅ Токен оновлено успішно");
         return true;
       }
-      console.log("❌ No new access token in response");
       return false;
     } catch (error) {
-      console.error("❌ Error during token refresh:", error);
+      if (error instanceof TypeError && error.message.includes("NetworkError")) {
+        logDevWarning("⚠️ Мережева помилка при оновленні токена");
+        return false;
+      }
+      logDevError("❌ Помилка оновлення токена:", error);
       return false;
     }
+    */
   }, []);
 
   // Валідація сесії
   const validateSession = useCallback(async (): Promise<boolean> => {
-    console.log("🔍 Starting session validation");
     const sessionId = localStorage.getItem("sessionId");
     if (!sessionId) {
-      console.log("❌ No sessionId in localStorage");
       return false;
     }
     try {
-      console.log(
-        "📤 Sending validation request with token:",
-        sessionId.substring(0, 20) + "...",
-      );
       const response = await fetch("/api/auth/validate", {
         method: "POST",
         headers: {
@@ -214,61 +236,86 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           Authorization: `Bearer ${sessionId}`,
         },
       });
-      console.log("📥 Validation response status:", response.status);
+      
       if (!response.ok) {
-        console.log("⚠️ Validation failed with status:", response.status);
         if (response.status === 401) {
-          console.log("🔄 Validation failed with 401, attempting refresh");
-          const refreshed = await refreshToken();
-          if (refreshed) {
-            console.log("✅ Refresh successful, retrying validation");
-            return await validateSession();
-          } else {
-            console.log("❌ Refresh failed, validation unsuccessful");
-          }
+          // Токен прострочений або невалідний - повний logout
+          logDevWarning("⚠️ Токен прострочений або невалідний, виконую logout");
+          await logout();
+          return false;
+        } else if (response.status === 500) {
+          // Помилка сервера - можливо після перезапуску
+          logDevWarning("⚠️ Server error during session validation - server may have restarted");
+          // Виконуємо logout при помилці сервера
+          await logout();
+          return false;
         }
         // Очищаємо токени при невдалій валідації
-        clearAuthData();
+        await logout();
         return false;
       }
+      
       const data = await response.json();
-      console.log("✅ Validation successful");
       if (data.valid && data.user) {
+        // Додаємо sessionId до user та стану авторизації
+        const userWithSession = {
+          ...data.user,
+          sessionId, // гарантуємо наявність sessionId у користувача
+        };
+
         setAuth((prev) => ({
           ...prev,
           isAuthenticated: true,
           isLoading: false,
-          user: data.user,
+          user: userWithSession,
+          sessionId, // зберігаємо токен у стані
           error: null,
         }));
         return true;
       }
       // Якщо валідація не пройшла
-      clearAuthData();
+      await logout();
       return false;
     } catch (error) {
-      console.error("❌ Error validating session:", error);
-      // Очищаємо всі дані при помилці валідації
-      clearAuthData();
+      // М'яка обробка мережевих помилок
+      if (error instanceof TypeError && error.message.includes("NetworkError")) {
+        logDevWarning("⚠️ Мережева помилка при валідації сесії");
+        // При мережевих помилках також виконуємо logout для безпеки
+        await logout();
+        return false;
+      }
+      logDevError("❌ Помилка валідації сесії:", error);
+      await logout();
       return false;
     }
-  }, [refreshToken]);
+  }, []); // Видаляємо залежність від refreshToken
 
   // Перевірка сесії при завантаженні (тільки один раз)
   useEffect(() => {
     const checkSession = async () => {
+      // Додаємо невелику затримку щоб уникнути race condition з іншими запитами
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
       const sessionId = localStorage.getItem("sessionId");
+      const isLoginPage = window.location.pathname === "/login";
+      
       if (sessionId) {
-        console.log("🔍 Initial session check on mount");
         const isValid = await validateSession();
         if (!isValid) {
-          console.log("❌ Session validation failed, clearing auth data");
-          clearAuthData();
+          // validateSession вже виконало logout, просто перенаправляємо
+          if (!isLoginPage) {
+            logDevWarning("⚠️ Сесія невалідна, перенаправлення на сторінку входу");
+            window.location.href = "/login";
+          }
         }
       } else {
-        console.log("❌ No session found on mount, staying logged out");
-        // Очищаємо будь-які залишкові дані
-        clearAuthData();
+        // Немає токена - очищаємо стан та перенаправляємо
+        if (!isLoginPage) {
+          clearAuthData();
+          window.location.href = "/login";
+        } else {
+          clearAuthData();
+        }
       }
     };
 
@@ -280,17 +327,63 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     setAuth((prev) => ({ ...prev, error: null }));
   }, []);
 
+  // Функція для оновлення access_token через refresh_token (БЛОКОВАНА)
+  // Залишена тільки для ручного виклику через UI
+  const refreshAccessToken = async (): Promise<string | null> => {
+    logDevWarning("⚠️ Automatic access token refresh is disabled for security");
+    logDevWarning("⚠️ Please login again to continue");
+    
+    // Блокуємо автоматичне оновлення та виконуємо logout
+    await logout();
+    return null;
+    
+    /* ПРИМІТКА: Код нижче закоментовано для безпеки
+    
+    const refreshTokenStored = localStorage.getItem("refreshToken");
+    if (!refreshTokenStored) {
+      logDevWarning("⚠️ Відсутній refresh token для оновлення access token");
+      return null;
+    }
+    try {
+      const response = await fetch("/api/auth/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refreshTokenStored }),
+      });
+      if (!response.ok) {
+        logDevWarning("⚠️ Не вдалося оновити access token");
+        return null;
+      }
+      const data = await response.json();
+      if (data.success && data.tokens && data.tokens.access_token) {
+        localStorage.setItem("sessionId", data.tokens.access_token);
+        localStorage.setItem("accessToken", data.tokens.access_token);
+        setAuth((prev) => ({
+          ...prev,
+          sessionId: data.tokens.access_token,
+          isAuthenticated: true,
+        }));
+        logDevWarning("✅ Access token оновлено успішно");
+        return data.tokens.access_token;
+      }
+      return null;
+    } catch (e) {
+      logDevError("❌ Помилка при оновленні access token:", e);
+      return null;
+    }
+    */
+  };
+
   return (
-    <AuthContext.Provider
-      value={{
-        auth,
-        login,
-        logout,
-        validateSession,
-        clearError,
-        refreshToken,
-      }}
-    >
+    <AuthContext.Provider value={{
+      auth,
+      login,
+      logout,
+      validateSession,
+      clearError,
+      refreshToken,
+      refreshAccessToken
+    }}>
       {children}
     </AuthContext.Provider>
   );

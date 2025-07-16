@@ -8,7 +8,7 @@ import gzip
 import zlib
 import json
 import time
-from typing import Dict, List, Optional, Any, Tuple, Set, Callable
+from typing import Dict, List, Optional, Any, Tuple, Set, Callable, Union
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 from collections import deque, defaultdict
@@ -34,10 +34,10 @@ BATCH_TIMEOUT = 0.1  # 100ms timeout для batching
 MAX_BATCH_SIZE_BYTES = 1024 * 1024  # 1MB максимальний розмір batch
 
 # Константи для heartbeat
-HEARTBEAT_INTERVAL = 30  # Базовий інтервал heartbeat (секунди)
-HEARTBEAT_TIMEOUT = 10  # Timeout для pong відповіді
-ADAPTIVE_HEARTBEAT_MIN = 10  # Мінімальний адаптивний інтервал
-ADAPTIVE_HEARTBEAT_MAX = 120  # Максимальний адаптивний інтервал
+HEARTBEAT_INTERVAL = 60  # Збільшено з 30 до 60 секунд для зменшення навантаження
+HEARTBEAT_TIMEOUT = 15  # Збільшено з 10 до 15 секунд пропорційно
+ADAPTIVE_HEARTBEAT_MIN = 30  # Збільшено з 10 до 30 секунд
+ADAPTIVE_HEARTBEAT_MAX = 180  # Збільшено з 120 до 180 секунд
 HEARTBEAT_BATCH_SIZE = 10  # Кількість клієнтів в одному batch для heartbeat
 
 # Константи для performance

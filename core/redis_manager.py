@@ -81,10 +81,6 @@ class RedisManager:
     async def initialize(self):
         """Ініціалізація Redis менеджера"""
         try:
-            self.logger.info("Initializing Redis Manager",
-                           redis_url=self.settings.redis_url,
-                           mode=self.redis_mode)
-
             # Визначення режиму роботи
             await self._detect_redis_mode()
 
@@ -107,8 +103,7 @@ class RedisManager:
             self.is_running = True
             self.is_connected = True
 
-            self.logger.info("Redis Manager initialized successfully",
-                           mode=self.redis_mode)
+            self.logger.info("Redis Manager initialized successfully")
 
         except Exception as e:
             self.logger.error("Failed to initialize Redis Manager", error=str(e))
@@ -116,40 +111,103 @@ class RedisManager:
             raise
 
     async def shutdown(self):
-        """Зупинка Redis менеджера"""
+        """Зупинка Redis менеджера з повним очищенням пулу з'єднань"""
         self.logger.info("Shutting down Redis Manager")
 
         self.is_running = False
 
-        # Зупинка задач
-        for task in [self.listen_task, self.health_check_task, self.pipeline_task]:
-            if task and not task.done():
-                task.cancel()
+        try:
+            # Зупинка фонових задач
+            tasks_to_cancel = [
+                self.listen_task,
+                self.health_check_task,
+                self.pipeline_task
+            ]
+
+            for task in tasks_to_cancel:
+                if task and not task.done():
+                    task.cancel()
+                    try:
+                        await asyncio.wait_for(task, timeout=5.0)
+                    except (asyncio.CancelledError, asyncio.TimeoutError):
+                        pass
+
+            self.logger.info("Background tasks cancelled")
+
+            # Flush pipeline buffer перед закриттям
+            if self.pipeline_enabled and self.pipeline_buffer:
                 try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+                    await self._flush_pipeline()
+                    self.logger.info("Pipeline buffer flushed")
+                except Exception as e:
+                    self.logger.warning("Error flushing pipeline buffer", error=str(e))
 
-        # Flush pipeline buffer
-        if self.pipeline_buffer:
-            await self._flush_pipeline()
+            # Відписка від всіх каналів
+            if self.pubsub and self.subscriptions:
+                try:
+                    await self.pubsub.unsubscribe(*list(self.subscriptions))
+                    await asyncio.sleep(0.1)  # Дати час на відписку
+                    self.logger.info("Unsubscribed from channels", 
+                                   channels="all", 
+                                   remaining_subscriptions=0)
+                except Exception as e:
+                    self.logger.warning("Error unsubscribing from channels", error=str(e))
 
-        # Відписка від всіх каналів
-        if self.pubsub:
-            try:
-                await self.pubsub.unsubscribe()
-                await self.pubsub.reset()
-            except Exception as e:
-                self.logger.error("Error unsubscribing from channels", error=str(e))
+            # Закриття Pub/Sub об'єкта
+            if self.pubsub:
+                try:
+                    await self.pubsub.close()
+                    self.logger.info("Pub/Sub connection closed")
+                except Exception as e:
+                    self.logger.warning("Error closing Pub/Sub", error=str(e))
 
-        # Закриття з'єднань
-        await self._close_connections()
+            # Закриття з'єднань з тайм-аутом
+            close_tasks = []
+            
+            if self.redis_client:
+                close_tasks.append(self._close_client_with_timeout(self.redis_client, "main Redis client"))
+            
+            if self.pubsub_client and self.pubsub_client != self.redis_client:
+                close_tasks.append(self._close_client_with_timeout(self.pubsub_client, "Pub/Sub client"))
 
-        # Зупинка асинхронного оптимізатора
-        if self.async_optimizer:
-            await self.async_optimizer.shutdown()
+            # Виконуємо закриття паралельно з тайм-аутом
+            if close_tasks:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*close_tasks, return_exceptions=True),
+                        timeout=10.0
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.warning("Redis clients close timeout - forcing shutdown")
 
-        self.logger.info("Redis Manager shutdown complete")
+            # Зупинка асинхронного оптимізатора
+            if hasattr(self, 'async_optimizer') and self.async_optimizer:
+                try:
+                    await self.async_optimizer.shutdown()
+                    self.logger.info("Async optimizer shutdown")
+                except Exception as e:
+                    self.logger.warning("Error shutting down async optimizer", error=str(e))
+
+            # Очищення локальних структур
+            self.subscriptions.clear()
+            self.message_cache.clear()
+            self.pipeline_buffer.clear()
+            self.pipeline_timers.clear()
+
+            self.is_connected = False
+            self.redis_client = None
+            self.pubsub_client = None
+            self.pubsub = None
+
+            self.logger.info("Redis Manager shutdown complete")
+
+        except Exception as e:
+            self.logger.error("Error during Redis Manager shutdown", error=str(e))
+            # Форсоване очищення при помилці
+            self.is_connected = False
+            self.redis_client = None
+            self.pubsub_client = None
+            self.pubsub = None
 
     async def _detect_redis_mode(self):
         """Визначення режиму роботи Redis"""
@@ -194,37 +252,54 @@ class RedisManager:
             raise
 
     async def _create_standalone_clients(self):
-        """Створення звичайних Redis клієнтів"""
+        """Створення звичайних Redis клієнтів з покращеним управлінням пулом"""
         # Підготовка URL з TLS параметрами для Upstash
         redis_url = self.settings.redis_url
         
-        # Додавання SSL параметрів до URL якщо потрібно
-        if getattr(self.settings, 'redis_tls_enabled', False):
-            # Для Upstash змінюємо протокол на rediss:// для TLS
-            if redis_url.startswith('redis://'):
-                redis_url = redis_url.replace('redis://', 'rediss://')
+        # Для Upstash завжди використовуємо TLS
+        if "upstash.io" in redis_url and redis_url.startswith('redis://'):
+            redis_url = redis_url.replace('redis://', 'rediss://')
         
-        # Базові параметри з'єднання
-        connection_kwargs = {
-            'max_connections': self.settings.redis_max_connections,
-            'retry_on_timeout': self.settings.redis_retry_on_timeout,
-            'decode_responses': True
+        # Покращені параметри з'єднання з пулом
+        base_kwargs = {
+            'retry_on_timeout': True,
+            'retry_on_error': [ConnectionError, TimeoutError],
+            'decode_responses': True,
+            'socket_timeout': 30.0,  # Збільшено для хмарного Redis
+            'socket_connect_timeout': 15.0,  # Збільшено для хмарного Redis
+            'socket_keepalive': True,
+            'socket_keepalive_options': {},
+            'health_check_interval': 30,  # Регулярна перевірка здоров'я
         }
         
-        # Основний клієнт для команд
+        # Додаткові SSL параметри для Upstash
+        if redis_url.startswith('rediss://'):
+            base_kwargs.update({
+                'ssl_cert_reqs': None,  # Не вимагаємо сертифікат клієнта
+                'ssl_check_hostname': False,  # Не перевіряємо hostname для Upstash
+            })
+        
+        # Основний клієнт для команд з покращеним пулом
+        main_kwargs = base_kwargs.copy()
+        main_kwargs['max_connections'] = min(self.settings.redis_max_connections, 20)  # Збільшено з 5 до 20
+        
         self.redis_client = redis.from_url(
             redis_url,
-            **connection_kwargs
+            **main_kwargs
         )
 
-        # Окремий клієнт для Pub/Sub
-        pubsub_kwargs = connection_kwargs.copy()
-        pubsub_kwargs['max_connections'] = 10
+        # Окремий клієнт для Pub/Sub з меншим pool
+        pubsub_kwargs = base_kwargs.copy()
+        pubsub_kwargs['max_connections'] = 5  # Збільшено з 2 до 5 для Pub/Sub
         
         self.pubsub_client = redis.from_url(
             redis_url,
             **pubsub_kwargs
         )
+        
+        self.logger.info("Redis clients created with connection pool",
+                        main_max_connections=main_kwargs['max_connections'],
+                        pubsub_max_connections=pubsub_kwargs['max_connections'])
 
     async def _create_sentinel_clients(self):
         """Створення Redis клієнтів через Sentinel"""
@@ -285,9 +360,7 @@ class RedisManager:
             if self.pubsub_client:
                 await self.pubsub_client.ping()
 
-            self.logger.info("✅ Redis connection successful", 
-                           redis_host="merry-mammal-56796.upstash.io",
-                           tls_enabled=getattr(self.settings, 'redis_tls_enabled', False))
+            self.logger.info("✅ Redis connection successful")
 
         except Exception as e:
             self.logger.error("❌ Redis connection test failed", error=str(e))
@@ -388,6 +461,17 @@ class RedisManager:
             if not self.pubsub:
                 return False
 
+            # Перевірка чи з'єднання ще активне
+            if not self.is_connected:
+                # Якщо з'єднання втрачено, просто очищаємо локальний стан
+                if channels:
+                    self.subscriptions.difference_update(channels)
+                else:
+                    self.subscriptions.clear()
+                self.logger.debug("Unsubscribed locally (connection lost)",
+                                channels=channels or "all")
+                return True
+
             if channels:
                 await self.pubsub.unsubscribe(*channels)
                 self.subscriptions.difference_update(channels)
@@ -402,9 +486,25 @@ class RedisManager:
             return True
 
         except Exception as e:
-            self.logger.error("Failed to unsubscribe from channels",
-                            channels=channels,
-                            error=str(e))
+            # Якщо помилка пов'язана з втратою з'єднання, не логуємо як error
+            error_str = str(e).lower()
+            if any(phrase in error_str for phrase in [
+                "connection lost", "connection reset", "broken pipe", 
+                "connection refused", "no connection"
+            ]):
+                self.logger.debug("Unsubscribe failed due to connection loss",
+                                channels=channels or "all",
+                                error=str(e))
+                # Очищаємо локальний стан
+                if channels:
+                    self.subscriptions.difference_update(channels)
+                else:
+                    self.subscriptions.clear()
+                return True
+            else:
+                self.logger.error("Failed to unsubscribe from channels",
+                                channels=channels,
+                                error=str(e))
             return False
 
     async def _listen_messages(self):
@@ -467,68 +567,183 @@ class RedisManager:
             self.logger.error("Error handling received message", error=str(e))
 
     async def _try_reconnect(self):
-        """Спроба відновлення з'єднання"""
-        try:
-            if self.is_connected:
-                return
+        """Спроба відновлення з'єднання з retry логікою"""
+        if self.is_connected:
+            return
 
-            self.logger.info("Attempting to reconnect to Redis")
+        max_retries = 5  # Збільшено для хмарного Redis
+        retry_delay = 5  # Збільшено базову затримку
+        
+        for attempt in range(max_retries):
+            try:
+                self.logger.info("🔄 Attempting to reconnect to Upstash Redis", 
+                               attempt=attempt + 1, 
+                               max_retries=max_retries)
 
-            # Відновлення з'єднання
-            await self._close_connections()
-            await self._create_redis_clients()
-            await self._test_connection()
+                # Закриття старих з'єднань
+                await self._close_connections()
+                
+                # Більша затримка перед спробою підключення для хмарного Redis
+                await asyncio.sleep(2 + attempt)
 
-            # Відновлення підписок
-            if self.subscriptions and self.pubsub:
-                await self.pubsub.subscribe(*list(self.subscriptions))
+                # Створення нових клієнтів
+                await self._create_redis_clients()
+                
+                # Тест з'єднання з більшим timeout для Upstash
+                await asyncio.wait_for(self._test_connection(), timeout=30.0)
 
-            self.is_connected = True
+                # Відновлення підписок якщо були
+                if self.subscriptions and self.pubsub:
+                    try:
+                        await self.pubsub.subscribe(*list(self.subscriptions))
+                        self.logger.info("✅ Upstash Redis subscriptions restored", 
+                                       subscriptions=list(self.subscriptions))
+                    except Exception as sub_e:
+                        self.logger.warning("⚠️ Failed to restore Upstash Redis subscriptions", error=str(sub_e))
 
-            if self.on_connection_restored:
-                await self.on_connection_restored()
+                self.is_connected = True
 
-            self.logger.info("Redis connection restored")
+                if self.on_connection_restored:
+                    await self.on_connection_restored()
 
-        except Exception as e:
-            self.logger.error("Failed to reconnect to Redis", error=str(e))
-            self.is_connected = False
+                self.logger.info("✅ Upstash Redis connection successfully restored", attempt=attempt + 1)
+                return  # Успішне відновлення
 
-            if self.on_connection_lost:
-                await self.on_connection_lost()
+            except asyncio.TimeoutError:
+                self.logger.warning("⏰ Upstash Redis reconnection attempt timed out", 
+                                  attempt=attempt + 1)
+            except Exception as e:
+                error_str = str(e).lower()
+                if "ssl" in error_str or "tls" in error_str:
+                    self.logger.warning("🔒 Upstash Redis SSL/TLS reconnection error", 
+                                      attempt=attempt + 1, 
+                                      error=str(e))
+                else:
+                    self.logger.warning("⚠️ Upstash Redis reconnection attempt failed", 
+                                      attempt=attempt + 1, 
+                                      error=str(e))
+
+            # Експоненціальна затримка перед наступною спробою (крім останньої)
+            if attempt < max_retries - 1:
+                delay = retry_delay * (2 ** attempt)
+                self.logger.debug(f"Waiting {delay}s before next Upstash Redis reconnection attempt")
+                await asyncio.sleep(delay)
+
+        # Всі спроби невдалі
+        self.logger.error("❌ Failed to reconnect to Upstash Redis after all attempts")
+        self.is_connected = False
+
+        if self.on_connection_lost:
+            await self.on_connection_lost()
 
     async def _health_check_loop(self):
-        """Перевірка здоров'я Redis з'єднання"""
+        """Перевірка здоров'я Redis з'єднання з автоматичним відновленням"""
+        consecutive_failures = 0
+        max_failures = 5  # Збільшено для хмарного Redis
+        base_sleep_interval = 15  # Збільшено базовий інтервал для Upstash
+        max_sleep_interval = 120  # Збільшено максимальний інтервал
+        
         while self.is_running:
             try:
                 if self.redis_client:
-                    await self.redis_client.ping()
+                    # Використовуємо ще більший timeout для Upstash Redis
+                    await asyncio.wait_for(self.redis_client.ping(), timeout=20.0)
 
                     if not self.is_connected:
                         self.is_connected = True
-                        self.logger.info("Redis connection restored")
+                        consecutive_failures = 0
+                        self.logger.info("✅ Upstash Redis connection restored")
 
                         if self.on_connection_restored:
                             await self.on_connection_restored()
                 else:
                     self.is_connected = False
 
-                await asyncio.sleep(self.settings.redis_health_check_interval)
+                # Більший інтервал для хмарного Redis
+                sleep_interval = max(self.settings.redis_health_check_interval, 30)
+                if consecutive_failures > 0:
+                    sleep_interval = min(
+                        base_sleep_interval * (2 ** min(consecutive_failures, 4)), 
+                        max_sleep_interval
+                    )
+
+                await asyncio.sleep(sleep_interval)
 
             except asyncio.CancelledError:
                 break
+            except asyncio.TimeoutError:
+                consecutive_failures += 1
+                if self.is_connected:
+                    self.is_connected = False
+                    self.connection_errors += 1
+                    self.last_error = "Upstash Redis ping timeout"
+
+                    # Тільки логуємо warning для першої помилки
+                    if consecutive_failures == 1:
+                        self.logger.warning("⏰ Upstash Redis health check timeout - connection may be slow",
+                                          consecutive_failures=consecutive_failures)
+                    elif consecutive_failures <= 3:
+                        self.logger.debug("Upstash Redis still timing out",
+                                        consecutive_failures=consecutive_failures)
+
+                    if self.on_connection_lost:
+                        await self.on_connection_lost()
+
+                # Спроба автоматичного відновлення після більшої кількості невдач
+                if consecutive_failures >= max_failures:
+                    self.logger.info("🔄 Attempting automatic Upstash Redis reconnection after multiple timeouts")
+                    await self._try_reconnect()
+                    consecutive_failures = 0  # Скидаємо лічильник після спроби відновлення
+
+                sleep_interval = min(
+                    base_sleep_interval * (2 ** min(consecutive_failures, 4)), 
+                    max_sleep_interval
+                )
+                await asyncio.sleep(sleep_interval)
+
             except Exception as e:
+                consecutive_failures += 1
                 if self.is_connected:
                     self.is_connected = False
                     self.connection_errors += 1
                     self.last_error = str(e)
 
-                    self.logger.error("Redis health check failed", error=str(e))
+                    # Зменшуємо рівень логування для зменшення шуму
+                    # Особливо для Upstash Redis connection reset
+                    error_str = str(e).lower()
+                    if "connection reset by peer" in error_str or "broken pipe" in error_str:
+                        # Upstash Redis іноді скидує з'єднання для економії ресурсів
+                        if consecutive_failures == 1:
+                            self.logger.info("🔄 Upstash Redis connection reset (normal for cloud Redis)", 
+                                           consecutive_failures=consecutive_failures)
+                        # Не логуємо на warning/error рівні для цієї помилки
+                    elif "ssl" in error_str or "tls" in error_str:
+                        if consecutive_failures == 1:
+                            self.logger.warning("🔒 Upstash Redis SSL/TLS error", 
+                                              error=str(e),
+                                              consecutive_failures=consecutive_failures)
+                    elif consecutive_failures <= 2:
+                        self.logger.warning("⚠️ Upstash Redis health check failed", 
+                                          error=str(e), 
+                                          consecutive_failures=consecutive_failures)
+                    else:
+                        self.logger.debug("Upstash Redis still disconnected", 
+                                        consecutive_failures=consecutive_failures)
 
                     if self.on_connection_lost:
                         await self.on_connection_lost()
 
-                await asyncio.sleep(5)  # Коротша затримка при помилках
+                # Спроба автоматичного відновлення після кількох невдач
+                if consecutive_failures >= max_failures:
+                    self.logger.info("🔄 Attempting automatic Upstash Redis reconnection after multiple failures")
+                    await self._try_reconnect()
+                    consecutive_failures = 0  # Скидаємо лічильник після спроби відновлення
+
+                sleep_interval = min(
+                    base_sleep_interval * (2 ** min(consecutive_failures, 4)), 
+                    max_sleep_interval
+                )
+                await asyncio.sleep(sleep_interval)
 
     def _cache_message(self, channel: str, message: Dict[str, Any]):
         """Кешування повідомлення для надійності"""
@@ -611,9 +826,16 @@ class RedisManager:
             return True
 
         except Exception as e:
+            error_str = str(e).lower()
             self.logger.error("Failed to set key",
                             key=key,
                             error=str(e))
+            
+            # При помилці "Too many connections" спробуємо переконнектитися
+            if "too many connections" in error_str or "connection" in error_str:
+                self.logger.warning("Redis connection issue detected, attempting reconnect")
+                await self._try_reconnect()
+            
             return False
 
     async def get_key(self, key: str) -> Optional[Any]:
@@ -634,9 +856,16 @@ class RedisManager:
                 return value
 
         except Exception as e:
+            error_str = str(e).lower()
             self.logger.error("Failed to get key",
                             key=key,
                             error=str(e))
+            
+            # При помилці "Too many connections" спробуємо переконнектитися
+            if "too many connections" in error_str or "connection" in error_str:
+                self.logger.warning("Redis connection issue detected, attempting reconnect")
+                await self._try_reconnect()
+            
             return None
 
     async def delete_key(self, key: str) -> bool:
@@ -826,3 +1055,31 @@ class RedisManager:
         except Exception as e:
             self.logger.error("Failed to cleanup old keys", error=str(e))
             return 0
+
+    async def _close_client_with_timeout(self, client, client_name: str):
+        """Закриття Redis клієнта з тайм-аутом"""
+        try:
+            self.logger.info(f"Closing {client_name}")
+            
+            # Спробуємо отримати статистику пулу перед закриттям
+            try:
+                if hasattr(client, 'connection_pool'):
+                    pool = client.connection_pool
+                    if hasattr(pool, '_created_connections'):
+                        created = pool._created_connections
+                        available = len(pool._available_connections) if hasattr(pool, '_available_connections') else 0
+                        self.logger.info(f"{client_name} pool stats before close",
+                                       created_connections=created,
+                                       available_connections=available)
+            except Exception:
+                pass  # Ігноруємо помилки статистики
+            
+            await client.close()
+            
+            # Додатковий час для завершення всіх з'єднань
+            await asyncio.sleep(0.5)
+            
+            self.logger.info(f"{client_name} closed successfully")
+            
+        except Exception as e:
+            self.logger.warning(f"Error closing {client_name}", error=str(e))

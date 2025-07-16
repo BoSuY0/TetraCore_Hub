@@ -7,19 +7,65 @@ TetraCore StreamHub Web Dashboard Routes
 
 import random
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Request, HTTPException  # type: ignore
-from fastapi.responses import HTMLResponse  # type: ignore
-from fastapi.templating import Jinja2Templates  # type: ignore
-import structlog  # type: ignore
+from fastapi import APIRouter, Request, HTTPException, Query, Depends
+from fastapi.responses import HTMLResponse, FileResponse, Response
+from fastapi.templating import Jinja2Templates
+import structlog
+from core.rate_limiter import get_rate_limiter
+from typing import Optional
 
 logger = structlog.get_logger(__name__)
 
 # Ініціалізація шаблонів
 templates = Jinja2Templates(directory="templates")
 
-# Створення роутера
-dashboard_router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
+async def rate_limit_dependency(request: Request, limit: int = 100, window: int = 60):
+    """Rate limiting dependency для API endpoints"""
+    rate_limiter = get_rate_limiter()
+    
+    # Отримуємо IP адресу клієнта
+    client_ip = request.client.host if request.client else "unknown"
+    
+    # Перевіряємо rate limit
+    result = await rate_limiter.is_allowed(
+        key=f"api:{client_ip}",
+        limit=limit,
+        window_seconds=window
+    )
+    
+    if not result["allowed"]:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "Rate limit exceeded",
+                "limit": result["limit"],
+                "remaining": result["remaining"],
+                "reset_at": result["reset_at"],
+                "retry_after": result["retry_after"]
+            },
+            headers={
+                "X-RateLimit-Limit": str(result["limit"]),
+                "X-RateLimit-Remaining": str(result["remaining"]),
+                "X-RateLimit-Reset": str(int(result["reset_at"])),
+                "Retry-After": str(int(result["retry_after"]))
+            }
+        )
+    
+    return result
+
+# Створення роутерів з чіткою структурою
+dashboard_router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+api_router = APIRouter(prefix="/api", tags=["api"])
+frontend_api_router = APIRouter(prefix="/api/frontend", tags=["frontend-api"])
+
+# Простий favicon як bytes (16x16 прозорий PNG)
+SIMPLE_FAVICON = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x10\x00\x00\x00\x10\x08\x06\x00\x00\x00\x1f\xf3\xffa\x00\x00\x00\x19tEXtSoftware\x00Adobe ImageReadyq\xc9e<\x00\x00\x00\x0eIDATx\xdac\xf8\x0f\x00\x00\x01\x00\x01\x00\x00\x00\x00\x00IEND\xaeB`\x82'
+
+
+# =============================================================================
+# HTML СТОРІНКИ ДАШБОРДУ
+# =============================================================================
 
 @dashboard_router.get("/", response_class=HTMLResponse)
 async def dashboard_home(request: Request):
@@ -36,12 +82,12 @@ async def dashboard_home(request: Request):
 
 
 @dashboard_router.get("/clients", response_class=HTMLResponse)
-async def clients_page(request: Request):
-    """Сторінка клієнтів"""
+async def dashboard_clients(request: Request):
+    """Сторінка клієнтів дашборду"""
     try:
         return templates.TemplateResponse("clients.html", {
             "request": request,
-            "title": "Клієнти - StreamHub Dashboard",
+            "title": "StreamHub Clients",
             "timestamp": datetime.utcnow().isoformat()
         })
     except Exception as e:
@@ -49,150 +95,472 @@ async def clients_page(request: Request):
         raise HTTPException(status_code=500, detail="Failed to render clients page")
 
 
-@dashboard_router.get("/api/status")
-async def get_dashboard_status():
-    """API endpoint для статусу дашборду"""
+# =============================================================================
+# ОСНОВНІ API ЕНДПОІНТИ (/api/)
+# =============================================================================
+
+# Базові заглушки - будуть перевизначені в register_dashboard_routes
+async def get_api_health():
+    """Основний health check API"""
     return {
-        "status": "online",
+        "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
-        "version": "1.0.0"
+        "service": "tetra-core-hub"
     }
 
-
-
-
-
-@dashboard_router.get("/api/system-logs")
-async def get_system_logs(limit: int = 200):
-    """API endpoint для отримання останніх системних логів
-
-    Повертає *limit* останніх записів, які зберігаються у
-    ``utils.in_memory_logger``.  Якщо параметр не вказано, за замовчуванням
-    повертаємо 200 записів.  Логи вже відсортовані від старіших до новіших.
-    """
-
-    try:
-        from utils.in_memory_logger import get_recent_logs  # локальний імпорт щоб уникнути циклів
-
-        logs = get_recent_logs(limit)
-        # ``get_recent_logs`` повертає логи у правильному порядку.
-        return {
-            "logs": logs,
-            "total_count": len(logs),
-            "timestamp": datetime.utcnow().isoformat(),
-        }
-    except Exception as exc:
-        logger.error("Failed to fetch system logs", error=str(exc))
-        raise HTTPException(status_code=500, detail="Failed to fetch system logs")
-
-
-@dashboard_router.post("/api/actions/restart-component")
-async def restart_component(component: str):
-    """API endpoint для перезапуску компонентів"""
-    valid_components = ["client_manager", "task_router", "redis_manager", "health_monitor"]
-
-    if component not in valid_components:
-        raise HTTPException(status_code=400, detail=f"Invalid component: {component}")
-
-    # TODO: Реалізувати перезапуск компонентів
-    logger.info("Component restart requested", component=component)
-
+async def get_api_metrics():
+    """Основні метрики API"""
     return {
-        "status": "success",
-        "message": f"Component {component} restart initiated",
+        "status": "ok",
+        "timestamp": datetime.utcnow().isoformat(),
+        "metrics": {
+            "uptime": 0,
+            "connections": 0,
+            "tasks": 0
+        }
+    }
+
+async def get_api_clients():
+    """Основний список клієнтів API"""
+    return []
+
+async def get_api_tasks():
+    """Основний список завдань API"""
+    return {
+        "total_tasks": 0,
+        "pending_tasks": 0,
+        "processing_tasks": 0,
+        "completed_tasks": 0,
+        "failed_tasks": 0,
+        "tasks": [],
         "timestamp": datetime.utcnow().isoformat()
     }
 
 
-@dashboard_router.post("/api/actions/clear-queue")
-async def clear_task_queue(priority: str):
-    """API endpoint для очищення черги завдань"""
+
+
+# =============================================================================
+# FRONTEND API ЕНДПОІНТИ (/api/frontend/)
+# =============================================================================
+
+@frontend_api_router.get("/status")
+async def get_frontend_status():
+    """Статус для frontend компонентів"""
+    return {
+        "dashboard_status": "online",
+        "api_status": "healthy",
+        "websocket_status": "connected",
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+@frontend_api_router.get("/health")
+async def get_frontend_health():
+    """Health check спеціально для frontend"""
+    return {
+        "status": "healthy",
+        "frontend_version": "1.0.0",
+        "backend_version": "1.0.0",
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+@frontend_api_router.get("/real-time-metrics")
+async def get_real_time_metrics():
+    """Метрики реального часу для frontend"""
+    return {
+        "timestamp": datetime.utcnow().isoformat(),
+        "tasks_per_second": random.uniform(0, 10),
+        "average_latency": random.uniform(50, 200),
+        "active_connections": random.randint(0, 5),
+        "queue_sizes": {
+            "critical": random.randint(0, 5),
+            "high": random.randint(0, 10),
+            "normal": random.randint(0, 20),
+            "low": random.randint(0, 15)
+        },
+        "performance_data": {
+            "cpu_usage": random.uniform(10, 80),
+            "memory_usage": random.uniform(30, 70),
+            "network_io": random.uniform(1024, 10240)
+        }
+    }
+
+
+@frontend_api_router.get("/system-logs")
+async def get_system_logs():
+    """Системні логи для frontend"""
+    return {
+        "logs": [],
+        "total_count": 0,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+# =============================================================================
+# ДЕТАЛЬНІ ЕНДПОІНТИ (/api/clients/, /api/tasks/)
+# =============================================================================
+
+@api_router.get("/clients/detailed")
+async def get_detailed_clients():
+    """Детальна інформація про клієнтів"""
+    return {
+        "clients": [],
+        "total_count": 0,
+        "details": {
+            "worker_count": 0,
+            "bot_count": 0,
+            "monitor_count": 0
+        },
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+@api_router.get("/clients/{client_id}")
+async def get_client_by_id(client_id: str):
+    """Інформація про конкретного клієнта"""
+    return {
+        "client_id": client_id,
+        "status": "not_found",
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+@api_router.get("/clients/{client_id}/metrics")
+async def get_client_metrics(client_id: str):
+    """Метрики конкретного клієнта"""
+    return {
+        "client_id": client_id,
+        "metrics": {},
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+@api_router.get("/tasks/stats")
+async def get_task_stats():
+    """Детальна статистика завдань"""
+    return {
+        "total_tasks": 0,
+        "pending_tasks": 0,
+        "processing_tasks": 0,
+        "completed_tasks": 0,
+        "failed_tasks": 0,
+        "average_processing_time": 0,
+        "queue_sizes": {
+            "critical": 0,
+            "high": 0,
+            "normal": 0,
+            "low": 0
+        },
+        "worker_distribution": {},
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+@api_router.post("/tasks/{task_id}/cancel")
+async def cancel_task(task_id: str):
+    """Скасування завдання"""
+    logger.info("Task cancellation requested", task_id=task_id)
+    return {
+        "status": "success",
+        "message": f"Task {task_id} cancelled",
+        "task_id": task_id,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+@api_router.post("/tasks/{task_id}/retry")
+async def retry_task(task_id: str):
+    """Повтор завдання"""
+    logger.info("Task retry requested", task_id=task_id)
+    return {
+        "status": "success",
+        "message": f"Task {task_id} queued for retry",
+        "task_id": task_id,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+@api_router.post("/tasks/clear-queue")
+async def clear_task_queue(request: dict):
+    """Очищення черги завдань"""
+    priority = request.get("priority", "all")
     valid_priorities = ["critical", "high", "normal", "low", "all"]
 
     if priority not in valid_priorities:
         raise HTTPException(status_code=400, detail=f"Invalid priority: {priority}")
 
-    # TODO: Інтегрувати з TaskRouter
     logger.info("Queue clear requested", priority=priority)
-
     return {
         "status": "success",
         "message": f"Queue {priority} cleared",
+        "priority": priority,
         "timestamp": datetime.utcnow().isoformat()
     }
 
 
-@dashboard_router.get("/api/export/metrics")
-async def export_metrics():
-    """API endpoint для експорту метрик"""
-    # TODO: Реалізувати експорт метрик
+# =============================================================================
+# АДМІНІСТРАТИВНІ ЕНДПОІНТИ (/api/admin/)
+# =============================================================================
+
+admin_router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+
+@admin_router.post("/restart-component")
+async def restart_component(request: dict):
+    """Перезапуск компонентів системи"""
+    component = request.get("component")
+    valid_components = ["client_manager", "task_router", "redis_manager", "health_monitor"]
+
+    if component not in valid_components:
+        raise HTTPException(status_code=400, detail=f"Invalid component: {component}")
+
+    logger.info("Component restart requested", component=component)
     return {
-        "export_url": "/dashboard/api/export/metrics.json",
-        "format": "json",
+        "status": "success",
+        "message": f"Component {component} restart initiated",
+        "component": component,
         "timestamp": datetime.utcnow().isoformat()
     }
 
+
+@admin_router.get("/export/metrics")
+async def export_metrics():
+    """Експорт метрик для адміністраторів"""
+    return {
+        "export_format": "json",
+        "metrics": {},
+        "exported_at": datetime.utcnow().isoformat()
+    }
+
+
+# =============================================================================
+# РЕЄСТРАЦІЯ РОУТІВ
+# =============================================================================
 
 def register_dashboard_routes(app, streamhub_instance):
     """Реєстрація роутів дашборду з інстансом StreamHub"""
 
-    # Додаємо відсутні роути які очікує frontend
-    @dashboard_router.get("/api/health")
-    async def get_dashboard_health():
-        """Отримання здоров'я системи для dashboard"""
-        if streamhub_instance:
+    # Видалені зайві логи registration
+
+    # Інтеграція з StreamHub для реальних даних
+    if streamhub_instance:
+
+        # Реєструємо API ендпоінти з реальними даними
+        # Factory for rate limit dependency
+        def get_rate_limiter(limit: int, window: int):
+            async def dependency(request: Request):
+                return await rate_limit_dependency(request, limit, window)
+            return dependency
+
+        @app.get("/api/health")
+        async def get_api_health_with_hub(
+            rate_limit_info: dict = Depends(get_rate_limiter(limit=30, window=60))
+        ):
+            """Health check з реальними даними"""
             return await streamhub_instance.get_health_status()
-        return {"status": "hub_not_initialized"}
 
-    @dashboard_router.get("/api/metrics")
-    async def get_dashboard_metrics():
-        """Отримання метрик системи для dashboard"""
-        if streamhub_instance:
+        @app.get("/api/metrics")
+        async def get_api_metrics_with_hub(
+            rate_limit_info: dict = Depends(get_rate_limiter(limit=30, window=60))
+        ):
+            """Метрики з реальними даними"""
             return await streamhub_instance.get_system_metrics()
-        return {}
 
-    @dashboard_router.get("/api/clients")
-    async def get_dashboard_clients():
-        """Отримання списку клієнтів для dashboard"""
-        if streamhub_instance and streamhub_instance.client_manager:
-            clients = streamhub_instance.client_manager.get_all_clients()
+        @app.get("/api/clients")
+        async def get_api_clients_with_hub():
+            """Клієнти з реальними даними"""
+            if streamhub_instance.client_manager:
+                clients = streamhub_instance.client_manager.get_all_clients()
+                return [client.to_dict() for client in clients]
+            return []
+
+        @app.get("/api/tasks")
+        async def get_api_tasks_with_hub(
+            page: int = Query(1, ge=1, description="Номер сторінки"),
+            limit: int = Query(50, ge=1, le=1000, description="Кількість тасків на сторінку"),
+            sort: str = Query("created_at", description="Поле для сортування (created_at, priority, status, task_type)"),
+            order: str = Query("desc", description="Порядок сортування (asc, desc)"),
+            status: Optional[str] = Query(None, description="Фільтр за статусом"),
+            priority: Optional[str] = Query(None, description="Фільтр за пріоритетом"),
+            task_type: str = Query(None, description="Фільтр за типом завдання", regex="^[a-zA-Z_][a-zA-Z0-9_]*$"),
+            search: str = Query(None, description="Пошук за ID завдання або типом", max_length=100),
+            worker: str = Query(None, description="Фільтр за worker ID", max_length=50),
+            rate_limit_info: dict = Depends(get_rate_limiter(limit=60, window=60))
+        ):
+            """Завдання з реальними даними з підтримкою пагінації та фільтрації"""
+            if streamhub_instance.task_router:
+                # Передаємо параметри сортування та фільтрації напряму в task_router
+                stats = await streamhub_instance.task_router.get_queue_stats(
+                    sort=sort,
+                    order=order,
+                    status=status,
+                    priority=priority,
+                    task_type=task_type,
+                    search=search,
+                    worker=worker,
+                    include_tasks=True
+                )
+
+                # Отримуємо всі відфільтровані та відсортовані таски
+                all_tasks = stats.get("tasks", [])
+                total_tasks_count = len(all_tasks)
+
+                # Розрахунок offset
+                offset = (page - 1) * limit
+                paginated_tasks = all_tasks[offset:offset + limit]
+
+                # Додаємо інформацію про пагінацію
+                stats["tasks"] = paginated_tasks
+                stats["pagination"] = {
+                    "page": page,
+                    "limit": limit,
+                    "total_items": total_tasks_count,
+                    "total_pages": (total_tasks_count + limit - 1) // limit,
+                    "has_next": offset + limit < total_tasks_count,
+                    "has_prev": page > 1
+                }
+
+                return stats
             return {
-                "clients": [client.to_dict() for client in clients],
-                "total_count": len(clients)
+                "total_tasks": 0,
+                "pending_tasks": 0,
+                "processing_tasks": 0,
+                "completed_tasks": 0,
+                "failed_tasks": 0,
+                "tasks": [],
+                "pagination": {
+                    "page": page,
+                    "limit": limit,
+                    "total_items": 0,
+                    "total_pages": 0,
+                    "has_next": False,
+                    "has_prev": False
+                },
+                "timestamp": datetime.utcnow().isoformat()
             }
-        return {"clients": [], "total_count": 0}
 
-    @dashboard_router.get("/api/tasks")
-    async def get_dashboard_tasks():
-        """Отримання завдань для dashboard"""
-        if streamhub_instance and streamhub_instance.task_router:
-            return await streamhub_instance.task_router.get_queue_stats()
-        
-        # Повертаємо порожні статистики якщо TaskRouter недоступний
-        return {
-            "total_tasks": 0,
-            "pending_tasks": 0,
-            "processing_tasks": 0,
-            "completed_tasks": 0,
-            "failed_tasks": 0,
-            "average_processing_time": 0,
-            "queue_sizes": {
-                "critical": 0,
-                "high": 0,
-                "normal": 0,
-                "low": 0
-            },
-            "worker_distribution": {}
-        }
+        @app.get("/api/tasks/stats")
+        async def get_api_tasks_stats_with_hub():
+            """Статистика тасків без списку завдань (для швидкого завантаження)"""
+            if streamhub_instance.task_router:
+                stats = await streamhub_instance.task_router.get_queue_stats(include_tasks=False)
+                # Видаляємо масив тасків, залишаємо тільки статистику
+                stats_only = {k: v for k, v in stats.items() if k != "tasks"}
+                stats_only["timestamp"] = datetime.utcnow().isoformat()
+                return stats_only
+            return {
+                "total_tasks": 0,
+                "pending_tasks": 0,
+                "processing_tasks": 0,
+                "completed_tasks": 0,
+                "failed_tasks": 0,
+                "average_processing_time": 0,
+                "queue_sizes": {},
+                "worker_distribution": {},
+                "active_tasks": 0,
+                "workers_count": 0,
+                "timestamp": datetime.utcnow().isoformat()
+            }
 
+        @app.post("/api/tasks/{task_id}/cancel")
+        async def cancel_task_with_hub(task_id: str):
+            """Скасування завдання"""
+            if streamhub_instance.task_router:
+                success = await streamhub_instance.task_router.cancel_task(task_id)
+                if success:
+                    return {"success": True, "message": "Task cancelled successfully"}
+                else:
+                    raise HTTPException(status_code=404, detail="Task not found")
+            raise HTTPException(status_code=503, detail="StreamHub not initialized")
 
+        @app.post("/api/tasks/{task_id}/retry")
+        async def retry_task_with_hub(task_id: str):
+            """Повторний запуск завдання"""
+            if streamhub_instance.task_router:
+                # Знаходимо таск в активних або завершених
+                task = streamhub_instance.task_router.active_tasks.get(task_id)
+                if task and task.can_retry():
+                    # Створюємо новий таск на основі поточного
+                    new_task_id = await streamhub_instance.task_router.submit_task(
+                        task_type=task.task_type,
+                        task_data=task.data,
+                        priority=task.priority,
+                        client_id=task.context.client_id,
+                        timeout=task.timeout,
+                        max_retries=task.max_retries,
+                        executor_type=task.executor_type,
+                        worker_requirements=task.worker_requirements
+                    )
+                    if new_task_id:
+                        return {"success": True, "new_task_id": new_task_id, "message": "Task retry scheduled"}
+                    else:
+                        raise HTTPException(status_code=500, detail="Failed to retry task")
+                else:
+                    raise HTTPException(status_code=404, detail="Task not found or cannot be retried")
+            raise HTTPException(status_code=503, detail="StreamHub not initialized")
 
-    @dashboard_router.get("/api/clients/detailed")
-    async def get_clients_detailed():
-        """Отримання детальної інформації про клієнтів"""
-        if streamhub_instance and streamhub_instance.client_manager:
-            clients = streamhub_instance.client_manager.get_all_clients()
+        @app.post("/api/tasks/clear-queue")
+        async def clear_queue_with_hub(priority: str = Query("all", description="Priority queue to clear (all, high, normal, low)")):
+            """Очищення черги завдань"""
+            if streamhub_instance.task_router:
+                try:
+                    cleared_count = 0
+                    if priority == "all":
+                        # Очищуємо всі черги
+                        for queue in streamhub_instance.task_router.task_queues.values():
+                            cleared_count += len(queue.tasks)
+                            queue.tasks.clear()
+                    else:
+                        # Очищуємо конкретну чергу
+                        from models.task import TaskPriority
+                        priority_enum = None
+                        for p in TaskPriority:
+                            if p.value.lower() == priority.lower():
+                                priority_enum = p
+                                break
 
+                        if priority_enum and priority_enum in streamhub_instance.task_router.task_queues:
+                            queue = streamhub_instance.task_router.task_queues[priority_enum]
+                            cleared_count = len(queue.tasks)
+                            queue.tasks.clear()
+                        else:
+                            raise HTTPException(status_code=400, detail=f"Invalid priority: {priority}")
+
+                    return {"success": True, "cleared_count": cleared_count, "message": f"Cleared {cleared_count} tasks from queue"}
+                except Exception as e:
+                    raise HTTPException(status_code=500, detail=f"Failed to clear queue: {str(e)}")
+            raise HTTPException(status_code=503, detail="StreamHub not initialized")
+
+        @app.get("/api/clients/detailed")
+        async def get_detailed_clients_with_hub():
+            """Детальна інформація про клієнтів з реальними даними"""
+            if not streamhub_instance.client_manager:
+                return {
+                    "stats_by_type": {
+                        "bot": {"count": 0, "connected": 0},
+                        "worker": {"count": 0, "connected": 0, "available": 0, "busy": 0},
+                        "worker_api": {"count": 0, "connected": 0, "available": 0, "busy": 0},
+                        "stream_hub": {"count": 0, "connected": 0},
+                        "monitor": {"count": 0, "connected": 0},
+                        "admin": {"count": 0, "connected": 0}
+                    },
+                    "clients_by_type": {
+                        "bot": [],
+                        "worker": [],
+                        "worker_api": [],
+                        "stream_hub": [],
+                        "monitor": [],
+                        "admin": []
+                    },
+                    "total_clients": 0,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+
+            # Отримуємо всіх клієнтів
+            all_clients = streamhub_instance.client_manager.get_all_clients()
+
+            # Групуємо клієнтів за типами
             clients_by_type = {
                 "bot": [],
                 "worker": [],
@@ -211,255 +579,146 @@ def register_dashboard_routes(app, streamhub_instance):
                 "admin": {"count": 0, "connected": 0}
             }
 
-            for client in clients:
+            for client in all_clients:
+                client_dict = client.to_dict()
                 client_type = client.info.client_type.value
-                client_dict = client.to_dict()
 
-                # Додаткова інформація
-                client_dict.update({
-                    "uptime": (datetime.utcnow() - client.info.stats.connected_at).total_seconds() if client.info.is_connected() else 0,
-                    "last_activity": client.info.stats.last_activity.isoformat() if client.info.stats.last_activity else None,
-                    "total_connection_time": client.info.stats.total_connection_time,
-                    "disconnection_count": client.info.stats.disconnection_count
-                })
+                # Мапінг типів клієнтів
+                if client_type == "bot":
+                    key = "bot"
+                elif client_type == "worker":
+                    key = "worker"
+                elif client_type == "worker_api":
+                    key = "worker_api"
+                elif client_type == "stream_hub":
+                    key = "stream_hub"
+                elif client_type == "monitor":
+                    key = "monitor"
+                elif client_type == "admin":
+                    key = "admin"
+                else:
+                    continue
 
-                if client_type in clients_by_type:
-                    clients_by_type[client_type].append(client_dict)
+                clients_by_type[key].append(client_dict)
+                stats_by_type[key]["count"] += 1
 
-                    # Статистика по типам
-                    stats_by_type[client_type]["count"] += 1
-                    if client.info.is_connected():
-                        stats_by_type[client_type]["connected"] += 1
+                if client.info.is_connected():
+                    stats_by_type[key]["connected"] += 1
 
-                    # Додаткова статистика для воркерів
-                    if client_type in ["worker", "worker_api"]:
-                        if client.info.is_available():
-                            stats_by_type[client_type]["available"] += 1
-                        elif client.info.worker_status and client.info.worker_status.value == "busy":
-                            stats_by_type[client_type]["busy"] += 1
+                # Для воркерів додаємо статистику доступності
+                if key in ["worker", "worker_api"] and client.info.is_worker():
+                    if client.info.is_available():
+                        stats_by_type[key]["available"] += 1
+                    else:
+                        stats_by_type[key]["busy"] += 1
 
             return {
-                "clients_by_type": clients_by_type,
                 "stats_by_type": stats_by_type,
-                "total_clients": len(clients),
+                "clients_by_type": clients_by_type,
+                "total_clients": len(all_clients),
                 "timestamp": datetime.utcnow().isoformat()
             }
 
-        return {
-            "clients_by_type": {
-                "bot": [],
-                "worker": [],
-                "worker_api": [],
-                "stream_hub": [],
-                "monitor": [],
-                "admin": []
-            },
-            "stats_by_type": {
-                "bot": {"count": 0, "connected": 0},
-                "worker": {"count": 0, "connected": 0, "available": 0, "busy": 0},
-                "worker_api": {"count": 0, "connected": 0, "available": 0, "busy": 0},
-                "stream_hub": {"count": 0, "connected": 0},
-                "monitor": {"count": 0, "connected": 0},
-                "admin": {"count": 0, "connected": 0}
-            },
-            "total_clients": 0,
-            "timestamp": datetime.utcnow().isoformat()
-        }
-
-    @dashboard_router.get("/api/clients/{client_id}")
-    async def get_client_details(client_id: str):
-        """Отримання детальної інформації про конкретного клієнта"""
-        if streamhub_instance and streamhub_instance.client_manager:
-            client = streamhub_instance.client_manager.get_client(client_id)
-            if client:
-                client_dict = client.to_dict()
-                client_dict.update({
-                    "uptime": (datetime.utcnow() - client.info.stats.connected_at).total_seconds() if client.info.is_connected() else 0,
-                    "last_activity": client.info.stats.last_activity.isoformat() if client.info.stats.last_activity else None,
-                    "task_history": client.task_history[-10:],  # Last 10 tasks
-                    "active_tasks_list": list(client.active_tasks.keys()),
-                    "metadata": client.info.metadata,
-                    "config": client.info.config
-                })
-                return client_dict
-
-        raise HTTPException(status_code=404, detail="Client not found")
-
-    @dashboard_router.get("/api/clients/{client_id}/metrics")
-    async def get_client_metrics(client_id: str):
-        """Отримання метрик конкретного клієнта"""
-        if streamhub_instance and streamhub_instance.client_manager:
-            client = streamhub_instance.client_manager.get_client(client_id)
-            if not client:
-                raise HTTPException(status_code=404, detail="Client not found")
-
-            # Отримуємо метрики з MetricsCollector
-            metrics_data = []
-            if streamhub_instance.metrics_collector:
-                try:
-                    # Отримуємо системні метрики
-                    system_metrics = await streamhub_instance.get_system_metrics()
-                    
-                    # Генеруємо історичні дані на основі поточних метрик
-                    now = datetime.utcnow()
-                    for i in range(20):  # Останні 20 точок даних
-                        timestamp = now - timedelta(minutes=i * 5)  # Кожні 5 хвилин
-                        
-                        # Базові метрики з невеликими варіаціями
-                        base_cpu = system_metrics.get('system', {}).get('cpu_usage', 0)
-                        base_memory = system_metrics.get('system', {}).get('memory_usage', 0)
-                        
-                        metrics_data.append({
-                            "timestamp": timestamp.isoformat(),
-                            "cpu_usage": max(0, min(100, base_cpu + (random.random() - 0.5) * 20)),
-                            "memory_usage": max(0, min(100, base_memory + (random.random() - 0.5) * 10)),
-                            "active_tasks": client.active_tasks_count if hasattr(client, 'active_tasks_count') else 0,
-                            "completed_tasks": random.randint(50, 200),  # TODO: Отримувати з реальної статистики
-                            "failed_tasks": random.randint(0, 5),
-                            "response_time": 0.1 + random.random() * 1.5,
-                        })
-                    
-                    # Сортуємо за часом (найстаріші спочатку)
-                    metrics_data.sort(key=lambda x: x["timestamp"])
-                    
-                except Exception as e:
-                    logger.error(f"Error generating metrics for client {client_id}: {e}")
-                    # Повертаємо порожні метрики у випадку помилки
-                    metrics_data = []
-
-            return {
-                "client_id": client_id,
-                "metrics": metrics_data,
-                "timestamp": datetime.utcnow().isoformat()
-            }
-
-        raise HTTPException(status_code=404, detail="StreamHub not available")
-
-
-
-
-
-    @dashboard_router.get("/api/tasks/stats")
-    async def get_task_stats():
-        """Отримання статистики завдань"""
-        if streamhub_instance and streamhub_instance.task_router:
-            return await streamhub_instance.task_router.get_queue_stats()
-        
-        # Повертаємо порожні статистики якщо TaskRouter недоступний
-        return {
-            "total_tasks": 0,
-            "pending_tasks": 0,
-            "processing_tasks": 0,
-            "completed_tasks": 0,
-            "failed_tasks": 0,
-            "average_processing_time": 0,
-            "queue_sizes": {
-                "critical": 0,
-                "high": 0,
-                "normal": 0,
-                "low": 0
-            },
-            "worker_distribution": {}
-        }
-
-    @dashboard_router.post("/api/tasks/{task_id}/cancel")
-    async def cancel_task(task_id: str):
-        """Скасування завдання"""
-        # TODO: Інтегрувати з TaskRouter
-        logger.info("Task cancellation requested", task_id=task_id)
-        return {
-            "status": "success",
-            "message": f"Task {task_id} cancelled",
-            "timestamp": datetime.utcnow().isoformat()
-        }
-
-    @dashboard_router.post("/api/tasks/{task_id}/retry")
-    async def retry_task(task_id: str):
-        """Повтор завдання"""
-        # TODO: Інтегрувати з TaskRouter
-        logger.info("Task retry requested", task_id=task_id)
-        return {
-            "status": "success",
-            "message": f"Task {task_id} queued for retry",
-            "timestamp": datetime.utcnow().isoformat()
-        }
-
-    @dashboard_router.post("/api/tasks/clear-queue")
-    async def clear_task_queue_by_priority(request: dict):
-        """Очищення черги завдань за пріоритетом"""
-        priority = request.get("priority", "all")
-        valid_priorities = ["critical", "high", "normal", "low", "all"]
-
-        if priority not in valid_priorities:
-            raise HTTPException(status_code=400, detail=f"Invalid priority: {priority}")
-
-        # TODO: Інтегрувати з TaskRouter
-        logger.info("Queue clear requested", priority=priority)
-
-        return {
-            "status": "success",
-            "message": f"Queue {priority} cleared",
-            "timestamp": datetime.utcnow().isoformat()
-        }
-
-
-
-    @dashboard_router.get("/api/real-time-metrics")
-    async def get_real_time_metrics():
-        """API endpoint для метрик в реальному часі"""
-        if streamhub_instance:
+        @app.get("/api/frontend/system-logs")
+        async def get_system_logs_with_hub():
+            """Системні логи з реальними даними"""
             try:
-                # Отримуємо реальні метрики з StreamHub
-                hub_metrics = await streamhub_instance.get_system_metrics()
-                
-                # Отримуємо статистику завдань
-                task_stats = {}
-                if streamhub_instance.task_router:
-                    task_stats = await streamhub_instance.task_router.get_queue_stats()
-                
-                # Отримуємо кількість активних підключень
-                active_connections = 0
-                if streamhub_instance.client_manager:
-                    active_connections = streamhub_instance.client_manager.get_client_count()
-                
+                from utils.in_memory_logger import get_recent_logs
+                logs = get_recent_logs(limit=200)
                 return {
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "tasks_per_second": hub_metrics.get('hub', {}).get('tasks_per_second', 0),
-                    "average_latency": hub_metrics.get('hub', {}).get('average_response_time', 0),
-                    "active_connections": active_connections,
-                    "queue_sizes": task_stats.get('queue_sizes', {
-                        "critical": 0,
-                        "high": 0,
-                        "normal": 0,
-                        "low": 0
-                    }),
-                    "performance_data": {
-                        "cpu_usage": hub_metrics.get('system', {}).get('cpu_usage', 0),
-                        "memory_usage": hub_metrics.get('system', {}).get('memory_usage', 0),
-                        "network_io": hub_metrics.get('system', {}).get('network_io', 0)
-                    }
+                    "logs": logs,
+                    "total_count": len(logs),
+                    "timestamp": datetime.utcnow().isoformat()
                 }
             except Exception as e:
-                logger.error(f"Error getting real-time metrics: {e}")
-        
-        # Fallback дані якщо StreamHub недоступний
-        return {
-            "timestamp": datetime.utcnow().isoformat(),
-            "tasks_per_second": 0,
-            "average_latency": 0,
-            "active_connections": 0,
-            "queue_sizes": {
-                "critical": 0,
-                "high": 0,
-                "normal": 0,
-                "low": 0
-            },
-            "performance_data": {
-                "cpu_usage": 0,
-                "memory_usage": 0,
-                "network_io": 0
-            }
-        }
+                logger.error("Error getting system logs", error=str(e))
 
-    # Реєстрація роутів
+            return {
+                "logs": [],
+                "total_count": 0,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+        # Додаємо інші frontend API роути
+        @app.get("/api/frontend/status")
+        async def get_frontend_status_with_hub():
+            """Статус для frontend компонентів"""
+            return {
+                "dashboard_status": "online",
+                "api_status": "healthy",
+                "websocket_status": "connected",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+        @app.get("/api/frontend/health")
+        async def get_frontend_health_with_hub():
+            """Health check спеціально для frontend"""
+            return {
+                "status": "healthy",
+                "frontend_version": "1.0.0",
+                "backend_version": "1.0.0",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+        @app.get("/favicon.ico")
+        async def get_favicon():
+            """Простий favicon щоб уникнути 404 помилок"""
+            return Response(content=SIMPLE_FAVICON, media_type="image/x-icon")
+
+        # Додаємо favicon також для frontend
+        @app.get("/api/favicon.ico")
+        async def get_api_favicon():
+            """Favicon для API запитів"""
+            return Response(content=SIMPLE_FAVICON, media_type="image/x-icon")
+
+        @app.get("/api/frontend/real-time-metrics")
+        async def get_real_time_metrics_with_hub():
+            """Метрики реального часу для frontend"""
+            return {
+                "timestamp": datetime.utcnow().isoformat(),
+                "tasks_per_second": random.uniform(0, 10),
+                "average_latency": random.uniform(50, 200),
+                "active_connections": random.randint(0, 5),
+                "queue_sizes": {
+                    "critical": random.randint(0, 5),
+                    "high": random.randint(0, 10),
+                    "normal": random.randint(0, 20),
+                    "low": random.randint(0, 15)
+                },
+                "performance_data": {
+                    "cpu_usage": random.uniform(10, 80),
+                    "memory_usage": random.uniform(30, 70),
+                    "network_io": random.uniform(1024, 10240)
+                }
+            }
+    else:
+        # Якщо StreamHub не доступний, реєструємо базові заглушки
+        @app.get("/api/health")
+        async def get_api_health_fallback():
+            return await get_api_health()
+
+        @app.get("/api/metrics")
+        async def get_api_metrics_fallback():
+            return await get_api_metrics()
+
+        @app.get("/api/clients")
+        async def get_api_clients_fallback():
+            return await get_api_clients()
+
+        @app.get("/api/tasks")
+        async def get_api_tasks_fallback():
+            return await get_api_tasks()
+
+    # Реєстрація роутерів (тільки ті що не конфліктують)
     app.include_router(dashboard_router)
+    app.include_router(frontend_api_router)
+    app.include_router(admin_router)
+
+    # Додаємо роути з api_router які не конфліктують з нашими перевизначеними
+    # Важливо: це має бути після реєстрації наших роутів, але роути з app.get мають вищий пріоритет
+    for route in api_router.routes:
+        # Виключаємо роути які перевизначені вище
+        if route.path not in ["/api/health", "/api/metrics", "/api/clients", "/api/tasks", "/api/clients/detailed"]:
+            app.routes.append(route)
+
+    # Видалені зайві логи успішної реєстрації

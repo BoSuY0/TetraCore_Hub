@@ -267,7 +267,7 @@ const SystemHealthWidget: React.FC = () => {
         }
         
         const response = await fetch(
-          buildUrl("/dashboard/api/real-time-metrics"),
+          buildUrl("/api/frontend/real-time-metrics"),
           {
             headers,
           }

@@ -4,6 +4,12 @@ import './index.css';
 import App from './App';
 import reportWebVitals from './reportWebVitals';
 import './i18n'; // Ініціалізація i18n
+import { setupDevToolsFilter } from './utils/devtools-filter';
+
+// Налаштовуємо фільтрацію помилок DevTools тільки в development
+if (process.env.NODE_ENV === 'development') {
+  setupDevToolsFilter();
+}
 
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement

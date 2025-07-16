@@ -88,7 +88,7 @@ const fetchClientMetrics = async (
     }
     
     const response = await fetch(
-      `${API_BASE_URL}/dashboard/api/clients/${clientId}/metrics`,
+      `${API_BASE_URL}/api/clients/${clientId}/metrics`,
       {
         headers,
       }
@@ -100,7 +100,22 @@ const fetchClientMetrics = async (
         window.location.href = '/';
         return [];
       }
-      throw new Error(`Failed to fetch metrics for client ${clientId}`);
+      
+      if (response.status === 404) {
+        // Клієнт не має метрик - це нормально, не логуємо як помилку
+        console.debug(`📊 No metrics available for client ${clientId} (404)`);
+        return [];
+      }
+      
+      if (response.status === 429) {
+        // Rate limiting - логуємо один раз
+        console.warn(`⚠️ Rate limited when fetching metrics for client ${clientId}`);
+        return [];
+      }
+      
+      // Тільки для інших помилок логуємо як error
+      console.error(`❌ HTTP ${response.status} when fetching metrics for client ${clientId}`);
+      return [];
     }
     
     const data = await response.json();
@@ -118,9 +133,15 @@ const fetchClientMetrics = async (
       }));
     }
 
+    // Якщо метрики відсутні, повертаємо порожній масив без логування
     return [];
   } catch (error) {
-    console.error(`Error fetching metrics for client ${clientId}:`, error);
+    // Логуємо тільки критичні помилки (мережа тощо)
+    if (error instanceof Error && error.message.includes('fetch')) {
+      console.error(`🌐 Network error fetching metrics for client ${clientId}:`, error.message);
+    } else {
+      console.debug(`📊 No metrics data available for client ${clientId}`);
+    }
     return [];
   }
 };
@@ -137,7 +158,7 @@ const fetchRealTimeMetrics = async (): Promise<any> => {
     }
     
     const response = await fetch(
-      `${API_BASE_URL}/dashboard/api/real-time-metrics`,
+      `${API_BASE_URL}/api/frontend/real-time-metrics`,
       {
         headers,
       }
@@ -914,8 +935,8 @@ const WorkerMetrics: React.FC<WorkerMetricsProps> = ({ clients }) => {
       try {
         const metrics = await fetchClientMetrics(clientId);
         if (metrics.length === 0) {
-          // Якщо API не повертає дані, повертаємо порожній масив
-          console.warn(`No metrics data available for client ${clientId}`);
+          // Якщо API не повертає дані, логуємо як debug замість warning
+          console.debug(`📊 No metrics data available for client ${clientId} - це нормально для деяких типів клієнтів`);
           return [];
         }
         return metrics;

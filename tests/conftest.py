@@ -3,8 +3,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 from fastapi.testclient import TestClient
 
-# Import the main FastAPI app and settings object to be used in tests
-from main import app
+# Import the hub launcher and settings for tests
 from config import Settings
 
 
@@ -16,15 +15,6 @@ def event_loop():
     loop.close()
 
 
-@pytest.fixture(scope="module")
-def test_client():
-    """
-    Create a FastAPI TestClient instance for hitting API endpoints.
-    """
-    with TestClient(app) as client:
-        yield client
-
-
 @pytest.fixture
 def mock_settings(monkeypatch):
     """
@@ -32,12 +22,6 @@ def mock_settings(monkeypatch):
     """
     # Create a fresh Settings object for each test
     settings = Settings()
-
-    # Use monkeypatch to replace the original get_settings function
-    # with one that returns our test-specific settings object.
-    # This is currently commented out as get_settings is not implemented.
-    # from main import get_settings
-    # monkeypatch.setattr("main.get_settings", lambda: settings)
     
     return settings
 
