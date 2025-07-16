@@ -97,14 +97,48 @@ class DeploymentChecker:
             ("runtime.txt", self.project_root / "runtime.txt"),
             (".buildpacks", self.project_root / ".buildpacks"),
             ("app.json", self.project_root / "app.json"),
-            ("start_hub.py", self.project_root / "start_hub.py"),
             ("frontend/package.json", self.frontend_dir / "package.json"),
             ("frontend/tsconfig.json", self.frontend_dir / "tsconfig.json"),
         ]
+        
+        # Перевіряємо наявність launcher скрипта (hub_launcher.py або start_hub.py)
+        launcher_found = False
+        if (self.project_root / "hub_launcher.py").exists():
+            self.check_passed("hub_launcher.py exists (main launcher)")
+            launcher_found = True
+        elif (self.project_root / "start_hub.py").exists():
+            self.check_passed("start_hub.py exists (legacy launcher)")
+            launcher_found = True
+        else:
+            self.check_failed("No launcher script found (hub_launcher.py or start_hub.py)")
 
         for name, path in required_files:
             if path.exists():
                 self.check_passed(f"{name} exists")
+                
+                # Додаткова перевірка для runtime.txt
+                if name == "runtime.txt":
+                    with open(path, 'r') as f:
+                        runtime_version = f.read().strip()
+                    if runtime_version.startswith('python-'):
+                        self.check_passed(f"runtime.txt specifies {runtime_version}")
+                        
+                        # Перевіряємо узгодженість з .python-version
+                        python_version_file = self.project_root / ".python-version"
+                        if python_version_file.exists():
+                            with open(python_version_file, 'r') as f:
+                                local_version = f.read().strip()
+                            
+                            # Витягуємо major.minor версії для порівняння
+                            runtime_major_minor = runtime_version.replace('python-', '').split('.')[:2]
+                            local_major_minor = local_version.split('.')[:2]
+                            
+                            if runtime_major_minor == local_major_minor:
+                                self.check_passed(f"Python versions consistent: runtime.txt ({runtime_version}) matches .python-version ({local_version})")
+                            else:
+                                self.check_warning(f"Python version mismatch: runtime.txt ({runtime_version}) vs .python-version ({local_version})")
+                    else:
+                        self.check_warning(f"runtime.txt has unusual format: {runtime_version}")
             else:
                 self.check_failed(f"{name} missing")
 
@@ -189,6 +223,28 @@ class DeploymentChecker:
             else:
                 self.check_failed("Frontend package.json missing 'build' script")
 
+    def check_procfile(self):
+        """Check Procfile configuration"""
+        print("\n🔍 Checking Procfile configuration...")
+        
+        procfile = self.project_root / "Procfile"
+        if procfile.exists():
+            with open(procfile, 'r') as f:
+                content = f.read().strip()
+            
+            if 'hub_launcher.py' in content:
+                self.check_passed("Procfile uses hub_launcher.py")
+                if 'prod' in content:
+                    self.check_passed("Procfile runs in production mode")
+                else:
+                    self.check_warning("Procfile doesn't specify production mode")
+            elif 'start_hub.py' in content:
+                self.check_warning("Procfile uses legacy start_hub.py (consider upgrading to hub_launcher.py)")
+            else:
+                self.check_failed("Procfile doesn't specify a valid launcher script")
+        else:
+            self.check_failed("Procfile missing")
+
     def check_typescript_config(self):
         """Check TypeScript configuration"""
         print("\n🔍 Checking TypeScript configuration...")
@@ -202,4 +258,63 @@ class DeploymentChecker:
             if 'const isProduction' in content or 'let isProduction' in content:
                 self.check_passed("config.ts has isProduction variable defined")
             else:
-                self.check_failed("config.ts
+                self.check_failed("config.ts missing isProduction variable")
+
+    def run_checks(self):
+        """Запуск всіх перевірок"""
+        print("🚀 TetraCore Hub Deployment Readiness Check")
+        print("=" * 50)
+        
+        start_time = datetime.now()
+        
+        # Виконуємо всі перевірки
+        self.check_node_npm()
+        self.check_project_structure()
+        self.check_buildpacks()
+        self.check_package_json()
+        self.check_procfile()
+        self.check_typescript_config()
+        
+        end_time = datetime.now()
+        duration = (end_time - start_time).total_seconds()
+        
+        # Підсумок результатів
+        print("\n" + "=" * 50)
+        print("📊 ПІДСУМОК ПЕРЕВІРКИ")
+        print("=" * 50)
+        
+        print(f"⏱️  Тривалість: {duration:.2f} секунд")
+        print(f"✅ Пройдено: {len(self.info)} перевірок")
+        print(f"⚠️  Попередження: {len(self.warnings)} штук")
+        print(f"❌ Помилки: {len(self.errors)} штук")
+        
+        if self.errors:
+            print("\n🔴 КРИТИЧНІ ПОМИЛКИ:")
+            for error in self.errors:
+                print(f"  • {error}")
+        
+        if self.warnings:
+            print("\n🟡 ПОПЕРЕДЖЕННЯ:")
+            for warning in self.warnings:
+                print(f"  • {warning}")
+        
+        # Визначення статусу готовності
+        if not self.errors:
+            if not self.warnings:
+                print("\n🎉 ПРОЕКТ ГОТОВИЙ ДО РОЗГОРТАННЯ!")
+                return True
+            else:
+                print("\n✅ Проект готовий до розгортання (є попередження)")
+                return True
+        else:
+            print("\n🛑 ПРОЕКТ НЕ ГОТОВИЙ ДО РОЗГОРТАННЯ!")
+            print("   Виправте критичні помилки перед розгортанням.")
+            return False
+
+
+if __name__ == "__main__":
+    checker = DeploymentChecker()
+    success = checker.run_checks()
+    
+    # Вихід з відповідним кодом
+    sys.exit(0 if success else 1)
