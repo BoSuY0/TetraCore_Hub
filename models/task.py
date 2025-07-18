@@ -27,15 +27,8 @@ class TaskType(str, Enum):
     CUSTOM = "custom"
 
     # Типи завдань для бота
-    PING_BOT = "ping_bot"
-    GENERIC_BOT_TASK = "generic_bot_task"
-    SEND_MESSAGE = "send_message"
-    EDIT_MESSAGE = "edit_message"
-    DELETE_MESSAGE = "delete_message"
-    SEND_PHOTO = "send_photo"
-    SEND_DOCUMENT = "send_document"
-    MODULE_ACTIVATED = "module_activated"
-    MODULE_DEACTIVATED = "module_deactivated"
+    ACTIVATE_MODULE = "activate_module"
+    DEACTIVATE_MODULE = "deactivate_module"
 
     # Типи завдань для воркерів
     WORKER_TASK = "worker_task"
