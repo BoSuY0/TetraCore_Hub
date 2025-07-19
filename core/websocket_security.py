@@ -95,7 +95,10 @@ class WebSocketSecurityManager:
         """Автентифікація WebSocket з'єднання"""
         import os
         import time
+        from config import get_settings
+        
         environment = os.getenv("ENVIRONMENT", "development")
+        settings = get_settings()
         
         # В development режимі дозволяємо підключення без токена для тестування
         if not token:
@@ -112,8 +115,20 @@ class WebSocketSecurityManager:
                 logger.warning("WebSocket authentication failed: no token provided")
                 return None
 
+        # Спочатку перевіряємо чи це статичний AUTH_TOKEN для ботів
+        if settings.auth_token and token == settings.auth_token:
+            logger.info("WebSocket authentication successful with static AUTH_TOKEN", 
+                       token_preview=token[:8] + "..." if len(token) > 8 else token)
+            return {
+                "user_id": "bot_client",
+                "username": "bot_client",
+                "role": "bot",
+                "permissions": ["tasks.view", "tasks.execute", "clients.view"],
+                "session_id": f"bot-{int(time.time())}"
+            }
+
         try:
-            # Валідація JWT токена
+            # Валідація JWT токена для Dashboard/Monitor клієнтів
             auth_mgr = get_auth_manager()
             
             # Ініціалізуємо Redis якщо потрібно
@@ -122,10 +137,11 @@ class WebSocketSecurityManager:
                     await initialize_auth_manager_redis()
                 except Exception as e:
                     logger.warning("Could not initialize Redis for WebSocket auth", error=str(e))
+
             
             payload = await auth_mgr.decode_token(token)
             
-            logger.info("WebSocket authentication successful", 
+            logger.info("WebSocket authentication successful with JWT token", 
                        user_id=payload.get("user_id"),
                        username=payload.get("username"))
 
