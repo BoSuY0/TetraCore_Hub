@@ -35,13 +35,15 @@ from fastapi import FastAPI
 # Константи безпеки
 MAX_PATH_LENGTH = 4096
 MAX_COMMAND_LENGTH = 8192
-ALLOWED_NODE_COMMANDS = ['node', 'npm', 'npx']
+ALLOWED_NODE_COMMANDS = ['node', 'npm', 'npx', 'npm.cmd', 'npx.cmd']
 ALLOWED_NPM_SCRIPTS = ['install', 'ci', 'build', 'start', 'test']
 DEFAULT_TIMEOUT = 300  # 5 хвилин
 MAX_TIMEOUT = 3600  # 1 година
 SAFE_ENV_VARS = [
     'PATH', 'HOME', 'USER', 'LANG', 'LC_ALL', 'NODE_ENV',
-    'NPM_CONFIG_LOGLEVEL', 'CI', 'FORCE_COLOR'
+    'NPM_CONFIG_LOGLEVEL', 'CI', 'FORCE_COLOR', 'APPDATA', 'LOCALAPPDATA',
+    'TEMP', 'TMP', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'PROGRAMFILES',
+    'PROGRAMFILES(X86)', 'SYSTEMROOT', 'WINDIR', 'COMSPEC'
 ]
 
 # Додаткові утиліти логування
@@ -92,6 +94,31 @@ class SecureCommand:
     def __init__(self):
         self.allowed_commands = set(ALLOWED_NODE_COMMANDS)
 
+    def find_node_executable(self) -> Optional[str]:
+        """Знаходить виконуваний файл Node.js"""
+        # Перевіряємо системний PATH
+        node_path = shutil.which('node')
+        if node_path:
+            return node_path
+
+        # Перевіряємо стандартні місця встановлення
+        if sys.platform == 'win32':
+            possible_paths = [
+                os.path.join(os.environ.get('ProgramFiles', 'C:\\Program Files'), 'nodejs', 'node.exe'),
+                os.path.join(os.environ.get('ProgramFiles(x86)', 'C:\\Program Files (x86)'), 'nodejs', 'node.exe')
+            ]
+        else:
+            possible_paths = [
+                '/usr/bin/node',
+                '/usr/local/bin/node'
+            ]
+
+        for path in possible_paths:
+            if os.path.exists(path):
+                return path
+
+        return None
+
     def validate_command(self, command: List[str]) -> List[str]:
         """Валідує команду перед виконанням"""
         if not command:
@@ -102,13 +129,22 @@ class SecureCommand:
         if len(cmd_str) > MAX_COMMAND_LENGTH:
             raise SecurityError(f"Команда занадто довга: {len(cmd_str)} > {MAX_COMMAND_LENGTH}")
 
+        # Для Windows, автоматично додаємо розширення до команд
+        if sys.platform == 'win32':
+            if command[0] in ['npm', 'npx']:
+                command[0] = command[0] + '.cmd'
+            elif command[0] == 'node':
+                # Node.js зазвичай встановлюється як node.exe на Windows
+                # Але Windows автоматично знаходить .exe файли
+                pass
+
         # Перевірка дозволених команд
         base_cmd = os.path.basename(command[0])
         if base_cmd not in self.allowed_commands:
             raise SecurityError(f"Недозволена команда: {base_cmd}")
 
         # Валідація npm scripts
-        if base_cmd == 'npm' and len(command) > 1:
+        if base_cmd in ['npm', 'npm.cmd'] and len(command) > 1:
             if command[1] not in ['run'] + ALLOWED_NPM_SCRIPTS:
                 raise SecurityError(f"Недозволений npm script: {command[1]}")
 
@@ -127,9 +163,15 @@ class SecureCommand:
         env.update({
             'NODE_ENV': os.getenv('NODE_ENV', 'production'),
             'NPM_CONFIG_LOGLEVEL': 'warn',
-            'CI': 'true',
+            'CI': os.getenv('CI', 'false'),  # Змінено на false для локального розробництва
             'FORCE_COLOR': '0'
         })
+        
+        # Додаємо npm-специфічні змінні для Windows
+        if sys.platform == 'win32':
+            for var in ['npm_config_cache', 'npm_config_prefix', 'npm_config_userconfig']:
+                if var in os.environ:
+                    env[var] = os.environ[var]
 
         # Видаляємо потенційно небезпечні змінні
         dangerous_vars = ['LD_PRELOAD', 'LD_LIBRARY_PATH', 'PYTHONPATH']
@@ -143,6 +185,15 @@ class SecureCommand:
         """Безпечне виконання команди"""
         # Валідація
         command = self.validate_command(command)
+
+        # Перевіряємо, чи команда є node, і якщо так, чи існує виконуваний файл
+        base_cmd = os.path.basename(command[0])
+        if base_cmd.startswith('node'):
+            node_executable = self.find_node_executable()
+            if not node_executable:
+                raise SecurityError("Node.js не знайдено. Будь ласка, встановіть Node.js і переконайтеся, що він є у вашому PATH.")
+            command[0] = node_executable
+
 
         if timeout > MAX_TIMEOUT:
             timeout = MAX_TIMEOUT
@@ -547,8 +598,11 @@ class StreamHubLauncher:
     async def check_node_available(self):
         """Перевіряє наявність Node.js з безпековими обмеженнями"""
         try:
+            # Валідуємо команду через SecureCommand (може додати розширення на Windows)
+            command = self.secure_cmd.validate_command(["node", "--version"])
+            
             returncode, stdout, stderr = await self.secure_cmd.run_safe(
-                ["node", "--version"],
+                command,
                 cwd=self.project_root,
                 timeout=10
             )
@@ -593,11 +647,23 @@ class StreamHubLauncher:
                 self.logger.debug("Залежності встановлено/перевірено.")
                 return True
             else:
-                self.logger.error(
-                    "Помилка виконання 'npm install'",
-                    stdout=stdout.strip(),
-                    stderr=stderr.strip()
-                )
+                # Детальне логування помилки
+                error_msg = f"Помилка виконання 'npm install' (код: {returncode})"
+                self.logger.error(error_msg)
+                
+                if stdout.strip():
+                    print(f"STDOUT: {stdout.strip()}")
+                    self.logger.error(f"npm stdout: {stdout.strip()}")
+                    
+                if stderr.strip():
+                    print(f"STDERR: {stderr.strip()}")
+                    self.logger.error(f"npm stderr: {stderr.strip()}")
+                    
+                # Додаткова діагностика
+                print(f"Команда: {' '.join(command_list)}")
+                print(f"Робоча директорія: {frontend_path}")
+                print(f"Змінні оточення: {list(self.secure_cmd.create_safe_env().keys())}")
+                
                 return False
 
         except Exception as e:
@@ -668,9 +734,12 @@ class StreamHubLauncher:
             frontend_path = self.secure_path.validate_path(str(self.frontend_dir))
 
             command_list = ["npm", "run", "dev", "--", "--host", "--port", "3000"]
+            
+            # Валідуємо команду через SecureCommand (автоматично додасть .cmd на Windows)
+            validated_command = self.secure_cmd.validate_command(command_list)
 
             process = await asyncio.create_subprocess_exec(
-                *command_list,
+                *validated_command,
                 cwd=str(frontend_path),
                 env=self.secure_cmd.create_safe_env(),
                 stdout=asyncio.subprocess.PIPE,

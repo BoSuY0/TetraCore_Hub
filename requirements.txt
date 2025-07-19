@@ -51,7 +51,7 @@ black==23.12.1
 flake8==7.0.0
 
 # JSON handling
-orjson==3.9.10
+orjson>=3.10.0
 msgpack==1.1.0
 
 # Date/time utilities

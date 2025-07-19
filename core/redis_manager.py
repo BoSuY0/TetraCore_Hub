@@ -46,6 +46,7 @@ class RedisManager:
         self.pipeline_flush_interval: float = getattr(settings, 'redis_pipeline_flush_interval', 0.1)  # секунди
         self.pipeline_buffer: List[tuple] = []
         self.pipeline_task: Optional[asyncio.Task] = None
+        self.pipeline_timers: Dict[str, asyncio.Task] = {}
 
         # Pub/Sub об'єкти
         self.pubsub = None

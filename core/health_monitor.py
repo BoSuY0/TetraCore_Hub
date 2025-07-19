@@ -316,18 +316,32 @@ class HealthMonitor:
             memory = psutil.virtual_memory()
             memory_usage = memory.percent
 
-            # Диск
-            disk = psutil.disk_usage('/')
+            # Диск (Windows-сумісний шлях)
+            import os
+            disk_path = os.path.splitdrive(os.getcwd())[0] + os.sep  # Отримуємо поточний диск (наприклад, 'C:\\')
+            disk = psutil.disk_usage(disk_path)
             disk_usage = disk.percent
 
-            # Мережа
-            network = psutil.net_io_counters()
+            # Мережа (з обробкою помилок для Windows)
+            try:
+                network = psutil.net_io_counters()
+            except Exception as e:
+                # Якщо виникає помилка PdhAddEnglishCounterW або інша, використовуємо значення за замовчуванням
+                if "PdhAddEnglishCounterW" in str(e):
+                    self.logger.info("[health_monitor.py] Performance counters disabled, using default network values", error=str(e), source="health_monitor.py")
+                else:
+                    self.logger.warning("[health_monitor.py] Network counters unavailable", error=str(e), source="health_monitor.py")
+                network = type('NetworkIO', (), {'bytes_sent': 0, 'bytes_recv': 0})()
 
             # Процеси
             process_count = len(psutil.pids())
 
-            # Навантаження системи
-            load_avg = psutil.getloadavg()[0] if hasattr(psutil, 'getloadavg') else 0.0
+            # Навантаження системи (не підтримується на Windows)
+            try:
+                load_avg = psutil.getloadavg()[0] if hasattr(psutil, 'getloadavg') else 0.0
+            except (OSError, AttributeError):
+                # На Windows getloadavg() може викликати помилку
+                load_avg = 0.0
 
             # Оновлення статистики
             self.system_stats.update({
@@ -367,12 +381,299 @@ class HealthMonitor:
             }
 
         except Exception as e:
-            self.logger.error("Error checking system health", error=str(e))
+            error_msg = str(e)
+            if "PdhAddEnglishCounterW" in error_msg:
+                self.logger.info("[health_monitor.py] Performance counters may be disabled. System health check continues with limited metrics.", error=error_msg, source="health_monitor.py")
+                return {
+                    "is_healthy": True,  # Не вважаємо це критичною помилкою
+                    "alerts": [],
+                    "stats": self.system_stats
+                }
+            else:
+                self.logger.error("[health_monitor.py] Error checking system health", error=error_msg, source="health_monitor.py")
+                return {
+                    "is_healthy": False,
+                    "alerts": [f"System health check failed: {error_msg}"],
+                    "stats": self.system_stats
+                }
+
+    async def get_overall_health(self) -> Dict[str, Any]:
+        """Отримання загального стану здоров'я"""
+        try:
+            # Перевірка компонентів
+            healthy_components = sum(1 for status in self.component_statuses.values() if status.is_healthy)
+            total_components = len(self.component_statuses)
+            component_health_percentage = (healthy_components / total_components * 100) if total_components > 0 else 100
+
+            # Перевірка клієнтів
+            healthy_clients = 0
+            total_clients = 0
+
+            if self.client_manager:
+                clients = self.client_manager.get_all_clients()
+                total_clients = len(clients)
+
+                for client in clients:
+                    if await self.check_client_health(client):
+                        healthy_clients += 1
+
+            client_health_percentage = (healthy_clients / total_clients * 100) if total_clients > 0 else 100
+
+            # Системне здоров'я
+            system_health = await self.check_system_health()
+
+            # Загальна оцінка
+            overall_score = (component_health_percentage + client_health_percentage) / 2
+            if not system_health["is_healthy"]:
+                overall_score *= 0.8  # Штраф за системні проблеми
+
+            # Визначення загального статусу
+            if overall_score >= 90:
+                overall_status = "excellent"
+            elif overall_score >= 75:
+                overall_status = "good"
+            elif overall_score >= 50:
+                overall_status = "warning"
+            else:
+                overall_status = "critical"
+
+            uptime = (datetime.utcnow() - self.start_time).total_seconds()
+
             return {
-                "is_healthy": False,
-                "alerts": [f"System health check failed: {str(e)}"],
+                "overall_status": overall_status,
+                "overall_score": round(overall_score, 1),
+                "uptime_seconds": uptime,
+                "components": {
+                    "healthy": healthy_components,
+                    "total": total_components,
+                    "percentage": round(component_health_percentage, 1)
+                },
+                "clients": {
+                    "healthy": healthy_clients,
+                    "total": total_clients,
+                    "percentage": round(client_health_percentage, 1)
+                },
+                "system": system_health,
+                "statistics": {
+                    "total_checks": self.total_checks,
+                    "failed_checks": self.failed_checks,
+                    "success_rate": round((self.total_checks - self.failed_checks) / self.total_checks * 100, 1) if self.total_checks > 0 else 100,
+                    "alerts_sent": self.alerts_sent
+                }
+            }
+
+        except Exception as e:
+            self.logger.error("Error getting overall health", error=str(e))
+            return {
+                "overall_status": "error",
+                "overall_score": 0,
+                "error": str(e)
+            }
+
+    def get_component_status(self, component: str) -> Optional[HealthStatus]:
+        """Отримання статусу компонента"""
+        return self.component_statuses.get(component)
+
+    def get_all_component_statuses(self) -> Dict[str, HealthStatus]:
+        """Отримання статусів всіх компонентів"""
+        return self.component_statuses.copy()
+
+    def get_system_stats(self) -> Dict[str, Any]:
+        """Отримання системної статистики"""
+        return self.system_stats.copy()
+
+    def get_health_history(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Отримання історії перевірок здоров'я"""
+        return self.check_history[-limit:] if limit > 0 else self.check_history
+
+    def _add_to_history(self, check_result: Dict[str, Any]):
+        """Додавання результату перевірки до історії"""
+        self.check_history.append(check_result)
+
+        # Обмеження розміру історії
+        if len(self.check_history) > self.max_history_size:
+            self.check_history = self.check_history[-self.max_history_size:]
+
+    def is_healthy(self) -> bool:
+        """Перевірка чи монітор здоровий"""
+        return self.is_running
+
+    async def _monitoring_loop(self):
+        """Основний цикл моніторингу компонентів"""
+        while self.is_running:
+            try:
+                # Перевірка компонентів - додаємо посилання на StreamHub
+                hub = getattr(self, 'hub', None)
+                
+                if self.client_manager:
+                    await self.check_component_health(
+                        "client_manager",
+                        lambda: self.client_manager.is_healthy()
+                    )
+
+                # Перевірка WebSocket менеджера
+                if hub and hasattr(hub, 'websocket_manager') and hub.websocket_manager:
+                    await self.check_component_health(
+                        "websocket_manager",
+                        lambda: hub.websocket_manager.is_healthy()
+                    )
+
+                # Перевірка Task Router
+                if hub and hasattr(hub, 'task_router') and hub.task_router:
+                    await self.check_component_health(
+                        "task_router",
+                        lambda: hub.task_router.is_healthy()
+                    )
+
+                # Перевірка Redis менеджера
+                if hub and hasattr(hub, 'redis_manager') and hub.redis_manager:
+                    await self.check_component_health(
+                        "redis_manager",
+                        lambda: hub.redis_manager.is_healthy()
+                    )
+
+                # Перевірка Metrics Collector
+                if hub and hasattr(hub, 'metrics_collector') and hub.metrics_collector:
+                    await self.check_component_health(
+                        "metrics_collector",
+                        lambda: hub.metrics_collector.is_healthy()
+                    )
+
+                # Перевірка клієнтів
+                if self.client_manager:
+                    clients = self.client_manager.get_all_clients()
+                    for client in clients:
+                        await self.check_client_health(client)
+
+                await asyncio.sleep(30)  # Перевірка кожні 30 секунд
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error("Error in monitoring loop", error=str(e))
+                await asyncio.sleep(10)
+
+    async def _system_monitoring_loop(self):
+        """Цикл моніторингу системних ресурсів"""
+        self.logger.info("Starting system monitoring loop")
+        while self.is_running:
+            try:
+                await self.check_system_health()
+                await asyncio.sleep(self.settings.system_health_check_interval)
+            except psutil.Error as e:
+                error_msg = str(e)
+                if "PdhAddEnglishCounterW" in error_msg:
+                    self.logger.info(
+                        "[health_monitor.py] Performance counters disabled. Using default system health metrics.",
+                        error=error_msg,
+                        source="health_monitor.py"
+                    )
+                else:
+                    self.logger.warning(
+                        "[health_monitor.py] Could not collect system health metrics. Performance counters might be disabled on Windows.",
+                        error=error_msg,
+                        source="health_monitor.py"
+                    )
+                # Продовжуємо роботу, але з більшою затримкою
+                await asyncio.sleep(self.settings.system_health_check_interval * 5)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error("Error in system monitoring loop", error=str(e))
+                await asyncio.sleep(self.settings.system_health_check_interval)
+        self.logger.info("System monitoring loop stopped")
+
+    async def check_system_health(self):
+        """Перевірка здоров'я системи"""
+        try:
+            # CPU використання
+            cpu_usage = psutil.cpu_percent(interval=1)
+
+            # Пам'ять
+            memory = psutil.virtual_memory()
+            memory_usage = memory.percent
+
+            # Диск (Windows-сумісний шлях)
+            import os
+            disk_path = os.path.splitdrive(os.getcwd())[0] + os.sep  # Отримуємо поточний диск (наприклад, 'C:\\')
+            disk = psutil.disk_usage(disk_path)
+            disk_usage = disk.percent
+
+            # Мережа (з обробкою помилок для Windows)
+            try:
+                network = psutil.net_io_counters()
+            except Exception as e:
+                # Якщо виникає помилка PdhAddEnglishCounterW або інша, використовуємо значення за замовчуванням
+                error_msg = str(e)
+                if "PdhAddEnglishCounterW" in error_msg:
+                    self.logger.info("[health_monitor.py] Performance counters disabled, using default network values", error=error_msg, source="health_monitor.py")
+                else:
+                    self.logger.warning("[health_monitor.py] Network counters unavailable", error=error_msg, source="health_monitor.py")
+                network = type('NetworkIO', (), {'bytes_sent': 0, 'bytes_recv': 0})()
+
+            # Процеси
+            process_count = len(psutil.pids())
+
+            # Навантаження системи (не підтримується на Windows)
+            try:
+                load_avg = psutil.getloadavg()[0] if hasattr(psutil, 'getloadavg') else 0.0
+            except (OSError, AttributeError):
+                # На Windows getloadavg() може викликати помилку
+                load_avg = 0.0
+
+            # Оновлення статистики
+            self.system_stats.update({
+                "cpu_usage": cpu_usage,
+                "memory_usage": memory_usage,
+                "disk_usage": disk_usage,
+                "network_io": {
+                    "bytes_sent": network.bytes_sent,
+                    "bytes_recv": network.bytes_recv
+                },
+                "process_count": process_count,
+                "load_average": load_avg
+            })
+
+            # Перевірка порогів
+            alerts = []
+
+            if cpu_usage > self.thresholds["cpu_usage"]:
+                alerts.append(f"High CPU usage: {cpu_usage:.1f}%")
+
+            if memory_usage > self.thresholds["memory_usage"]:
+                alerts.append(f"High memory usage: {memory_usage:.1f}%")
+
+            if disk_usage > self.thresholds["disk_usage"]:
+                alerts.append(f"High disk usage: {disk_usage:.1f}%")
+
+            # Відправка сповіщень
+            for alert in alerts:
+                if self.on_system_alert:
+                    await self.on_system_alert(alert)
+                self.alerts_sent += 1
+
+            return {
+                "is_healthy": len(alerts) == 0,
+                "alerts": alerts,
                 "stats": self.system_stats
             }
+
+        except Exception as e:
+            error_msg = str(e)
+            if "PdhAddEnglishCounterW" in error_msg:
+                self.logger.info("[health_monitor.py] Performance counters may be disabled. System health check continues with limited metrics.", error=error_msg, source="health_monitor.py")
+                return {
+                    "is_healthy": True,  # Не вважаємо це критичною помилкою
+                    "alerts": [],
+                    "stats": self.system_stats
+                }
+            else:
+                self.logger.error("[health_monitor.py] Error checking system health", error=error_msg, source="health_monitor.py")
+                return {
+                    "is_healthy": False,
+                    "alerts": [f"System health check failed: {error_msg}"],
+                    "stats": self.system_stats
+                }
 
     async def get_overall_health(self) -> Dict[str, Any]:
         """Отримання загального стану здоров'я"""

@@ -443,24 +443,53 @@ class MetricsCollector:
         try:
             import psutil
 
-            # CPU
-            cpu_percent = psutil.cpu_percent(interval=0.1)
-            self.set_gauge("streamhub_cpu_usage", cpu_percent)
+            # CPU (з обробкою помилок Performance counters)
+            try:
+                cpu_percent = psutil.cpu_percent(interval=0.1)
+                self.set_gauge("streamhub_cpu_usage", cpu_percent)
+            except (OSError, AttributeError) as e:
+                self.logger.warning("CPU metrics unavailable", error=str(e))
+                cpu_percent = 0.0
 
-            # Пам'ять
-            memory = psutil.virtual_memory()
-            self.set_gauge("streamhub_memory_usage", memory.percent)
+            # Пам'ять (з обробкою помилок Performance counters)
+            try:
+                memory = psutil.virtual_memory()
+                self.set_gauge("streamhub_memory_usage", memory.percent)
+            except (OSError, AttributeError) as e:
+                self.logger.warning("Memory metrics unavailable", error=str(e))
+                memory = type('obj', (object,), {'percent': 0.0, 'available': 0, 'used': 0})()
 
-            # Диск
-            disk = psutil.disk_usage('/')
-            disk_percent = disk.percent
+            # Диск (з обробкою помилок)
+            try:
+                disk = psutil.disk_usage('/')
+                disk_percent = disk.percent
+            except (OSError, AttributeError) as e:
+                self.logger.warning("Disk metrics unavailable", error=str(e))
+                disk = type('obj', (object,), {'percent': 0.0, 'free': 0, 'used': 0})()
+                disk_percent = 0.0
 
-            # Мережа
-            network = psutil.net_io_counters()
+            # Мережа (з обробкою помилок Performance counters)
+            try:
+                network = psutil.net_io_counters()
+            except (OSError, AttributeError) as e:
+                error_msg = str(e)
+                if "PdhAddEnglishCounterW" in error_msg:
+                    self.logger.info("[metrics_collector.py] Performance counters disabled, using default network values", error=error_msg, source="metrics_collector.py")
+                else:
+                    self.logger.warning("[metrics_collector.py] Network metrics unavailable", error=error_msg, source="metrics_collector.py")
+                network = type('obj', (object,), {'bytes_sent': 0, 'bytes_recv': 0})()
 
-            # Процес Python
-            process = psutil.Process()
-            process_memory = process.memory_info()
+            # Процес Python (з обробкою помилок)
+            try:
+                process = psutil.Process()
+                process_memory = process.memory_info()
+                process_cpu = process.cpu_percent()
+                process_threads = process.num_threads()
+            except (OSError, AttributeError) as e:
+                self.logger.warning("Process metrics unavailable", error=str(e))
+                process_memory = type('obj', (object,), {'rss': 0, 'vms': 0})()
+                process_cpu = 0.0
+                process_threads = 0
 
             return {
                 "cpu_percent": cpu_percent,
@@ -474,13 +503,33 @@ class MetricsCollector:
                 "network_bytes_recv": network.bytes_recv,
                 "process_memory_rss": process_memory.rss,
                 "process_memory_vms": process_memory.vms,
-                "process_cpu_percent": process.cpu_percent(),
-                "process_threads": process.num_threads()
+                "process_cpu_percent": process_cpu,
+                "process_threads": process_threads
             }
 
         except Exception as e:
-            self.logger.error("Error collecting system metrics", error=str(e))
-            return {}
+            error_msg = str(e)
+            if "PdhAddEnglishCounterW" in error_msg:
+                self.logger.info("[metrics_collector.py] Performance counters may be disabled. Using default values for system metrics.", error=error_msg, source="metrics_collector.py")
+                # Повертаємо базові метрики замість порожнього словника
+                return {
+                    "cpu_percent": 0.0,
+                    "memory_percent": 0.0,
+                    "memory_available": 0,
+                    "memory_used": 0,
+                    "disk_percent": 0.0,
+                    "disk_free": 0,
+                    "disk_used": 0,
+                    "network_bytes_sent": 0,
+                    "network_bytes_recv": 0,
+                    "process_memory_rss": 0,
+                    "process_memory_vms": 0,
+                    "process_cpu_percent": 0.0,
+                    "process_threads": 0
+                }
+            else:
+                self.logger.error("Error collecting system metrics", error=error_msg)
+                return {}
 
     def _get_time_series_summary(self) -> Dict[str, Any]:
         """Отримання підсумку часових рядів"""
@@ -629,8 +678,12 @@ class MetricsCollector:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                self.logger.error("Error in collection loop", error=str(e))
-                self.errors_count += 1
+                error_msg = str(e)
+                if "PdhAddEnglishCounterW" in error_msg:
+                    self.logger.info("[metrics_collector.py] Performance counters disabled in collection loop", error=error_msg, source="metrics_collector.py")
+                else:
+                    self.logger.error("Error in collection loop", error=error_msg)
+                    self.errors_count += 1
                 await asyncio.sleep(30)
 
     async def _aggregation_loop(self):
@@ -657,7 +710,11 @@ class MetricsCollector:
             self.last_cache_update = datetime.utcnow() - timedelta(seconds=self.cache_ttl + 1)
 
         except Exception as e:
-            self.logger.error("Error in automatic metrics collection", error=str(e))
+            error_msg = str(e)
+            if "PdhAddEnglishCounterW" in error_msg:
+                self.logger.info("[metrics_collector.py] Performance counters disabled in automatic collection", error=error_msg, source="metrics_collector.py")
+            else:
+                self.logger.error("Error in automatic metrics collection", error=error_msg)
 
     async def _aggregate_metrics(self):
         """Агрегація метрик"""
