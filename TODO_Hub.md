@@ -41,7 +41,7 @@
   - [x] Обмежити кількість з'єднань з одного IP
   - [x] Впровадити затримку між спробами підключення
 - [x] **Додати авторизацію для WebSocket підключень**
-  - [x] Перевірка токенів при handshake
+  - [x] Перевірка токенів при handshake (Bearer + HMAC з timestamp/nonce)
   - [x] Відключення неавторизованих клієнтів
   - [x] Різні рівні доступу для різних типів клієнтів
 - [x] **Шифрування чутливих даних**
@@ -50,7 +50,7 @@
 
 ### 1.2 Валідація вхідних даних
 - [x] **Посилити валідацію WebSocket повідомлень**
-  - [x] Додати pydantic моделі для всіх типів повідомлень
+  - [x] Додати pydantic моделі для основних типів повідомлень (client_registration, task_submit, task_result, subscribe/unsubscribe)
   - [x] Валідувати розмір повідомлень
   - [x] Перевіряти формат даних перед обробкою
 - [x] **Санітизація даних для dashboard**
@@ -64,6 +64,8 @@
 - [x] **Додати HTTPS/WSS обов'язковість**
   - [x] Перевіряти протокол підключення
   - [x] Redirect HTTP -> HTTPS
+-- [x] **mTLS (опційно)**
+  - [x] Перевірка `X-Client-Cert-Verified: SUCCESS` від проксі при `MTLS_ENFORCE=true`
 
 ### 1.4 Проблеми зі скриптами
 - [x] **Виправити start_hub.py**
@@ -100,9 +102,9 @@
 - [x] **Оптимізувати heartbeat механізм**
   - [x] Зменшити частоту ping/pong
   - [x] Batch heartbeat перевірки
-- [x] **Compression для WebSocket**
-  - [x] Включити permessage-deflate
-  - [x] Стискати великі повідомлення
+- [x] **Compression для WebSocket** (браузер: увімкнено; сервісні клієнти: вимкнено для економії CPU)
+- [x] **Обмеження розміру повідомлень** (`WS_MAX_MESSAGE_SIZE`)
+- [x] **Керування швидкістю** (`WS_MAX_MESSAGES_PER_SECOND`)
 
 ### 2.2 Redis оптимізації
 - [x] **Впровадити Redis clustering**
@@ -192,7 +194,7 @@
   - [ ] Автоматичний restart компонентів
   - [ ] Rollback при критичних помилках
 
-#### hub.py (800+ рядків!)
+#### hub.py
 - [ ] **Декомпозиція**
   - [ ] Виділити HTTP handlers в окремий модуль
   - [ ] WebSocket handlers в окремий модуль
@@ -213,9 +215,8 @@
 
 #### metrics_collector.py
 - [x] **Prometheus інтеграція**
-  - [x] Розкоментувати та виправити експорт
-  - [x] Додати /metrics endpoint
-  - [x] Custom metrics для бізнес-логіки
+  - [x] Експорт `/metrics`
+  - [x] Custom метрики (безпека/WS)
 - [x] **Real-time моніторинг**
   - [x] WebSocket streaming метрик
   - [ ] Server-Sent Events для dashboard
@@ -248,13 +249,14 @@
   - [x] Latency monitoring
 
 #### task_router.py
-- [x] **Розширені черги**
-  - [x] Priority queues в Redis
+  - [x] **Розширені черги**
+  - [x] Priority queues в Redis (Streams overflow опційно)
   - [ ] Dead letter queues
   - [ ] Delayed queues
 - [ ] **Distributed processing**
   - [ ] Distributed locks (RedLock)
-  - [ ] Idempotency keys
+  - [x] Idempotency keys (Redis NX TTL)
+  - [ ] Exactly-once delivery (замість цього — at-least-once + ідемпотентність)
   - [ ] Exactly-once delivery
 - [ ] **Batch processing**
   - [ ] Групування завдань
@@ -278,8 +280,8 @@
   - [x] Automatic reconnect
   - [x] Exponential backoff
   - [x] Session recovery
-- [x] **Extensions**
-  - [x] Compression negotiation
+  - [x] **Extensions**
+  - [x] Compression negotiation (браузер only)
   - [ ] Custom extensions
   - [x] Binary frame handling
 
@@ -301,8 +303,8 @@
   - [ ] Покриття >80% для core модулів
   - [ ] Тести для всіх endpoints
 - [ ] **Integration тести**
-  - [ ] WebSocket тести
-  - [ ] Redis integration тести
+  - [ ] WebSocket тести (HMAC/nonce/origin/rate limits)
+  - [ ] Redis integration тести (Streams overflow, idempotency)
 - [ ] **E2E тести**
   - [ ] Playwright/Cypress для frontend
   - [ ] Тестування повного flow
@@ -412,9 +414,9 @@
   - [ ] `web/dashboard.py` використовує випадкові числа
   - [ ] Підключити реальні дані з MetricsCollector
   - [ ] Видалити всі `random.randint()` виклики
-- [ ] **Prometheus метрики**
-  - [ ] Експорт метрик продуктивності
-  - [ ] Custom метрики для бізнес-логіки
+- [x] **Prometheus метрики**
+  - [x] Експорт метрик продуктивності через `/metrics`
+  - [x] Custom метрики для безпеки/WS
 - [ ] **Grafana dashboards**
   - [ ] Real-time моніторинг
   - [ ] Алерти для критичних подій
@@ -466,12 +468,11 @@
 ## 🔧 Етап 5: DevOps та інфраструктура
 
 ### 5.1 CI/CD покращення
-- [ ] **GitHub Actions**
-  - [ ] Автоматичні тести при PR
-  - [ ] Security scanning
-  - [ ] Dependency updates
-  - [ ] Автоматична збірка frontend
-  - [ ] Deploy preview для PR
+- [ ] **Security scanning**: gitleaks (секрети), SAST (bandit/ruff), dependency audit (pip-audit/safety)
+- [ ] **Automated tests**: запуск unit/integration на PR
+- [ ] **Dependency updates**: автоперевірки оновлень
+- [ ] **Frontend build**: автоматична збірка
+- [ ] **Deploy previews** (за потреби)
 - [ ] **Automated deployment**
   - [ ] Blue-green deployment
   - [ ] Rollback механізм
@@ -534,28 +535,22 @@
   - [ ] Smart invalidation
   - [ ] Cache warming
 
-## 🎯 Пріоритети виконання
+## 🎯 Пріоритети виконання (оновлено)
 
-### Високий пріоритет (1-2 тижні)
-1. [x] Критичні виправлення безпеки (Етап 1) - ВИКОНАНО
-   - [x] Особливо auth_config.py hardcoded credentials
-   - [x] Subprocess injection в start_hub.py
-   - [x] Невизначена функція print_auth_status()
-2. [ ] Виправлення помилок з діагностики (Етап 3.1)
-3. [ ] Базові тести (Етап 3.4)
-4. [ ] Рефакторинг core модулів (Етап 3.2)
-5. [ ] Безпечний рефакторинг скриптів (Етап 3.6)
-6. [ ] Fix Heroku deployment (Етап 3.7)
+### Now (1–2 тижні)
+1. Базові unit та інтеграційні тести (WS HMAC/nonce/origin/rate limits; Redis Streams overflow; idempotency).
+2. CI: gitleaks + bandit/ruff + pip-audit/safety + тест-ран.
+3. Docker образи + health checks.
 
-### Середній пріоритет (3-4 тижні)
-1. [x] Оптимізація продуктивності (Етап 2) - ЧАСТКОВО ВИКОНАНО
-2. [ ] Рефакторинг (Етап 3.2)
-3. [ ] CI/CD налаштування (Етап 5.1)
+### Next (2–4 тижні)
+1. Dead-letter queue та delayed queues у `TaskRouter`.
+2. Декомпозиція `StreamHub` та рознесення handlers/сервісів.
+3. Dashboard з реальними метриками.
 
-### Низький пріоритет (1-2 місяці)
-1. [ ] Новий функціонал (Етап 4)
-2. [ ] Масштабування (Етап 6)
-3. [ ] Розширена інфраструктура (Етап 5)
+### Later
+1. Distributed locks (RedLock), batch processing.
+2. Redis clustering/Sentinel (за необхідності).
+3. OpenTelemetry + Grafana dashboards.
 
 ## 📈 Метрики успіху
 

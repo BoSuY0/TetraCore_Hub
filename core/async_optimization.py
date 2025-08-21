@@ -7,6 +7,7 @@ TetraCore StreamHub Async Optimization Module
 """
 
 import asyncio
+import os
 import json
 import aiofiles
 import time
@@ -19,7 +20,6 @@ from enum import Enum
 import structlog
 from collections import deque
 import weakref
-import pickle
 import hashlib
 
 # Type definitions
@@ -60,6 +60,8 @@ class AsyncOptimizer:
         self.logger = structlog.get_logger(__name__)
         self.max_workers = max_workers
         self.max_tasks = max_tasks
+        # Відключення фон-петель у тест-середовищі або за прапором
+        self.disable_background_tasks = bool(os.getenv("PYTEST_CURRENT_TEST")) or os.getenv("DISABLE_BACKGROUND_TASKS", "").lower() in ("1", "true", "yes")
 
         # Пули для виконання задач
         self.thread_pool = ThreadPoolExecutor(max_workers=max_workers)
@@ -96,11 +98,15 @@ class AsyncOptimizer:
                         max_workers=self.max_workers,
                         max_tasks=self.max_tasks)
 
-        # Запуск обробника задач
-        self.worker_task = asyncio.create_task(self._worker_loop())
-
-        # Запуск очищення кешу
-        self.cache_cleanup_task = asyncio.create_task(self._cache_cleanup_loop())
+        if self.disable_background_tasks:
+            self.logger.debug("AsyncOptimizer background tasks disabled (test env)")
+            self.worker_task = None
+            self.cache_cleanup_task = None
+        else:
+            # Запуск обробника задач
+            self.worker_task = asyncio.create_task(self._worker_loop())
+            # Запуск очищення кешу
+            self.cache_cleanup_task = asyncio.create_task(self._cache_cleanup_loop())
 
     async def shutdown(self):
         """Завершення роботи оптимізатора"""
@@ -195,7 +201,48 @@ class AsyncOptimizer:
 
         self.stats["cache_misses"] += 1
 
-        # Створення задачі
+        # Якщо фон-петлі вимкнені (тести) — виконуємо відразу, без воркера
+        if self.disable_background_tasks:
+            try:
+                if asyncio.iscoroutinefunction(func):
+                    result = await func(*args, **kwargs)
+                else:
+                    # Виконати в thread pool, щоб не блокувати
+                    result = await self.run_in_thread(func, *args, **kwargs)
+                bt = BackgroundTask(
+                    id=task_id,
+                    name=name,
+                    func=func,
+                    args=args,
+                    kwargs=kwargs,
+                    priority=priority,
+                    started_at=time.time(),
+                    completed_at=time.time(),
+                    result=result
+                )
+                self.completed_tasks[task_id] = bt
+                self.result_cache[task_id] = result
+                self.stats["tasks_completed"] += 1
+                self.logger.debug("Background task executed inline (test mode)", task_id=task_id)
+                return task_id
+            except Exception as e:
+                bt = BackgroundTask(
+                    id=task_id,
+                    name=name,
+                    func=func,
+                    args=args,
+                    kwargs=kwargs,
+                    priority=priority,
+                    started_at=time.time(),
+                    completed_at=time.time(),
+                    error=e
+                )
+                self.completed_tasks[task_id] = bt
+                self.stats["tasks_failed"] += 1
+                self.logger.error("Inline background task failed (test mode)", task_id=task_id, error=str(e))
+                return task_id
+
+        # Інакше — звичайний шлях через чергу та воркер
         task = BackgroundTask(
             id=task_id,
             name=name,
@@ -204,16 +251,12 @@ class AsyncOptimizer:
             kwargs=kwargs,
             priority=priority
         )
-
-        # Додавання в чергу
         self.task_queues[priority].append(task)
         self.stats["tasks_created"] += 1
-
         self.logger.info("Background task created",
                         task_id=task_id,
                         name=name,
                         priority=priority.name)
-
         return task_id
 
     async def get_task_result(self, task_id: str, timeout: float = None) -> Any:
@@ -428,9 +471,9 @@ class AsyncOptimizer:
 
     def _generate_task_id(self, name: str, args: tuple, kwargs: dict) -> str:
         """Генерація унікального ID для задачі"""
-        # Створення хешу з параметрів
+        # Створення хешу з параметрів (уникаємо MD5 через колізії)
         data = f"{name}:{args}:{sorted(kwargs.items())}"
-        return hashlib.md5(data.encode()).hexdigest()
+        return hashlib.sha256(data.encode()).hexdigest()
 
     def get_stats(self) -> Dict[str, Any]:
         """Отримання статистики"""

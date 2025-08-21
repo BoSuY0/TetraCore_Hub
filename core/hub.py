@@ -76,19 +76,26 @@ class StreamHub:
         self.total_tasks_processed = 0
         self.total_errors = 0
 
+        # Backpressure: ліміт одночасних повідомлень, що опрацьовуються на клієнта
+        # Налаштовується через SETTINGS.message_queue_size або ENV WS_MAX_INFLIGHT
+        try:
+            max_inflight = int(os.getenv("WS_MAX_INFLIGHT", "0"))
+        except Exception:
+            max_inflight = 0
+        self.max_inflight_per_client = max_inflight or max(1, min(32, getattr(self.settings, "message_queue_size", 8)))
+        self._client_inflight: Dict[str, int] = {}
+        self._client_wait_queues: Dict[str, asyncio.Queue] = {}
+
         # Задачі
         self.self_client_task: Optional[asyncio.Task] = None
 
     async def initialize(self):
         """Ініціалізація всіх компонентів"""
         try:
-            # Ініціалізація Redis (якщо увімкнено)
-            if self.settings.redis_enabled:
-                self.redis_manager = RedisManager(self.settings)
-                await self.redis_manager.initialize()
-                self.logger.info("✅ Redis manager initialized")
-            else:
-                self.redis_manager = None
+            # Ініціалізація Redis (завжди увімкнено у конфігурації)
+            self.redis_manager = RedisManager(self.settings)
+            await self.redis_manager.initialize()
+            self.logger.info("✅ Redis manager initialized")
 
             # Ініціалізація асинхронного оптимізатора
             self.async_optimizer = AsyncOptimizer(
@@ -138,11 +145,22 @@ class StreamHub:
             # Налаштування подієвих обробників
             self._setup_event_handlers()
 
+        # Автоматична ротація токенів (якщо увімкнено)
+        try:
+            if getattr(self.settings, 'enable_token_rotation', False):
+                interval = int(getattr(self.settings, 'token_rotation_interval_minutes', 1440))
+                asyncio.create_task(self._token_rotation_loop(interval))
+        except Exception:
+            pass
+
             # Самореєстрація як клієнт
             await self._register_self_as_client()
 
             # Запуск periodic broadcast для task stats
             asyncio.create_task(self._periodic_task_stats_broadcast())
+
+            # Запуск periodic broadcast для системних метрик (реальний стрім для дашборду)
+            asyncio.create_task(self._periodic_metrics_broadcast())
 
             self.start_time = datetime.utcnow()
             self.is_running = True
@@ -196,14 +214,14 @@ class StreamHub:
         # Статична перевірка: self.app тепер гарантовано не None
         assert self.app is not None
 
-        # Налаштування CORS
+        # Налаштування CORS (звужена конфігурація)
         self.app.add_middleware(
             CORSMiddleware,
             allow_origins=self.settings.allowed_origins,
             allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-            expose_headers=["*"]
+            allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type", "X-Requested-With", "X-Correlation-Id"],
+            expose_headers=["X-Total-Count", "X-Page-Count", "X-API-Version"]
         )
 
         integrate_security(
@@ -292,6 +310,18 @@ class StreamHub:
                 "environment": self.settings.environment.value,
                 "version": "1.0.0"
             }
+
+        # Prometheus metrics endpoint (обмеження доступу в production в security_integration)
+        @self.app.get("/metrics")  # type: ignore[attr-defined]
+        async def prometheus_metrics():
+            from fastapi.responses import PlainTextResponse  # type: ignore
+            try:
+                if self.metrics_collector:
+                    text = await self.metrics_collector.export_prometheus_metrics()
+                    return PlainTextResponse(text, media_type="text/plain")
+            except Exception as e:
+                self.logger.error("Failed to export Prometheus metrics", error=str(e))
+            return PlainTextResponse("", media_type="text/plain")
 
         # Remove duplicate route registrations - these will be handled by dashboard.py
         # Only register routes that are NOT handled by dashboard.py to avoid conflicts
@@ -401,6 +431,14 @@ class StreamHub:
         try:
             # Authenticate WebSocket connection before accepting
             token = websocket.query_params.get("token")
+            # У production забороняємо токен у query
+            try:
+                env = os.getenv("ENVIRONMENT", "development").lower()
+                if env == "production" and token:
+                    await websocket.close(code=1008, reason="Query token not allowed")
+                    return
+            except Exception:
+                pass
             # Видалений детальний лог authentication attempt
 
             user_data = await ws_security_manager.authenticate_websocket(websocket, token)
@@ -429,6 +467,13 @@ class StreamHub:
                     self.logger.warning("Cannot close WebSocket - already closed",
                                       state=websocket.client_state.name)
                 return
+
+            # Метрики підключень: інкремент
+            try:
+                if hasattr(self.metrics_collector, 'increment_counter'):
+                    self.metrics_collector.increment_counter("streamhub_connections_total", 1)
+            except Exception:
+                pass
 
             self.logger.info("New authenticated WebSocket connection",
                            user_id=user_data["user_id"],
@@ -787,38 +832,49 @@ class StreamHub:
                                 client_id=client.info.client_id)
                 raw_data = await websocket.receive_text()
 
-                # Логування всіх вхідних WebSocket повідомлень
-                self.logger.info("[WS RAW] Отримано сире WebSocket повідомлення",
-                               client_id=client.info.client_id,
-                               client_type=client.info.client_type.value,
-                               raw_data_length=len(raw_data),
-                               raw_data_preview=raw_data[:200] if len(raw_data) > 200 else raw_data)
+                # Зменшене логування для безпеки в продакшені: без preview
+                is_prod = os.getenv("ENVIRONMENT", "development").lower() == "production"
+                if is_prod:
+                    self.logger.info("[WS RAW] Отримано WebSocket повідомлення",
+                                    client_id=client.info.client_id,
+                                    client_type=client.info.client_type.value,
+                                    raw_data_length=len(raw_data))
+                else:
+                    self.logger.info("[WS RAW] Отримано сире WebSocket повідомлення",
+                                    client_id=client.info.client_id,
+                                    client_type=client.info.client_type.value,
+                                    raw_data_length=len(raw_data),
+                                    raw_data_preview=raw_data[:200] if len(raw_data) > 200 else raw_data)
 
                 # Validate message using security manager
-                # Тимчасово вимикаємо security manager для всіх клієнтів
-                if False:  # hasattr(client, 'security_client_id') and client.info.client_type != ClientType.WORKER:
+                # Увімкнуто: використовуємо валідацію WS для всіх клієнтів (окрім специфічних кейсів у майбутньому)
+                if hasattr(client, 'security_client_id') and client.security_client_id:
                     # Логування raw повідомлення
                     self.logger.info("[DEBUG] Raw WebSocket message received",
                                    client_id=client.info.client_id,
                                    raw_data_preview=raw_data[:500] if len(raw_data) > 500 else raw_data)
 
-                    validated_message = await ws_security_manager.validate_message(
-                        client.security_client_id,
-                        raw_data
-                    )
+                    validated_message = await ws_security_manager.validate_message(client.security_client_id, raw_data)
 
                     if not validated_message:
                         self.logger.warning("Invalid message received",
                                           client_id=client.info.client_id)
                         continue
 
-                    # Логування validated message
-                    self.logger.info("[DEBUG] Validated message structure",
-                                   client_id=client.info.client_id,
-                                   message_type=validated_message.type,
-                                   has_data=hasattr(validated_message, 'data'),
-                                   data_keys=list(validated_message.data.keys()) if hasattr(validated_message, 'data') and isinstance(validated_message.data, dict) else None,
-                                   data_content=validated_message.data if hasattr(validated_message, 'data') else None)
+                    # Логування validated message (без контенту даних у продакшені)
+                    if os.getenv("ENVIRONMENT", "development").lower() == "production":
+                        self.logger.debug("[DEBUG] Validated message structure",
+                                          client_id=client.info.client_id,
+                                          message_type=validated_message.type,
+                                          has_data=hasattr(validated_message, 'data'),
+                                          data_keys=list(validated_message.data.keys()) if hasattr(validated_message, 'data') and isinstance(validated_message.data, dict) else None)
+                    else:
+                        self.logger.info("[DEBUG] Validated message structure",
+                                         client_id=client.info.client_id,
+                                         message_type=validated_message.type,
+                                         has_data=hasattr(validated_message, 'data'),
+                                         data_keys=list(validated_message.data.keys()) if hasattr(validated_message, 'data') and isinstance(validated_message.data, dict) else None,
+                                         data_content=validated_message.data if hasattr(validated_message, 'data') else None)
 
                     # Convert WebSocketMessage to data format for parse_message
                     # WebSocketMessage uses 'type' field, but parse_message expects 'message_type'
@@ -828,10 +884,10 @@ class StreamHub:
                         "correlation_id": validated_message.correlation_id,
                     }
 
-                    # Спеціальна обробка для TASK_SUBMIT - витягуємо поля з data
-                    if validated_message.type == MessageType.TASK_SUBMIT.value:
-                        # Всі поля таску знаходяться в validated_message.data
-                        message_data.update(validated_message.data)
+            # Спеціальна обробка для TASK_SUBMIT - витягуємо поля з data (уніфікований формат)
+            if validated_message.type == MessageType.TASK_SUBMIT.value:
+                # Всі поля таску знаходяться в validated_message.data
+                message_data.update(validated_message.data)
                         self.logger.info("[DEBUG] TASK_SUBMIT through security manager",
                                        client_id=client.info.client_id,
                                        data_keys=list(validated_message.data.keys()),
@@ -845,31 +901,50 @@ class StreamHub:
                     if validated_message.message_id:
                         message_data["message_id"] = validated_message.message_id
 
-                    # Логування message_data перед парсингом
-                    self.logger.info("[DEBUG] Message data before parsing",
-                                   client_id=client.info.client_id,
-                                   message_data_keys=list(message_data.keys()),
-                                   message_data_content=message_data)
+                    # Логування message_data перед парсингом (без контенту в продакшені)
+                    if os.getenv("ENVIRONMENT", "development").lower() == "production":
+                        self.logger.debug("[DEBUG] Message data before parsing",
+                                          client_id=client.info.client_id,
+                                          message_data_keys=list(message_data.keys()))
+                    else:
+                        self.logger.info("[DEBUG] Message data before parsing",
+                                         client_id=client.info.client_id,
+                                         message_data_keys=list(message_data.keys()),
+                                         message_data_content=message_data)
 
                     message = parse_message(message_data)
 
-                    # Логування розпаршеного message
-                    self.logger.info("[DEBUG] Parsed message structure",
-                                   client_id=client.info.client_id,
-                                   message_type=getattr(message, 'message_type', None),
-                                   has_task_id=hasattr(message, 'task_id'),
-                                   task_id=getattr(message, 'task_id', None) if hasattr(message, 'task_id') else None,
-                                   has_task_type=hasattr(message, 'task_type'),
-                                   task_type=getattr(message, 'task_type', None) if hasattr(message, 'task_type') else None,
-                                   has_task_data=hasattr(message, 'task_data'),
-                                   message_attrs=list(vars(message).keys()) if hasattr(message, '__dict__') else None)
+                    # Логування розпаршеного message (мінімальне у проді)
+                    if os.getenv("ENVIRONMENT", "development").lower() == "production":
+                        self.logger.debug("[DEBUG] Parsed message structure",
+                                          client_id=client.info.client_id,
+                                          message_type=getattr(message, 'message_type', None),
+                                          has_task_id=hasattr(message, 'task_id'),
+                                          has_task_type=hasattr(message, 'task_type'),
+                                          has_task_data=hasattr(message, 'task_data'))
+                    else:
+                        self.logger.info("[DEBUG] Parsed message structure",
+                                         client_id=client.info.client_id,
+                                         message_type=getattr(message, 'message_type', None),
+                                         message_class=type(message).__name__,
+                                         has_task_id=hasattr(message, 'task_id'),
+                                         task_id=getattr(message, 'task_id', None) if hasattr(message, 'task_id') else None,
+                                         has_task_type=hasattr(message, 'task_type'),
+                                         task_type=getattr(message, 'task_type', None) if hasattr(message, 'task_type') else None,
+                                         has_task_data=hasattr(message, 'task_data'),
+                                         message_attrs=list(vars(message).keys()) if hasattr(message, '__dict__') else None)
                 else:
-                    # Fallback for legacy connections (should be removed in future)
-                    # Also used for API Workers temporarily
+                    # Fallback (тимчасово): сувора перевірка розміру перед парсингом
+                    try:
+                        from core.websocket_security import MAX_MESSAGE_SIZE
+                    except Exception:
+                        MAX_MESSAGE_SIZE = 1024 * 1024
+                    if len(raw_data) > MAX_MESSAGE_SIZE:
+                        await self._send_error(websocket, "MESSAGE_TOO_LARGE", "Message exceeds allowed size")
+                        continue
                     if self.async_optimizer:
                         data = await self.async_optimizer.json_loads(raw_data)
                     else:
-                        # Фолбек на стандартний json.loads у малоймовірному випадку, коли async_optimizer не ініціалізовано
                         data = json.loads(raw_data)
 
                     # Додаткове логування для API Worker
@@ -893,6 +968,18 @@ class StreamHub:
                                    has_task_type="task_type" in data,
                                    has_task_data="task_data" in data,
                                    data_keys=list(data.keys()))
+
+                    # Backpressure: перевіряємо ліміт одночасних повідомлень на клієнта
+                    _cid = client.info.client_id
+                    _cur = self._client_inflight.get(_cid, 0)
+                    if _cur >= self.max_inflight_per_client:
+                        # Короткий м'який backoff; якщо не звільнилось — повертаємо помилку
+                        await asyncio.sleep(0)
+                        _cur = self._client_inflight.get(_cid, 0)
+                        if _cur >= self.max_inflight_per_client:
+                            await self._send_error(websocket, "BACKPRESSURE", "Too many in-flight messages; slow down")
+                            continue
+                    self._client_inflight[_cid] = _cur + 1
 
                     # Спеціальна обробка для TASK_SUBMIT повідомлень
                     if data.get("message_type") == MessageType.TASK_SUBMIT.value or data.get("type") == MessageType.TASK_SUBMIT.value:
@@ -952,7 +1039,11 @@ class StreamHub:
                 client.info.stats.last_activity = datetime.utcnow()
 
                 # Обробка повідомлення
-                await self._process_client_message(client, message)
+                try:
+                    await self._process_client_message(client, message)
+                finally:
+                    _cid2 = client.info.client_id
+                    self._client_inflight[_cid2] = max(0, self._client_inflight.get(_cid2, 1) - 1)
 
         except WebSocketDisconnect:
             self.logger.info("Client disconnected", client_id=client.info.client_id)
@@ -1313,22 +1404,27 @@ class StreamHub:
 
     def _authenticate_client(self, message: BaseMessage) -> bool:
         """Аутентифікація клієнта"""
-        # 1. Dashboard / monitor клієнти вже проходять JWT-аутентифікацію під час
-        #    встановлення WebSocket-зʼєднання, тому їм не потрібен додатковий
-        #    static auth_token. Дозволяємо реєстрацію, щоб уникнути помилки
-        #    «AUTH_FAILED» та циклів reconnection на фронтенді.
+        # 1) MONITOR клієнти вже аутентифіковані через JWT на рівні WS
         from models.client import ClientType  # Локальний імпорт, щоб уникнути циклічних залежностей
 
         if message.client_type == ClientType.MONITOR:
             return True
 
-        # 2. Якщо глобальний static AUTH_TOKEN не налаштований – додаткова
-        #    перевірка не потрібна.
-        if not self.settings.auth_token:
+        # 2) Підтримуємо ротацію токенів: приймаємо auth_token, auth_token_active, auth_token_next
+        allowed_tokens = []
+        for tk in [getattr(self.settings, 'auth_token_active', None),
+                   getattr(self.settings, 'auth_token_next', None),
+                   getattr(self.settings, 'auth_token', None)]:
+            if tk:
+                allowed_tokens.append(tk)
+
+        # 3) Якщо токени не налаштовані - пропускаємо додаткову перевірку
+        if not allowed_tokens:
             return True
 
-        # 3. Для усіх інших клієнтів вимагаємо збіг із налаштованим AUTH_TOKEN.
-        return getattr(message, 'auth_token', None) == self.settings.auth_token
+        # 4) Перевірка токена з повідомлення реєстрації
+        client_token = getattr(message, 'auth_token', None)
+        return client_token in allowed_tokens
 
     def _get_client_config(self, client: Client) -> Dict[str, Any]:
         """Отримання конфігурації для клієнта"""
@@ -1677,7 +1773,7 @@ class StreamHub:
                 config={
                     "max_connections": self.settings.max_connections,
                     "websocket_timeout": self.settings.websocket_timeout,
-                    "redis_enabled": self.settings.redis_enabled
+                    "redis_enabled": True
                 }
             )
 
@@ -1756,6 +1852,45 @@ class StreamHub:
             self.logger.error("Fatal error in periodic task stats broadcast", 
                             error=str(e))
 
+    async def _periodic_metrics_broadcast(self):
+        """Періодичне надсилання системних метрик через WebSocket"""
+        try:
+            while self.is_running:
+                try:
+                    # Отримуємо актуальні системні метрики хабу
+                    full_metrics = await self.get_system_metrics()
+
+                    # Формуємо lightweight повідомлення для фронтенду (тільки system + hub)
+                    metrics = {
+                        "system": full_metrics.get("system", {}),
+                        "hub": full_metrics.get("hub", {}),
+                        "timestamp": full_metrics.get("timestamp"),
+                    }
+
+                    ws_message = {
+                        "type": "metrics_update",
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "data": metrics,
+                    }
+
+                    # Розсилаємо тільки моніторинг-клієнтам (дашборд)
+                    if self.client_manager:
+                        await self.client_manager.broadcast_to_clients(
+                            ws_message,
+                            client_types=[ClientType.MONITOR],
+                        )
+                except Exception as e:
+                    # Тримаємо логування мʼяким, щоб не засмічувати логи при тимчасових збоях
+                    self.logger.debug("Failed to broadcast metrics", error=str(e))
+
+                # Інтервал стріму метрик: 2 секунди (без агресивного 100мс polling)
+                await asyncio.sleep(2)
+
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            self.logger.error("Fatal error in periodic metrics broadcast", error=str(e))
+
     def get_app(self) -> FastAPI:
         """Отримання FastAPI додатка"""
         if not self.app:
@@ -1765,3 +1900,23 @@ class StreamHub:
             # Створення FastAPI додатка
             self._create_fastapi_app()
         return self.app
+
+    async def _token_rotation_loop(self, interval_minutes: int):
+        """Фоновий цикл ротації статичних токенів (AUTH_TOKEN_ACTIVE/NEXT)."""
+        try:
+            while self.is_running:
+                await asyncio.sleep(interval_minutes * 60)
+                try:
+                    active = getattr(self.settings, 'auth_token_active', None)
+                    next_t = getattr(self.settings, 'auth_token_next', None)
+                    if next_t:
+                        # Переключення next -> active
+                        self.settings.auth_token_active = next_t
+                        self.settings.auth_token_next = None
+                        if self.metrics_collector:
+                            self.metrics_collector.increment_counter("auth_token_rotations")
+                        self.logger.warning("AUTH token rotated: NEXT -> ACTIVE")
+                except Exception as e:
+                    self.logger.error("Token rotation loop error", error=str(e))
+        except asyncio.CancelledError:
+            pass

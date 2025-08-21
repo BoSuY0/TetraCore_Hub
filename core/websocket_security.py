@@ -4,14 +4,18 @@ WebSocket Security Middleware for TetraCore Hub
 """
 
 import json
+import orjson
 import time
 import asyncio
 from typing import Dict, Optional, List, Set, Any
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 import hashlib
 import hmac
 from urllib.parse import parse_qs
+from collections import defaultdict, deque
+import os
 
 from fastapi import WebSocket, WebSocketDisconnect, Query, HTTPException
 from fastapi.websockets import WebSocketState
@@ -24,14 +28,15 @@ from core.auth_manager import get_auth_manager, initialize_auth_manager_redis
 
 logger = structlog.get_logger()
 
-# Константи безпеки
-MAX_MESSAGE_SIZE = 1024 * 1024  # 1MB
-MAX_MESSAGES_PER_SECOND = 10
+# Константи безпеки (env-override)
+MAX_MESSAGE_SIZE = int(os.getenv("WS_MAX_MESSAGE_SIZE", str(256 * 1024)))
+MAX_MESSAGES_PER_SECOND = int(os.getenv("WS_MAX_MESSAGES_PER_SECOND", "10"))
 MAX_CONNECTIONS_PER_USER = 20  # Збільшено для development
 CONNECTION_TIMEOUT = 300  # 5 хвилин
 HEARTBEAT_INTERVAL = 30  # 30 секунд
 MAX_RECONNECT_ATTEMPTS = 3
 RECONNECT_WINDOW = 60  # 1 хвилина
+HANDSHAKE_WINDOW_SECONDS = 60  # Дозволене вікно часу для HMAC-handshake
 
 
 class WebSocketMessage(BaseModel):
@@ -57,28 +62,94 @@ class WebSocketMessage(BaseModel):
             raise ValueError(f'Invalid message type: {v}')
         return v
 
+
+class ClientRegistrationMessage(WebSocketMessage):
+    type: str = 'client_registration'
+    data: Dict[str, Any]
+
     @validator('data')
-    def validate_data_size(cls, v):
-        # Перевірка розміру даних
-        data_str = json.dumps(v)
-        if len(data_str) > MAX_MESSAGE_SIZE:
-            raise ValueError(f'Message too large: {len(data_str)} bytes')
+    def validate_registration(cls, v):
+        required = {"client_id", "client_type", "client_name", "client_version"}
+        missing = required - set(v.keys())
+        if missing:
+            raise ValueError(f"Missing registration fields: {', '.join(sorted(missing))}")
         return v
 
 
+class TaskResultMessage(WebSocketMessage):
+    type: str = 'task_result'
+    data: Dict[str, Any]
+
+    @validator('data')
+    def validate_result(cls, v):
+        required = {"task_id", "status"}
+        missing = required - set(v.keys())
+        if missing:
+            raise ValueError(f"Missing task_result fields: {', '.join(sorted(missing))}")
+        return v
+
+    @validator('data')
+    def validate_data_size(cls, v):
+        # Перевірка розміру даних
+        try:
+            payload = orjson.dumps(v)
+            size = len(payload)
+        except Exception:
+            data_str = json.dumps(v)
+            size = len(data_str.encode('utf-8'))
+        if size > MAX_MESSAGE_SIZE:
+            raise ValueError(f'Message too large: {size} bytes')
+        return v
+
+
+class TaskSubmitMessage(WebSocketMessage):
+    type: str = 'task_submit'
+    data: Dict[str, Any]
+
+    @validator('data')
+    def validate_fields(cls, v):
+        # Розширений дозволений набір полів для сумісності з клієнтами
+        allowed = {
+            'task_id', 'task_type', 'task_data', 'priority', 'timeout',
+            'max_retries', 'worker_requirements', 'created_at', 'executor_type',
+            'correlation_id'
+        }
+        extra = set(v.keys()) - allowed
+        if extra:
+            raise ValueError(f"Unexpected fields: {', '.join(extra)}")
+        return v
+
+
+class SubscriptionMessage(WebSocketMessage):
+    type: str
+    data: Dict[str, Any]
+
+    @validator('type')
+    def validate_type(cls, v):
+        if v not in ('subscribe', 'unsubscribe'):
+            raise ValueError('Invalid subscription action')
+        return v
+    
+    @validator('data')
+    def validate_sub_data(cls, v):
+        if 'channel' not in v:
+            raise ValueError('Missing channel')
+        return v
+
+
+@dataclass(slots=True)
 class ConnectionInfo:
     """Інформація про WebSocket з'єднання"""
-    def __init__(self, websocket: WebSocket, user_id: str, client_id: str):
-        self.websocket = websocket
-        self.user_id = user_id
-        self.client_id = client_id
-        self.connected_at = datetime.now(timezone.utc)
-        self.last_activity = datetime.now(timezone.utc)
-        self.message_count = 0
-        self.last_message_time = time.time()
-        self.subscriptions: Set[str] = set()
-        self.permissions: List[str] = []
-        self.metadata: Dict[str, Any] = {}
+    websocket: WebSocket
+    user_id: str
+    client_id: str
+    connected_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    last_activity: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    message_count: int = 0
+    last_message_time: float = field(default_factory=time.time)
+    subscriptions: Set[str] = field(default_factory=set)
+    permissions: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 class WebSocketSecurityManager:
@@ -91,40 +162,110 @@ class WebSocketSecurityManager:
         self.rate_limiters: Dict[str, List[float]] = {}
         self._cleanup_task = None
 
+        # Rate limiting для спроб підключення
+        self._conn_attempts_ip: Dict[str, deque] = defaultdict(deque)
+        self._conn_attempts_tok: Dict[str, deque] = defaultdict(deque)
+        self._conn_window_seconds: int = int(os.getenv("WS_CONN_WINDOW_SECONDS", "60"))
+        self._conn_max_per_window: int = int(os.getenv("WS_MAX_CONN_ATTEMPTS_PER_MIN", "20"))
+
+        # Анти-replay: кеш використаних nonce (in-memory; Redis використовується коли є)
+        self._used_nonces: Dict[str, float] = {}
+        self._nonce_ttl_seconds: int = int(os.getenv("WS_NONCE_TTL_SECONDS", "120"))
+
     async def authenticate_websocket(self, websocket: WebSocket, token: Optional[str]) -> Optional[Dict]:
         """Автентифікація WebSocket з'єднання"""
         import os
         import time
         from config import get_settings
-        
+
         environment = os.getenv("ENVIRONMENT", "development")
         settings = get_settings()
-        
-        # В development режимі дозволяємо підключення без токена для тестування
-        if not token:
-            if environment == "development":
-                logger.info("WebSocket connection in development mode without token - allowing guest access")
-                return {
-                    "user_id": "guest",
-                    "username": "guest", 
-                    "role": "viewer",
-                    "permissions": ["tasks.view", "clients.view"],
-                    "session_id": f"guest-{int(time.time())}"
-                }
+        client_ip = websocket.client.host if websocket.client else "unknown"
+
+        # Rate limit за IP
+        if self._is_rate_limited_ip(client_ip):
+            logger.warning("WebSocket connection rate limited (IP)", ip=client_ip)
+            await self._incr_metric("ip_rate_limited")
+            return None
+
+        # 1) Отримуємо токени з query і заголовка
+        try:
+            auth_header = websocket.headers.get("authorization")
+        except Exception:
+            auth_header = None
+
+        query_token_present = bool(token)
+        header_token = None
+        if auth_header:
+            auth_header_str = str(auth_header)
+            if auth_header_str.lower().startswith("bearer "):
+                header_token = auth_header_str.split(" ", 1)[1].strip()
             else:
-                logger.warning("WebSocket authentication failed: no token provided")
+                header_token = auth_header_str.strip()
+
+        # Перевірка Origin лише для браузерів у продакшні
+        try:
+            if environment.lower() == "production":
+                origin = websocket.headers.get("origin")
+                ua = (websocket.headers.get("user-agent") or "").lower()
+                is_browser = bool(origin) and ("mozilla" in ua or websocket.headers.get("sec-fetch-site") is not None)
+                if origin and is_browser:
+                    from config import get_settings
+                    allowed = get_settings().allowed_origins or []
+                    if allowed and "*" not in allowed and origin not in allowed:
+                        logger.warning("WebSocket Origin not allowed", origin=origin)
+                        await self._incr_metric("ws_origin_blocked")
+                        return None
+        except Exception:
+            pass
+
+        # У production забороняємо ?token=
+        if environment.lower() == "production" and query_token_present:
+            logger.warning("Query token is not allowed in production")
+            await self._incr_metric("query_token_rejected")
+            return None
+
+        token = header_token or token
+
+        # 2) Якщо досі немає токена — забороняємо доступ у будь-якому середовищі
+        if not token:
+            logger.warning("WebSocket authentication failed: no token provided")
+            return None
+
+        # Спочатку перевіряємо чи це один зі статичних токенів для сервісних клієнтів (бот/воркер)
+        static_tokens: list[str] = []
+        # Підтримка dual-token ротації
+        token_active = getattr(settings, "auth_token_active", None) or getattr(settings, "auth_token", None)
+        token_next = getattr(settings, "auth_token_next", None)
+        if token_active:
+            static_tokens.append(token_active)
+        if token_next:
+            static_tokens.append(token_next)
+
+        if token in static_tokens:
+            # Для сервісних клієнтів у проді HMAC обов'язковий
+            if environment.lower() == "production" and not (await self._validate_hmac_handshake_async(websocket, token)):
+                logger.warning("HMAC handshake validation failed")
+                await self._incr_metric("hmac_failed")
                 return None
 
-        # Спочатку перевіряємо чи це статичний AUTH_TOKEN для ботів
-        if settings.auth_token and token == settings.auth_token:
-            logger.info("WebSocket authentication successful with static AUTH_TOKEN", 
-                       token_preview=token[:8] + "..." if len(token) > 8 else token)
+            # Rate-limit за токеном (через хеш)
+            self._record_token_attempt(token)
+            if self._is_rate_limited_token(token):
+                logger.warning("WebSocket connection rate limited (token)")
+                await self._incr_metric("token_rate_limited")
+                return None
+
+            client_id = websocket.headers.get("X-Client-Id") or f"service-{int(time.time())}"
+            client_type = (websocket.headers.get("X-Client-Type") or "service").lower()
+            logger.info("WebSocket authentication successful with static token",
+                        client_id=client_id, client_type=client_type)
             return {
-                "user_id": "bot_client",
-                "username": "bot_client",
-                "role": "bot",
+                "user_id": client_id,
+                "username": client_type,
+                "role": "service",
                 "permissions": ["tasks.view", "tasks.execute", "clients.view"],
-                "session_id": f"bot-{int(time.time())}"
+                "session_id": f"svc-{int(time.time())}"
             }
 
         try:
@@ -154,23 +295,8 @@ class WebSocketSecurityManager:
             }
 
         except Exception as e:
-            # В development режимі також дозволяємо fallback на guest
-            if environment == "development":
-                logger.warning("WebSocket authentication failed, falling back to guest access", 
-                             error=str(e),
-                             token_preview=token[:20] + "..." if len(token) > 20 else token)
-                return {
-                    "user_id": "guest",
-                    "username": "guest",
-                    "role": "viewer", 
-                    "permissions": ["tasks.view", "clients.view"],
-                    "session_id": f"guest-fallback-{int(time.time())}"
-                }
-            else:
-                logger.warning("WebSocket authentication failed", 
-                             error=str(e),
-                             token_preview=token[:20] + "..." if len(token) > 20 else token)
-                return None
+            logger.warning("WebSocket authentication failed", error=str(e))
+            return None
 
     async def accept_connection(self, websocket: WebSocket, user_data: Dict) -> Optional[ConnectionInfo]:
         """Прийняття та реєстрація WebSocket з'єднання"""
@@ -243,8 +369,55 @@ class WebSocketSecurityManager:
 
         # Парсинг та валідація
         try:
-            message_data = json.loads(raw_message)
-            message = WebSocketMessage(**message_data)
+            try:
+                message_data = orjson.loads(raw_message if isinstance(raw_message, (bytes, bytearray)) else raw_message.encode("utf-8"))
+            except Exception:
+                message_data = json.loads(raw_message)
+
+            base = WebSocketMessage(**message_data)
+
+            # Строгі схеми для критичних типів з підтримкою плоского формату для task_submit
+            if base.type in ('task_submit',):
+                if 'data' not in message_data or not isinstance(message_data.get('data'), dict):
+                    allowed_fields = {
+                        'task_id', 'task_type', 'task_data', 'priority', 'timeout',
+                        'max_retries', 'worker_requirements', 'created_at', 'executor_type'
+                    }
+                    nested = {k: v for k, v in message_data.items() if k in allowed_fields}
+                    normalized = {
+                        'type': 'task_submit',
+                        'data': nested
+                    }
+                    for mk in ('timestamp', 'message_id', 'correlation_id'):
+                        if mk in message_data:
+                            normalized[mk] = message_data[mk]
+                    message = TaskSubmitMessage(**normalized)
+                else:
+                    message = TaskSubmitMessage(**message_data)
+            elif base.type in ('client_registration',):
+                # Підтримка плоского формату: загортаємо поля у data при потребі
+                if 'data' not in message_data or not isinstance(message_data.get('data'), dict):
+                    allowed_fields = {
+                        'client_id', 'client_type', 'client_name', 'client_version',
+                        'capabilities', 'max_concurrent_tasks', 'auth_token', 'client_info'
+                    }
+                    nested = {k: v for k, v in message_data.items() if k in allowed_fields}
+                    normalized = {
+                        'type': 'client_registration',
+                        'data': nested
+                    }
+                    for mk in ('timestamp', 'message_id', 'correlation_id'):
+                        if mk in message_data:
+                            normalized[mk] = message_data[mk]
+                    message = ClientRegistrationMessage(**normalized)
+                else:
+                    message = ClientRegistrationMessage(**message_data)
+            elif base.type in ('task_result',):
+                message = TaskResultMessage(**message_data)
+            elif base.type in ('subscribe', 'unsubscribe'):
+                message = SubscriptionMessage(**message_data)
+            else:
+                message = base
 
             # Оновлюємо статистику
             conn_info.last_activity = datetime.now(timezone.utc)
@@ -274,6 +447,12 @@ class WebSocketSecurityManager:
         if not conn_info:
             return False
 
+        # Ліміт кількості підписок на клієнта
+        max_subs = int(os.getenv("WS_MAX_SUBSCRIPTIONS", "50"))
+        if subscribe and len(conn_info.subscriptions) >= max_subs:
+            await self._send_error(conn_info.websocket, "Too many subscriptions")
+            return False
+
         # Перевірка дозволів на підписку
         channel_parts = channel.split(":")
         if channel_parts[0] == "tasks" and "tasks.view" not in conn_info.permissions:
@@ -298,6 +477,11 @@ class WebSocketSecurityManager:
     async def broadcast_to_channel(self, channel: str, message: Dict, exclude_client: Optional[str] = None):
         """Відправка повідомлення всім підписникам каналу"""
         sent_count = 0
+        # Обмеження на розсилку у великий канал
+        max_broadcast = int(os.getenv("WS_MAX_BROADCAST", "1000"))
+        if len(self.connections) > max_broadcast:
+            self.logger.warning("Broadcast suppressed due to size limit", connections=len(self.connections))
+            return 0
 
         for client_id, conn_info in self.connections.items():
             if client_id == exclude_client:
@@ -476,6 +660,206 @@ class WebSocketSecurityManager:
             "channels": channels,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
+
+    # ===================== INTERNAL HELPERS =====================
+    def _is_rate_limited_ip(self, ip: str) -> bool:
+        try:
+            now = time.time()
+            dq = self._conn_attempts_ip[ip]
+            while dq and now - dq[0] > self._conn_window_seconds:
+                dq.popleft()
+            dq.append(now)
+            return len(dq) > self._conn_max_per_window
+        except Exception:
+            return False
+
+    def _record_token_attempt(self, token: str) -> None:
+        try:
+            tok_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+            now = time.time()
+            dq = self._conn_attempts_tok[tok_hash]
+            while dq and now - dq[0] > self._conn_window_seconds:
+                dq.popleft()
+            dq.append(now)
+        except Exception:
+            pass
+
+    def _is_rate_limited_token(self, token: str) -> bool:
+        try:
+            tok_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+            dq = self._conn_attempts_tok.get(tok_hash)
+            if not dq:
+                return False
+            return len(dq) > self._conn_max_per_window
+        except Exception:
+            return False
+
+    def _validate_hmac_handshake(self, websocket: WebSocket, secret: str) -> bool:
+        try:
+            headers = websocket.headers
+            client_id = headers.get("X-Client-Id")
+            ts_str = headers.get("X-Timestamp")
+            nonce = headers.get("X-Nonce")
+            sig = headers.get("X-Signature")
+            client_type = headers.get("X-Client-Type") or "service"
+            client_version = headers.get("X-Client-Version") or "1.0.0"
+
+            if not all([client_id, ts_str, nonce, sig]):
+                logger.warning("Missing HMAC handshake headers")
+                return False
+
+            # Перевірка timestamp
+            try:
+                ts = int(ts_str)
+            except ValueError:
+                logger.warning("Invalid timestamp in HMAC handshake")
+                return False
+            now = int(time.time())
+            if abs(now - ts) > HANDSHAKE_WINDOW_SECONDS:
+                logger.warning("HMAC timestamp window exceeded", delta=abs(now - ts))
+                return False
+
+            # Перевірка nonce (replay protection)
+            if not self._check_and_store_nonce(nonce):
+                logger.warning("Replay detected: nonce reused")
+                return False
+
+            # Обчислення очікуваного підпису
+            canonical = f"{client_id}|{ts_str}|{nonce}|{client_type}|{client_version}"
+            expected = hmac.new(
+                key=secret.encode("utf-8"),
+                msg=canonical.encode("utf-8"),
+                digestmod=hashlib.sha256
+            ).hexdigest()
+
+            if not hmac.compare_digest(expected, sig):
+                logger.warning("Invalid HMAC signature")
+                return False
+
+            return True
+        except Exception as e:
+            logger.warning("HMAC handshake validation error", error=str(e))
+            return False
+
+    async def _validate_hmac_handshake_async(self, websocket: WebSocket, secret: str) -> bool:
+        try:
+            headers = websocket.headers
+            client_id = headers.get("X-Client-Id")
+            ts_str = headers.get("X-Timestamp")
+            nonce = headers.get("X-Nonce")
+            sig = headers.get("X-Signature")
+            client_type = headers.get("X-Client-Type") or "service"
+            client_version = headers.get("X-Client-Version") or "1.0.0"
+
+            if not all([client_id, ts_str, nonce, sig]):
+                logger.warning("Missing HMAC handshake headers")
+                return False
+
+            try:
+                ts = int(ts_str)
+            except ValueError:
+                logger.warning("Invalid timestamp in HMAC handshake")
+                return False
+            now = int(time.time())
+            if abs(now - ts) > HANDSHAKE_WINDOW_SECONDS:
+                logger.warning("HMAC timestamp window exceeded", delta=abs(now - ts))
+                return False
+
+            # Async перевірка nonce
+            if not await self._check_and_store_nonce_async(nonce):
+                logger.warning("Replay detected: nonce reused")
+                await self._incr_metric("nonce_replay")
+                return False
+
+            canonical = f"{client_id}|{ts_str}|{nonce}|{client_type}|{client_version}"
+            expected = hmac.new(
+                key=secret.encode("utf-8"),
+                msg=canonical.encode("utf-8"),
+                digestmod=hashlib.sha256
+            ).hexdigest()
+            if not hmac.compare_digest(expected, sig):
+                logger.warning("Invalid HMAC signature")
+                return False
+            return True
+        except Exception as e:
+            logger.warning("HMAC handshake validation error", error=str(e))
+            return False
+
+    def _check_and_store_nonce(self, nonce: str) -> bool:
+        try:
+            now = time.time()
+            # Якщо Redis доступний — використовуємо його
+            if self.redis_client:
+                key = f"ws_nonce:{nonce}"
+                try:
+                    res = self.redis_client.set(key, "1", ex=self._nonce_ttl_seconds, nx=True)
+                except Exception:
+                    res = None
+                # Якщо не вдалося атомарно встановити або ключ уже існує — перевірка/retry
+                try:
+                    if not res:
+                        exists = self.redis_client.get(key)
+                        if exists:
+                            return False
+                        self.redis_client.set(key, "1", ex=self._nonce_ttl_seconds)
+                except Exception:
+                    # Якщо Redis недоступний – переходимо до in-memory
+                    pass
+                else:
+                    # Якщо сюди дійшли без виключення — успіх
+                    return True
+                # Якщо сталася помилка вище – не повертаємо тут, дамо впасти на in-memory
+
+            # In-memory fallback
+            expired = [n for n, t in self._used_nonces.items() if now - t > self._nonce_ttl_seconds]
+            for n in expired:
+                self._used_nonces.pop(n, None)
+            if nonce in self._used_nonces:
+                return False
+            self._used_nonces[nonce] = now
+            return True
+        except Exception:
+            return False
+
+    async def _check_and_store_nonce_async(self, nonce: str) -> bool:
+        try:
+            now = time.time()
+            if self.redis_client:
+                key = f"ws_nonce:{nonce}"
+                try:
+                    res = await self.redis_client.set(key, "1", ex=self._nonce_ttl_seconds, nx=True)  # type: ignore
+                    if not res:
+                        return False
+                except Exception:
+                    # Якщо Redis недоступний – перевірка існування і повторна спроба
+                    try:
+                        exists = await self.redis_client.get(key)  # type: ignore
+                        if exists:
+                            return False
+                        await self.redis_client.set(key, "1", ex=self._nonce_ttl_seconds)  # type: ignore
+                    except Exception:
+                        # перехід на in-memory
+                        pass
+                else:
+                    return True
+
+            # In-memory fallback
+            expired = [n for n, t in self._used_nonces.items() if now - t > self._nonce_ttl_seconds]
+            for n in expired:
+                self._used_nonces.pop(n, None)
+            if nonce in self._used_nonces:
+                return False
+            self._used_nonces[nonce] = now
+            return True
+        except Exception:
+            return False
+
+    async def _incr_metric(self, name: str, amount: int = 1) -> None:
+        try:
+            if self.redis_client:
+                await self.redis_client.incrby(f"metrics:{name}", amount)
+        except Exception:
+            pass
 
 
 # Глобальний екземпляр менеджера

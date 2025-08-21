@@ -191,19 +191,20 @@ const SystemResourceMonitor: React.FC<{
 
   // Отримуємо реальні дані з API
   useEffect(() => {
-    const fetchData = async () => {
+    // Оскільки метрики приходять по WebSocket через StatusContext,
+    // підтримуємо тільки одноразове завантаження як стартовий fallback.
+    let cancelled = false;
+    const primeData = async () => {
       const hubMetrics = await fetchHubMetrics();
       const rtMetrics = await fetchRealTimeMetrics();
-
-      if (hubMetrics || rtMetrics) {
+      if (!cancelled && (hubMetrics || rtMetrics)) {
         setRealTimeData({ hub: hubMetrics, realTime: rtMetrics });
       }
     };
-
-    fetchData();
-    const interval = setInterval(fetchData, 5000); // Оновлюємо кожні 5 секунд
-
-    return () => clearInterval(interval);
+    primeData();
+    return () => {
+      cancelled = true;
+    };
   }, [selectedClient]);
 
   const getUsageColor = (value: number) => {
@@ -234,18 +235,12 @@ const SystemResourceMonitor: React.FC<{
 
   // Використовуємо реальні дані з API
   const systemData = resourceData || {
-    cpu_usage:
-      realTimeData?.hub?.system?.cpu_usage ||
-      realTimeData?.realTime?.performance_data?.cpu_usage ||
-      0,
-    memory_usage:
-      realTimeData?.hub?.system?.memory_usage ||
-      realTimeData?.realTime?.performance_data?.memory_usage ||
-      0,
-    disk_usage: realTimeData?.hub?.system?.disk_usage || 0,
-    network_in: realTimeData?.realTime?.performance_data?.network_io || 0,
-    network_out: realTimeData?.realTime?.performance_data?.network_io || 0,
-    uptime: realTimeData?.hub?.uptime || state.health?.uptime || 0,
+    cpu_usage: state.metrics?.system?.cpu_usage ?? realTimeData?.hub?.system?.cpu_usage ?? 0,
+    memory_usage: state.metrics?.system?.memory_usage ?? realTimeData?.hub?.system?.memory_usage ?? 0,
+    disk_usage: state.metrics?.system?.disk_usage ?? realTimeData?.hub?.system?.disk_usage ?? 0,
+    network_in: 0,
+    network_out: 0,
+    uptime: state.metrics?.system?.uptime ?? realTimeData?.hub?.uptime ?? state.health?.uptime ?? 0,
   };
 
   const resources = [

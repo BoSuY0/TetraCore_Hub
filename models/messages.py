@@ -407,7 +407,7 @@ def create_message(message_type: MessageType, **kwargs) -> Message:
     import structlog
     logger = structlog.get_logger(__name__)
 
-    logger.info("[DEBUG] create_message called",
+    logger.debug("[DEBUG] create_message called",
                 message_type=message_type,
                 kwargs_keys=list(kwargs.keys()),
                 has_task_type=("task_type" in kwargs),
@@ -417,7 +417,7 @@ def create_message(message_type: MessageType, **kwargs) -> Message:
 
     # Спеціальне логування для TASK_SUBMIT
     if message_type == MessageType.TASK_SUBMIT:
-        logger.info("[DEBUG] TASK_SUBMIT specific data",
+        logger.debug("[DEBUG] TASK_SUBMIT specific data",
                     task_type=kwargs.get("task_type", "MISSING"),
                     task_data=kwargs.get("task_data", "MISSING"),
                     all_fields=list(kwargs.keys()))
@@ -439,7 +439,7 @@ def create_message(message_type: MessageType, **kwargs) -> Message:
 
     message_class = message_classes.get(message_type, BaseMessage)
 
-    logger.info("[DEBUG] Creating message instance",
+    logger.debug("[DEBUG] Creating message instance",
                 message_class=message_class.__name__,
                 will_pass_kwargs=kwargs)
 
@@ -451,7 +451,7 @@ def create_message(message_type: MessageType, **kwargs) -> Message:
         else:
             return message_class(message_type=message_type, **kwargs)
     except Exception as e:
-        logger.error("[DEBUG] Failed to create message",
+        logger.debug("[DEBUG] Failed to create message",
                     message_class=message_class.__name__,
                     error=str(e),
                     error_type=type(e).__name__)
@@ -464,7 +464,7 @@ def parse_message(message_data: Dict[str, Any]) -> Message:
     logger = structlog.get_logger(__name__)
 
     # Логування вхідних даних
-    logger.info("[DEBUG] parse_message called",
+    logger.debug("[DEBUG] parse_message called",
                 message_data_keys=list(message_data.keys()),
                 message_type_value=message_data.get("message_type"),
                 has_task_type=("task_type" in message_data),
@@ -477,7 +477,7 @@ def parse_message(message_data: Dict[str, Any]) -> Message:
     data_copy = message_data.copy()
     data_copy.pop("message_type", None)
 
-    logger.info("[DEBUG] Creating message",
+    logger.debug("[DEBUG] Creating message",
                 message_type=message_type,
                 data_copy_keys=list(data_copy.keys()),
                 has_task_type_in_copy=("task_type" in data_copy),

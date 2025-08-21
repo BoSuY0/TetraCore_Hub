@@ -275,9 +275,16 @@ class RedisManager:
         
         # Додаткові SSL параметри для Upstash
         if redis_url.startswith('rediss://'):
+            # Дозволяємо керувати перевіркою TLS через змінні середовища
+            import os
+            ssl_check_hostname = os.getenv('REDIS_SSL_CHECK_HOSTNAME', 'true').lower() in ('1','true','yes')
+            ssl_cert_reqs_env = os.getenv('REDIS_SSL_CERT_REQS', 'required').lower()
+            # Map env to redis-py values
+            ssl_cert_reqs_value = None if ssl_cert_reqs_env in ('none','false','0') else ssl_cert_reqs_env
+
             base_kwargs.update({
-                'ssl_cert_reqs': None,  # Не вимагаємо сертифікат клієнта
-                'ssl_check_hostname': False,  # Не перевіряємо hostname для Upstash
+                'ssl_cert_reqs': ssl_cert_reqs_value,
+                'ssl_check_hostname': ssl_check_hostname,
             })
         
         # Основний клієнт для команд з покращеним пулом

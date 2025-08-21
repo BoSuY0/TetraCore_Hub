@@ -24,6 +24,7 @@ class TaskType(str, Enum):
     NOTIFICATION = "notification"
     WEBHOOK = "webhook"
     CALCULATION = "calculation"
+    SEND_MESSAGE = "send_message"
     CUSTOM = "custom"
 
     # Типи завдань для бота
@@ -75,6 +76,9 @@ class TaskMetadata(BaseModel):
     is_critical: bool = False
     is_retryable: bool = True
     is_cancellable: bool = True
+
+    # Ідемпотентність: ключ для унікальної ідентифікації запиту
+    idempotency_key: Optional[str] = None
 
     # Налаштування виконання
     execution_settings: Dict[str, Any] = Field(default_factory=dict)
@@ -316,8 +320,8 @@ class Task(BaseModel):
         self.context.completed_at = datetime.utcnow()
         self.context.add_status_change(TaskStatus.FAILED, f"Task failed: {error_message}")
 
-    def timeout(self):
-        """Завершення завдання через таймаут"""
+    def mark_timeout(self):
+        """Позначити завдання як завершене через таймаут"""
         self.context.completed_at = datetime.utcnow()
         self.context.add_status_change(TaskStatus.TIMEOUT, "Task timed out")
 
@@ -387,6 +391,59 @@ class Task(BaseModel):
             "metadata": self.metadata.model_dump()
         }
 
+    # ====== Storage-friendly serialization for overflow persistence ======
+    def to_storage(self) -> Dict[str, Any]:
+        """Мінімальне подання для збереження у Redis overflow.
+
+        Не включає контекст виконання; відновлюється як нове PENDING завдання.
+        """
+        return {
+            "task_id": self.task_id,
+            "task_type": self.task_type.value,
+            "data": self.data,
+            "priority": self.priority.value,
+            "timeout": self.timeout,
+            "max_retries": self.max_retries,
+            "retry_delay": self.retry_delay,
+            "executor_type": self.executor_type.value if hasattr(self.executor_type, 'value') else str(self.executor_type),
+            "worker_requirements": self.worker_requirements,
+            # metadata може бути великим, тому зберігаємо лише базові поля
+            "metadata": self.metadata.model_dump() if hasattr(self.metadata, 'model_dump') else {}
+        }
+
+    @classmethod
+    def from_storage(cls, stored: Dict[str, Any]) -> "Task":
+        """Відновлення Task з мінімального подання overflow."""
+        # Імпорт enum всередині щоб уникнути циклічних залежностей при імпорті
+        from models.task import TaskType, TaskPriority, ExecutorType, TaskMetadata
+        task_type = stored.get("task_type")
+        priority = stored.get("priority", "normal")
+        executor_type = stored.get("executor_type", "worker")
+
+        # Нормалізація enumів
+        task_type_enum = TaskType(task_type)
+        priority_enum = TaskPriority(priority)
+        executor_type_enum = ExecutorType(executor_type) if executor_type in [e.value for e in ExecutorType] else ExecutorType.WORKER
+
+        metadata_dict = stored.get("metadata") or {}
+        try:
+            metadata = TaskMetadata(**metadata_dict)
+        except Exception:
+            metadata = TaskMetadata()
+
+        return cls(
+            task_id=stored.get("task_id"),
+            task_type=task_type_enum,
+            data=stored.get("data") or {},
+            priority=priority_enum,
+            timeout=int(stored.get("timeout", 300)),
+            max_retries=int(stored.get("max_retries", 3)),
+            retry_delay=int(stored.get("retry_delay", 5)),
+            executor_type=executor_type_enum,
+            worker_requirements=stored.get("worker_requirements") or [],
+            metadata=metadata,
+        )
+
 
 class TaskQueue(BaseModel):
     """Черга завдань"""
@@ -417,6 +474,7 @@ class TaskQueue(BaseModel):
 
     class Config:
         arbitrary_types_allowed = True
+        extra = 'allow'
 
     def add_task(self, task: Task) -> bool:
         """Додавання завдання до черги"""

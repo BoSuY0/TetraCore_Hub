@@ -167,24 +167,48 @@ async def get_frontend_health():
 
 @frontend_api_router.get("/real-time-metrics")
 async def get_real_time_metrics():
-    """Метрики реального часу для frontend"""
-    return {
-        "timestamp": datetime.utcnow().isoformat(),
-        "tasks_per_second": random.uniform(0, 10),
-        "average_latency": random.uniform(50, 200),
-        "active_connections": random.randint(0, 5),
-        "queue_sizes": {
-            "critical": random.randint(0, 5),
-            "high": random.randint(0, 10),
-            "normal": random.randint(0, 20),
-            "low": random.randint(0, 15)
-        },
-        "performance_data": {
-            "cpu_usage": random.uniform(10, 80),
-            "memory_usage": random.uniform(30, 70),
-            "network_io": random.uniform(1024, 10240)
+    """Метрики реального часу для frontend (реальні з хабу)"""
+    try:
+        # Імпортуємо тут, щоб уникнути циклічних залежностей при імпорті модуля
+        from core.hub import StreamHub  # type: ignore
+        # Поточний FastAPI app недоступний тут напряму; цей ендпоінт використовується
+        # як standalone. Для реальних даних використовується перевизначення у register_dashboard_routes.
+        # Тож тут залишаємо бековий fallback на випадок прямого виклику без інтеграції.
+        return {
+            "timestamp": datetime.utcnow().isoformat(),
+            "tasks_per_second": 0,
+            "average_latency": 0,
+            "active_connections": 0,
+            "queue_sizes": {
+                "critical": 0,
+                "high": 0,
+                "normal": 0,
+                "low": 0,
+            },
+            "performance_data": {
+                "cpu_usage": 0,
+                "memory_usage": 0,
+                "network_io": 0,
+            },
         }
-    }
+    except Exception:
+        return {
+            "timestamp": datetime.utcnow().isoformat(),
+            "tasks_per_second": 0,
+            "average_latency": 0,
+            "active_connections": 0,
+            "queue_sizes": {
+                "critical": 0,
+                "high": 0,
+                "normal": 0,
+                "low": 0,
+            },
+            "performance_data": {
+                "cpu_usage": 0,
+                "memory_usage": 0,
+                "network_io": 0,
+            },
+        }
 
 
 @frontend_api_router.get("/system-logs")
@@ -673,24 +697,56 @@ def register_dashboard_routes(app, streamhub_instance):
 
         @app.get("/api/frontend/real-time-metrics")
         async def get_real_time_metrics_with_hub():
-            """Метрики реального часу для frontend"""
-            return {
-                "timestamp": datetime.utcnow().isoformat(),
-                "tasks_per_second": random.uniform(0, 10),
-                "average_latency": random.uniform(50, 200),
-                "active_connections": random.randint(0, 5),
-                "queue_sizes": {
-                    "critical": random.randint(0, 5),
-                    "high": random.randint(0, 10),
-                    "normal": random.randint(0, 20),
-                    "low": random.randint(0, 15)
-                },
-                "performance_data": {
-                    "cpu_usage": random.uniform(10, 80),
-                    "memory_usage": random.uniform(30, 70),
-                    "network_io": random.uniform(1024, 10240)
+            """Метрики реального часу для frontend (живі з StreamHub)"""
+            try:
+                # Отримаємо системні та hub метрики одним викликом
+                raw = await streamhub_instance.get_system_metrics()
+
+                # Спробуємо отримати також оперативні черги завдань без списку тасків
+                task_stats = {}
+                try:
+                    if streamhub_instance.task_router:
+                        task_stats = await streamhub_instance.task_router.get_queue_stats(include_tasks=False)
+                except Exception:
+                    task_stats = {}
+
+                return {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "tasks_per_second": raw.get("hub", {}).get("tasks_per_second", 0),
+                    "average_latency": raw.get("hub", {}).get("average_response_time", 0),
+                    "active_connections": raw.get("hub", {}).get("active_clients", 0),
+                    "queue_sizes": task_stats.get("queue_sizes", {
+                        "critical": 0,
+                        "high": 0,
+                        "normal": 0,
+                        "low": 0,
+                    }),
+                    "performance_data": {
+                        "cpu_usage": raw.get("system", {}).get("cpu_usage", 0),
+                        "memory_usage": raw.get("system", {}).get("memory_usage", 0),
+                        # У простому форматі даємо один агрегований network_io
+                        "network_io": raw.get("system", {}).get("network_bytes_recv", 0),
+                    },
                 }
-            }
+            except Exception as e:
+                logger.debug("Failed to build real-time metrics", error=str(e))
+                return {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "tasks_per_second": 0,
+                    "average_latency": 0,
+                    "active_connections": 0,
+                    "queue_sizes": {
+                        "critical": 0,
+                        "high": 0,
+                        "normal": 0,
+                        "low": 0,
+                    },
+                    "performance_data": {
+                        "cpu_usage": 0,
+                        "memory_usage": 0,
+                        "network_io": 0,
+                    },
+                }
     else:
         # Якщо StreamHub не доступний, реєструємо базові заглушки
         @app.get("/api/health")

@@ -6,7 +6,6 @@ Redis clustering, pipeline operations, та оптимізація pub/sub
 import asyncio
 import time
 import json
-import pickle
 from typing import Dict, List, Optional, Any, Set, Tuple, Callable, Union
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
@@ -576,12 +575,16 @@ class RedisOptimizer:
     # === Helper методи ===
 
     def _encode_value(self, value: Any) -> bytes:
-        """Кодування та компресія значення"""
-        # Серіалізація
+        """Кодування та компресія значення (безпечна серіалізація JSON)."""
+        # Серіалізація у JSON, якщо не bytes
         if isinstance(value, bytes):
             serialized = value
         else:
-            serialized = pickle.dumps(value)
+            try:
+                serialized = json.dumps(value, default=str, ensure_ascii=False).encode("utf-8")
+            except Exception:
+                # Фолбек: перетворити у рядок
+                serialized = str(value).encode("utf-8")
 
         # Компресія якщо потрібно
         if self.enable_compression and len(serialized) > COMPRESSION_THRESHOLD:
@@ -594,7 +597,7 @@ class RedisOptimizer:
         return serialized
 
     def _decode_value(self, value: bytes) -> Any:
-        """Декодування та декомпресія значення"""
+        """Декодування та декомпресія значення (тільки JSON/UTF-8)."""
         if not value:
             return None
 
@@ -602,19 +605,24 @@ class RedisOptimizer:
         if value.startswith(b'C:'):
             try:
                 decompressed = zlib.decompress(value[2:])
-                return pickle.loads(decompressed)
-            except:
+                try:
+                    return json.loads(decompressed.decode("utf-8"))
+                except Exception:
+                    return decompressed.decode("utf-8", errors="ignore")
+            except Exception:
                 logger.warning("Failed to decompress value")
-                return None
+                try:
+                    return value.decode("utf-8", errors="ignore")
+                except Exception:
+                    return None
 
-        # Звичайне декодування
+        # Звичайне декодування як JSON/рядок
         try:
-            return pickle.loads(value)
-        except:
-            # Fallback на string
+            return json.loads(value.decode("utf-8"))
+        except Exception:
             try:
-                return value.decode('utf-8')
-            except:
+                return value.decode("utf-8")
+            except Exception:
                 return value
 
     def _is_large_value(self, value: bytes) -> bool:

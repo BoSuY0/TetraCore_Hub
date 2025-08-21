@@ -1,0 +1,56 @@
+name: security-ci
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install bandit safety pip-audit gitleaks cyclonedx-bom
+
+      - name: Bandit (SAST)
+        run: |
+          bandit -q -r . -lll || true
+
+      - name: Safety (vuln DB)
+        run: |
+          safety check --full-report || true
+
+      - name: pip-audit (Advisory DB)
+        run: |
+          pip-audit -r requirements.txt || true
+
+      - name: Gitleaks (secrets scan)
+        uses: zricethezav/gitleaks-action@v2.3.6
+        with:
+          config-path: ''
+        continue-on-error: true
+
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          cyclonedx-bom -o sbom.json || true
+
+      - name: Config diagnostics (non-fatal on main)
+        run: |
+          python tools/security_config_check.py || true
+
+      - name: Secret scanner (fail on findings)
+        run: |
+          python tools/secret_scan.py --all --format json --fail-on-find --fallback-ignore
+

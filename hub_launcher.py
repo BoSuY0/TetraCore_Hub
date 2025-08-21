@@ -47,8 +47,7 @@ SAFE_ENV_VARS = [
 ]
 
 # Додаткові утиліти логування
-from core.logging_utils import RateLimiterProcessor
-
+from core.logging_utils import RateLimiterProcessor, SampleInfoProcessor
 
 class SecurityError(Exception):
     """Помилка безпеки при валідації"""
@@ -361,6 +360,9 @@ class StreamHubLauncher:
 
         # Rate limiter
         rate_limiter = RateLimiterProcessor(min_interval=float(os.getenv("LOG_RATE_LIMIT_SEC", "5")))
+        info_sampler = SampleInfoProcessor()
+        from core.logging_utils import RedactSecretsProcessor
+        redact_secrets = RedactSecretsProcessor()
 
         # Кастомний рендерер з кольорами (ваш beautiful рендерер)
         def custom_console_renderer(logger, method_name, event_dict):
@@ -397,6 +399,8 @@ class StreamHubLauncher:
             structlog.stdlib.add_log_level,
             structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S"),
             rate_limiter,
+            info_sampler,
+            redact_secrets,
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
             structlog.stdlib.ProcessorFormatter.wrap_for_formatter,  # ВАЖЛИВО для stdlib
@@ -847,6 +851,9 @@ class StreamHubLauncher:
         from fastapi import FastAPI
         from fastapi.middleware.cors import CORSMiddleware
         from core.security_integration import integrate_security
+        from web.jwks import router as jwks_router
+        from web.dashboard import register_dashboard_routes
+        from web.security_diagnostics import router as security_diag_router
         from fastapi.staticfiles import StaticFiles
         from config import get_settings
         import os
@@ -864,14 +871,14 @@ class StreamHubLauncher:
         # Отримуємо налаштування
         settings = get_settings()
 
-        # Налаштовуємо CORS
+        # Налаштовуємо CORS (звужена конфігурація)
         app.add_middleware(
             CORSMiddleware,
             allow_origins=settings.allowed_origins,
             allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-            expose_headers=["*"]
+            allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type", "X-Requested-With", "X-Correlation-Id"],
+            expose_headers=["X-Total-Count", "X-Page-Count", "X-API-Version"]
         )
 
         # Інтеграція безпеки
@@ -880,6 +887,23 @@ class StreamHubLauncher:
             redis_client=None,  # Буде встановлено після ініціалізації
             require_auth=settings.require_authentication,
         )
+
+        # JWKS endpoint (always)
+        app.include_router(jwks_router)
+
+        # Security diagnostics endpoint тільки у development
+        try:
+            if settings.is_development():
+                app.include_router(security_diag_router)
+        except Exception:
+            pass
+
+        # Реєструємо базові fallback-роути для API (health/metrics/clients/tasks)
+        # Це потрібно для тестового середовища, де StreamHub ще не ініціалізований
+        try:
+            register_dashboard_routes(app, streamhub_instance=None)
+        except Exception:
+            pass
 
         # Підключення статичних файлів буде в run_backend після реєстрації API роутів
         # щоб уникнути перехоплення API запитів SPA fallback'ом
@@ -984,39 +1008,47 @@ class StreamHubLauncher:
                 try:
                     if system in ["Linux", "Darwin"]:  # Linux або macOS
                         # Використовуємо lsof для пошуку процесу
-                        cmd = f"lsof -ti :{port}"
-                        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                        # Шукаємо PID процеса без shell=True
+                        result = subprocess.run(["/usr/sbin/lsof", "-ti", f":{port}"], capture_output=True, text=True)
                         if result.stdout.strip():
                             pid = result.stdout.strip()
                             self.logger.info(f"🔨 Знайдено процес PID {pid} на порту {port}")
                             # Завершуємо процес
-                            subprocess.run(f"kill {pid}", shell=True)
+                            subprocess.run(["kill", f"{pid}"])
                             await asyncio.sleep(0.5)
                             # Перевіряємо чи процес завершився
-                            if subprocess.run(f"kill -0 {pid} 2>/dev/null", shell=True).returncode != 0:
+                            if subprocess.run(["bash", "-lc", f"kill -0 {pid} 2>/dev/null"]).returncode != 0:
                                 self.logger.info(f"✅ Процес {pid} завершено, порт {port} звільнено")
                             else:
                                 # Примусове завершення
-                                subprocess.run(f"kill -9 {pid}", shell=True)
+                                subprocess.run(["kill", "-9", f"{pid}"])
                                 self.logger.info(f"⚡ Процес {pid} примусово завершено")
                             await asyncio.sleep(0.5)
                             return
                     elif system == "Windows":
-                        # Для Windows використовуємо netstat
-                        cmd = f"netstat -ano | findstr :{port}"
-                        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                        # Для Windows використовуємо netstat без shell і без пайпів
+                        # Валідація порту як числового значення
+                        try:
+                            port_str = str(int(port))
+                        except Exception:
+                            self.logger.error(f"Невалідний номер порту: {port}")
+                            return
+                        # Запускаємо netstat та парсимо вивід у Python
+                        result = subprocess.run(["netstat", "-ano"], capture_output=True, text=True)
                         if result.stdout:
-                            # Витягуємо PID з виводу netstat
-                            lines = result.stdout.strip().split('\n')
+                            lines = result.stdout.strip().splitlines()
                             for line in lines:
                                 parts = line.split()
-                                if len(parts) >= 5 and f":{port}" in parts[1]:
+                                # Очікуваний формат: Proto Local Address Foreign Address State PID
+                                if len(parts) >= 5:
+                                    local_addr = parts[1]
                                     pid = parts[-1]
-                                    self.logger.info(f"🔨 Знайдено процес PID {pid} на порту {port}")
-                                    subprocess.run(f"taskkill /PID {pid} /F", shell=True)
-                                    self.logger.info(f"✅ Процес {pid} завершено")
-                                    await asyncio.sleep(0.5)
-                                    return
+                                    if f":{port_str}" in local_addr:
+                                        self.logger.info(f"🔨 Знайдено процес PID {pid} на порту {port_str}")
+                                        subprocess.run(["taskkill", "/PID", str(pid), "/F"]) 
+                                        self.logger.info(f"✅ Процес {pid} завершено")
+                                        await asyncio.sleep(0.5)
+                                        return
                 except Exception as e:
                     self.logger.error(f"❌ Помилка при спробі звільнити порт: {e}")
         else:
@@ -1135,8 +1167,11 @@ class StreamHubLauncher:
             # Створюємо uvicorn config з log_config=None щоб уникнути конфлікту з structlog
             # Логи Uvicorn будуть propagate через root logger до structlog
             try:
-                config = uvicorn.Config(
-                    app,
+                certfile = os.getenv("APP_TLS_CERT")
+                keyfile = os.getenv("APP_TLS_KEY")
+
+                uvicorn_kwargs = dict(
+                    app=app,
                     host=host,
                     port=port,
                     reload=reload,
@@ -1144,8 +1179,15 @@ class StreamHubLauncher:
                     log_config=None,
                     access_log=False,
                     use_colors=False,
-                    loop="asyncio"
+                    loop="asyncio",
                 )
+
+                if certfile and keyfile:
+                    self.logger.info("\ud83d\udd12 TLS увімкнено: використовую APP_TLS_CERT/APP_TLS_KEY")
+                    uvicorn_kwargs["ssl_certfile"] = certfile
+                    uvicorn_kwargs["ssl_keyfile"] = keyfile
+
+                config = uvicorn.Config(**uvicorn_kwargs)
             except KeyError as e:
                 self.logger.error(f"Помилка конфігурації Uvicorn: відсутній ключ {e}")
                 raise

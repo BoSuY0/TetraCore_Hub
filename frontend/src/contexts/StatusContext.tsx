@@ -537,7 +537,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
     };
 
     // Додаємо токен авторизації.
-    const token = authState.sessionId || localStorage.getItem("sessionId");
+    const token = authState.sessionId;
     if (
       token &&
       token !== "undefined" &&
@@ -571,10 +571,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
         if (response.status === 401) {
           console.log(`🔒 Authentication failed for ${url} - redirecting to login`);
-          // Видаляємо автоматичний refresh, натомість очищаємо дані та перенаправляємо
-          localStorage.removeItem("sessionId");
-          localStorage.removeItem("accessToken");
-          localStorage.removeItem("refreshToken");
+          // Перенаправляємо без маніпуляції localStorage (токени не зберігаються у storage)
           window.location.href = "/login";
           throw new Error("Authentication required");
         } else if (response.status === 429) {
@@ -821,9 +818,9 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       return;
     }
 
-    // Отримуємо токен із localStorage або auth state
-    let sessionId = localStorage.getItem("sessionId");
-    let tokenToCheck = sessionId || authState.sessionId;
+    // Отримуємо токен лише з auth state
+    let sessionId = authState.sessionId;
+    let tokenToCheck = sessionId;
     
     // Якщо токен відсутній, не можемо підключитися
     if (!tokenToCheck) {
@@ -860,9 +857,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
         },
       });
       // Очищаємо токени та перенаправляємо на логін
-      localStorage.removeItem("sessionId");
-      localStorage.removeItem("accessToken");
-      localStorage.removeItem("refreshToken");
+      // Токени не зберігаються у localStorage, просто редіректимо на логін
       window.location.href = "/login";
       return;
     }
@@ -901,10 +896,8 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       }
 
       console.warn(
-        `⚠️ Session ID mismatch (attempt ${sessionSyncAttemptsRef.current}/${maxSessionSyncAttempts}), updating localStorage with current sessionId`,
+        `⚠️ Session ID mismatch (attempt ${sessionSyncAttemptsRef.current}/${maxSessionSyncAttempts}), using AuthContext sessionId`,
       );
-      // Оновлюємо localStorage з поточним sessionId з auth стану
-      localStorage.setItem("sessionId", authState.sessionId);
       // Повторно викликаємо connectWebSocket з оновленим токеном після короткої затримки
       isConnectingRef.current = false;
       setTimeout(() => connectWebSocket(), 500);
@@ -1057,20 +1050,12 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
             break;
 
           case "metrics_update":
-            console.log("📊 Received metrics update:", message);
+            // Живі системні/хаб метрики через WS
             if (message.data) {
-              // Фільтруємо метрики для клієнтів, які їх підтримують
-              const validMetrics = { ...message.data };
-              if (validMetrics.clients) {
-                // Логуємо тільки якщо є проблемні клієнти
-                const problematicClients = Object.keys(validMetrics.clients).filter(
-                  clientId => !validMetrics.clients[clientId] || Object.keys(validMetrics.clients[clientId]).length === 0
-                );
-                if (problematicClients.length > 0) {
-                  console.debug("📊 Клієнти без метрик:", problematicClients);
-                }
-              }
-              dispatch({ type: "SET_METRICS", payload: validMetrics });
+              const payload = message.data;
+              dispatch({ type: "SET_METRICS", payload });
+              lastWebSocketUpdateRef.current = new Date();
+              startWebSocketTimeout();
             }
             break;
 
@@ -1284,7 +1269,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
             }
             
             // Спробуємо оновити токени
-            const response = await fetch(buildUrl("/auth/refresh"), {
+            const response = await fetch(buildUrl("/api/auth/refresh"), {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
@@ -1418,7 +1403,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       const shouldReconnect =
         mountedRef.current &&
         authState.isAuthenticated &&
-        localStorage.getItem("sessionId") &&
+        authState.sessionId &&
         state.reconnectInfo.attempts < state.reconnectInfo.maxAttempts &&
         (error.isRetryable || isNetworkError || isTemporaryError);
 
@@ -1462,7 +1447,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
             !socket &&
             !isConnectingRef.current &&
             authState.isAuthenticated &&
-            localStorage.getItem("sessionId")
+            authState.sessionId
           ) {
             console.log(
               `🔄 Attempting WebSocket reconnection (${nextAttempt}/${state.reconnectInfo.maxAttempts})... (Previous error: ${error.type}, code ${error.code})`,
@@ -1476,7 +1461,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
                 hasSocket: !!socket,
                 connecting: isConnectingRef.current,
                 authenticated: authState.isAuthenticated,
-                hasSession: !!localStorage.getItem("sessionId")
+                hasSession: !!authState.sessionId
               }
             );
           }
@@ -1727,7 +1712,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
           mountedRef.current &&
           authState.isAuthenticated &&
           !isPausedRef.current &&
-          localStorage.getItem("sessionId")
+          authState.sessionId
         ) {
           startDataRefresh();
         }
@@ -1752,7 +1737,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
     const authChanged = lastAuthStateRef.current !== authState.isAuthenticated;
     lastAuthStateRef.current = authState.isAuthenticated;
 
-    if (authState.isAuthenticated && localStorage.getItem("sessionId")) {
+    if (authState.isAuthenticated && authState.sessionId) {
       if (authChanged || !socket) {
         connectWebSocket();
       }

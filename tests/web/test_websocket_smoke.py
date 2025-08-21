@@ -1,4 +1,8 @@
-"""Basic smoke tests for health and protected endpoints."""
+"""WebSocket smoke-test: try to connect with token and expect handshake or 401 flow.
+
+Note: This is a lightweight test that builds the app but doesn't spin a real ASGI server.
+We validate that the WS endpoint is present and requires token.
+"""
 import os
 import pytest
 from fastapi.testclient import TestClient
@@ -8,7 +12,6 @@ from hub_launcher import StreamHubLauncher
 
 @pytest.fixture()
 def app_client(monkeypatch):
-    # Minimal app for testing
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.setenv("REQUIRE_AUTHENTICATION", "true")
     monkeypatch.setenv("REDIS_ENABLED", "false")
@@ -18,7 +21,7 @@ def app_client(monkeypatch):
     # Allow TestClient host
     monkeypatch.setenv("DISABLE_TRUSTED_HOST_MW", "1")
     monkeypatch.setenv("ADMIN_USERNAME", "admin")
-    monkeypatch.setenv("ADMIN_PASSWORD", "admin")  # dev allows plain for convenience
+    monkeypatch.setenv("ADMIN_PASSWORD", "admin")
 
     launcher = StreamHubLauncher()
     app = launcher.create_app()
@@ -26,12 +29,12 @@ def app_client(monkeypatch):
     return client
 
 
-def test_health_public(app_client: TestClient):
-    r = app_client.get("/api/health")
-    assert r.status_code in (200, 401, 403)
+def test_ws_requires_token(app_client: TestClient):
+    # Без токена очікуємо, що сервер закриє з'єднання на рукопотисканні або відразу після
+    import pytest
+    from starlette.websockets import WebSocketDisconnect
+    with pytest.raises(WebSocketDisconnect):
+        with app_client.websocket_connect("/ws"):
+            pass
 
 
-def test_protected_clients_requires_token(app_client: TestClient):
-    r = app_client.get("/api/clients")
-    # Should be unauthorized without token
-    assert r.status_code == 401

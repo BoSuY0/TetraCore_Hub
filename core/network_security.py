@@ -36,12 +36,13 @@ CONNECTION_LIMIT_PER_IP = 20  # Максимум одночасних з'єдн�
 REQUEST_SIZE_LIMIT = 10 * 1024 * 1024  # 10MB максимальний розмір запиту
 
 # Security headers
+# ВАЖЛИВО: CSP конфігурується централізовано у core/security_headers.py.
+# Тут не встановлюємо CSP, щоб уникнути перезапису суворіших політик.
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "X-XSS-Protection": "1; mode=block",
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
-    "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';",
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "Permissions-Policy": "geolocation=(), microphone=(), camera=()"
 }
@@ -105,46 +106,61 @@ class NetworkSecurityManager:
 
     def setup_cors(self, app):
         """Налаштування CORS middleware"""
+        # У production заборонити wildcard та перевірити ALLOWED_ORIGINS з ENV
+        env = os.getenv("ENVIRONMENT", "development").lower()
+        env_origins = os.getenv("ALLOWED_ORIGINS", "").strip()
+        origins = self.cors_origins
+        if env_origins:
+            origins = [o.strip() for o in env_origins.split(",") if o.strip()]
+        if env == "production":
+            # Викидаємо '*' якщо потрапило з конфігурації
+            origins = [o for o in origins if o != "*"] or []
+            if not origins:
+                import structlog
+                structlog.get_logger().warning("ALLOWED_ORIGINS is empty in production; all cross-origin requests will be blocked")
         app.add_middleware(
             CORSMiddleware,
-            allow_origins=self.cors_origins,
+            allow_origins=origins,
             allow_credentials=True,
             allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            allow_headers=["*"],
-            expose_headers=["X-Total-Count", "X-Page-Count"],
+            allow_headers=["Authorization", "Content-Type", "X-Requested-With", "X-Correlation-Id"],
+            expose_headers=["X-Total-Count", "X-Page-Count", "X-API-Version"],
             max_age=3600
         )
 
     def get_client_ip(self, request: Request) -> str:
-        """Отримання реальної IP адреси клієнта"""
-        # Перевіряємо заголовки в порядку пріоритету
-        headers_to_check = [
-            "X-Real-IP",
-            "X-Forwarded-For",
-            "CF-Connecting-IP",  # Cloudflare
-            "True-Client-IP",    # Cloudflare Enterprise
-            "X-Client-IP"
-        ]
+        """Отримання реальної IP адреси клієнта.
+        Довіряємо X-Forwarded-* тільки якщо запит прийшов від довіреного проксі (TRUSTED_PROXY_IPS).
+        """
+        trusted = set(ip.strip() for ip in os.getenv("TRUSTED_PROXY_IPS", "").split(",") if ip.strip())
+        client_host = request.client.host if request.client else None
 
-        for header in headers_to_check:
-            ip = request.headers.get(header)
-            if ip:
-                # X-Forwarded-For може містити список IP
-                if header == "X-Forwarded-For":
-                    ip = ip.split(",")[0].strip()
+        def _validate(ip_str: str) -> bool:
+            try:
+                ipaddress.ip_address(ip_str)
+                return True
+            except ValueError:
+                return False
 
-                # Валідація IP
-                try:
-                    ipaddress.ip_address(ip)
-                    return ip
-                except ValueError:
+        # Якщо запит прийшов від довіреного проксі — читаємо заголовки у пріоритеті
+        if client_host and client_host in trusted:
+            headers_to_check = [
+                "X-Forwarded-For",
+                "X-Real-IP",
+                "CF-Connecting-IP",
+                "True-Client-IP",
+                "X-Client-IP",
+            ]
+            for header in headers_to_check:
+                raw = request.headers.get(header)
+                if not raw:
                     continue
+                ip = raw.split(",")[0].strip() if header == "X-Forwarded-For" else raw.strip()
+                if _validate(ip):
+                    return ip
 
-        # Fallback на request.client
-        if request.client:
-            return request.client.host
-
-        return "unknown"
+        # Fallback: довіряємо безпосередньому клієнту (не проксі або недовірений проксі)
+        return client_host or "unknown"
 
     async def check_rate_limit(self, identifier: str, custom_limit: Optional[int] = None) -> bool:
         """Перевірка rate limit"""
@@ -347,7 +363,9 @@ class NetworkSecurityManager:
     def add_security_headers(self, response: Response):
         """Додавання security headers до відповіді"""
         for header, value in SECURITY_HEADERS.items():
-            response.headers[header] = value
+            # Не перезаписуємо існуючі заголовки, щоб зберегти налаштування з security_headers_middleware
+            if header not in response.headers:
+                response.headers[header] = value
 
     async def log_request(self, request: Request, response: Response, duration: float):
         """Логування запиту для аналізу"""

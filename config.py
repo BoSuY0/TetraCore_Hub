@@ -76,8 +76,8 @@ class Settings:
     # Role-based permissions
     role_permissions: dict = None
 
-    # Redis налаштування
-    redis_enabled: bool = False  # За замовчуванням вимкнено для безпеки
+    # Redis налаштування (Redis завжди увімкнений)
+    redis_enabled: bool = True
     redis_url: str = ""  # Має бути встановлено через REDIS_URL
     redis_tls_enabled: bool = True  # За замовчуванням TLS для продакшн
     redis_ssl_cert_reqs: str = "required"
@@ -126,6 +126,10 @@ class Settings:
     # Безпека
     allowed_origins: List[str] = None
     auth_token: Optional[str] = None
+    auth_token_active: Optional[str] = None
+    auth_token_next: Optional[str] = None
+    enable_token_rotation: bool = False
+    token_rotation_interval_minutes: int = 1440
     rate_limit_requests: int = 1000
 
     # Оптимізація продуктивності
@@ -202,12 +206,13 @@ class Settings:
         # ПОТІМ перевіряємо Heroku тільки якщо ENVIRONMENT не встановлено явно
         if env_name == self.environment.value and is_heroku_environment():
             self.environment = Environment.PRODUCTION
-            # Redis увімкнено тільки якщо є URL
-            self.redis_enabled = bool(os.getenv("REDIS_URL"))
+            # Redis завжди увімкнений; наявність URL визначає працездатність клієнта
+            self.redis_enabled = True
             self.debug = False
 
         # Інші налаштування
-        self.redis_enabled = os.getenv("REDIS_ENABLED", str(self.redis_enabled)).lower() in ("true", "1", "yes")
+        # Ігноруємо REDIS_ENABLED: Redis завжди увімкнений
+        self.redis_enabled = True
         self.redis_url = os.getenv("REDIS_URL", self.redis_url)
         self.redis_tls_enabled = os.getenv("REDIS_TLS_ENABLED", str(self.redis_tls_enabled)).lower() in ("true", "1", "yes")
         self.redis_ssl_cert_reqs = os.getenv("REDIS_SSL_CERT_REQS", self.redis_ssl_cert_reqs)
@@ -226,6 +231,14 @@ class Settings:
         self.host = os.getenv("HOST", self.host)
         self.debug = os.getenv("DEBUG", str(self.debug)).lower() in ("true", "1", "yes")
         self.auth_token = os.getenv("AUTH_TOKEN", self.auth_token)
+        # Dual-token ротація
+        self.auth_token_active = os.getenv("AUTH_TOKEN_ACTIVE", self.auth_token_active)
+        self.auth_token_next = os.getenv("AUTH_TOKEN_NEXT", self.auth_token_next)
+        self.enable_token_rotation = os.getenv("ENABLE_TOKEN_ROTATION", str(self.enable_token_rotation)).lower() in ("true","1","yes")
+        try:
+            self.token_rotation_interval_minutes = int(os.getenv("TOKEN_ROTATION_INTERVAL_MINUTES", str(self.token_rotation_interval_minutes)))
+        except Exception:
+            pass
         self.require_authentication = os.getenv("REQUIRE_AUTHENTICATION", str(self.require_authentication)).lower() in ("true", "1", "yes")
 
         log_level_name = os.getenv("LOG_LEVEL", self.log_level.value)
@@ -300,7 +313,7 @@ class Settings:
     def get_redis_config(self) -> dict:
         """Отримання конфігурації Redis"""
         return {
-            "enabled": self.redis_enabled,
+            "enabled": True,
             "url": self.redis_url,
             "tls_enabled": self.redis_tls_enabled,
             "ssl_cert_reqs": self.redis_ssl_cert_reqs,
@@ -427,7 +440,7 @@ class Settings:
                 "websocket": self.get_websocket_url()
             },
             "redis": {
-                "enabled": self.redis_enabled,
+            "enabled": True,
                 "url_safe": self._safe_redis_url()
             },
             "auth": {
@@ -478,7 +491,7 @@ def update_settings(**kwargs) -> Settings:
 DEVELOPMENT_OVERRIDES = {
     "debug": True,
     "log_level": LogLevel.DEBUG,
-    "redis_enabled": False,
+    "redis_enabled": True,
     "enable_metrics": True
 }
 
@@ -493,7 +506,7 @@ PRODUCTION_OVERRIDES = {
 TESTING_OVERRIDES = {
     "debug": True,
     "log_level": LogLevel.DEBUG,
-    "redis_enabled": False,
+    "redis_enabled": True,
     "enable_metrics": False,
 }
 

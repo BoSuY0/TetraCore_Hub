@@ -69,6 +69,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ username, password }),
+          credentials: "include",
         });
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
@@ -93,11 +94,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
             error: null,
             isLoading: false,
           });
-
-          // Зберігаємо access_token як sessionId для WebSocket
-          localStorage.setItem("sessionId", data.tokens.access_token);
-          localStorage.setItem("accessToken", data.tokens.access_token);
-          localStorage.setItem("refreshToken", data.tokens.refresh_token);
           return true;
         } else {
           throw new Error(data.message || "Login failed");
@@ -138,7 +134,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const logout = useCallback(async (): Promise<void> => {
     setAuth((prev) => ({ ...prev, isLoading: true }));
     try {
-      const sessionId = localStorage.getItem("sessionId");
+      const sessionId = auth.sessionId;
       if (!sessionId) {
         // Якщо немає сесії, просто очищаємо стан
         clearAuthData();
@@ -171,60 +167,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   // Функція оновлення токена (БЛОКОВАНА для автоматичного виклику)
   // Залишена тільки для ручного виклику через UI (кнопка "Оновити сесію")
   const refreshToken = useCallback(async (): Promise<boolean> => {
-    logDevWarning("⚠️ Automatic token refresh is disabled for security");
-    logDevWarning("⚠️ Please login again to continue");
-    
-    // Блокуємо автоматичне оновлення для безпеки
-    await logout();
-    return false;
-    
-    /* ПРИМІТКА: Код нижче закоментовано для безпеки
-    
-    const refresh = localStorage.getItem("refreshToken");
-    if (!refresh) {
-      logDevWarning("⚠️ Відсутній refresh token для оновлення");
-      return false;
-    }
+    const csrf = (document.cookie || "")
+      .split(";")
+      .map((s) => s.trim())
+      .find((c) => c.startsWith("csrf_token="))
+      ?.split("=")[1];
+    if (!csrf) return false;
     try {
       const response = await fetch("/api/auth/refresh", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh_token: refresh }),
+        headers: { "X-CSRF-Token": csrf },
+        credentials: "include",
       });
-      
-      if (!response.ok) {
-        logDevWarning("⚠️ Не вдалося оновити токен, потрібен релогін");
-        return false;
-      }
-      
+      if (!response.ok) return false;
       const data = await response.json();
-      if (data.tokens?.access_token) {
-        const newSessionId = data.tokens.access_token;
-        localStorage.setItem("accessToken", newSessionId);
-        localStorage.setItem("sessionId", newSessionId);
-        setAuth((prev) => ({
-          ...prev,
-          sessionId: newSessionId,
-          user: prev.user ? { ...prev.user, sessionId: newSessionId } : prev.user,
-        }));
-        logDevWarning("✅ Токен оновлено успішно");
-        return true;
-      }
-      return false;
-    } catch (error) {
-      if (error instanceof TypeError && error.message.includes("NetworkError")) {
-        logDevWarning("⚠️ Мережева помилка при оновленні токена");
-        return false;
-      }
-      logDevError("❌ Помилка оновлення токена:", error);
+      const newAccess = data?.tokens?.access_token;
+      if (!newAccess) return false;
+      setAuth((prev) => ({
+        ...prev,
+        isAuthenticated: true,
+        sessionId: newAccess,
+        user: prev.user ? { ...prev.user, sessionId: newAccess } : prev.user,
+        isLoading: false,
+      }));
+      return true;
+    } catch (e) {
       return false;
     }
-    */
   }, []);
 
   // Валідація сесії
   const validateSession = useCallback(async (): Promise<boolean> => {
-    const sessionId = localStorage.getItem("sessionId");
+    const sessionId = auth.sessionId;
     if (!sessionId) {
       return false;
     }
@@ -288,7 +262,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       await logout();
       return false;
     }
-  }, []); // Видаляємо залежність від refreshToken
+  }, [auth.sessionId]); // Видаляємо залежність від refreshToken
 
   // Перевірка сесії при завантаженні (тільки один раз)
   useEffect(() => {
@@ -296,7 +270,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       // Додаємо невелику затримку щоб уникнути race condition з іншими запитами
       await new Promise(resolve => setTimeout(resolve, 500));
       
-      const sessionId = localStorage.getItem("sessionId");
+      const sessionId = auth.sessionId;
       const isLoginPage = window.location.pathname === "/login";
       
       if (sessionId) {
@@ -320,7 +294,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     };
 
     checkSession();
-  }, []); // Порожній масив залежностей - виконується тільки при монтуванні
+  }, [auth.sessionId]); // Виконується при зміні сесії
 
   // Очищення помилки
   const clearError = useCallback(() => {
@@ -330,48 +304,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   // Функція для оновлення access_token через refresh_token (БЛОКОВАНА)
   // Залишена тільки для ручного виклику через UI
   const refreshAccessToken = async (): Promise<string | null> => {
-    logDevWarning("⚠️ Automatic access token refresh is disabled for security");
-    logDevWarning("⚠️ Please login again to continue");
-    
-    // Блокуємо автоматичне оновлення та виконуємо logout
-    await logout();
-    return null;
-    
-    /* ПРИМІТКА: Код нижче закоментовано для безпеки
-    
-    const refreshTokenStored = localStorage.getItem("refreshToken");
-    if (!refreshTokenStored) {
-      logDevWarning("⚠️ Відсутній refresh token для оновлення access token");
-      return null;
-    }
-    try {
-      const response = await fetch("/api/auth/refresh", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh_token: refreshTokenStored }),
-      });
-      if (!response.ok) {
-        logDevWarning("⚠️ Не вдалося оновити access token");
-        return null;
-      }
-      const data = await response.json();
-      if (data.success && data.tokens && data.tokens.access_token) {
-        localStorage.setItem("sessionId", data.tokens.access_token);
-        localStorage.setItem("accessToken", data.tokens.access_token);
-        setAuth((prev) => ({
-          ...prev,
-          sessionId: data.tokens.access_token,
-          isAuthenticated: true,
-        }));
-        logDevWarning("✅ Access token оновлено успішно");
-        return data.tokens.access_token;
-      }
-      return null;
-    } catch (e) {
-      logDevError("❌ Помилка при оновленні access token:", e);
-      return null;
-    }
-    */
+    const ok = await refreshToken();
+    return ok ? auth.sessionId : null;
   };
 
   return (

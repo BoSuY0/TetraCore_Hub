@@ -37,14 +37,8 @@
       "required": false
     },
     "REDIS_URL": {
-      "description": "URL для підключення до Redis",
-      "value": "redis://default:yiyAwEptyrnORRT5QQY4Zum3m7j5c4Aj@redis-14708.c78.eu-west-1-2.ec2.redns.redis-cloud.com:14708",
+      "description": "URL для підключення до Redis (встановіть у Heroku Config Vars)",
       "required": true
-    },
-    "REDIS_ENABLED": {
-      "description": "Увімкнути Redis",
-      "value": "true",
-      "required": false
     },
     "AUTH_TOKEN": {
       "description": "Токен аутентифікації (опціонально)",

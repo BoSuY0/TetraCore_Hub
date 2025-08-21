@@ -73,7 +73,8 @@ class SecurityHeadersManager:
             # Cross-Origin políticas
             "Cross-Origin-Embedder-Policy": "require-corp",
             "Cross-Origin-Opener-Policy": "same-origin",
-            "Cross-Origin-Resource-Policy": "same-origin"
+            "Cross-Origin-Resource-Policy": "same-origin",
+            "X-Permitted-Cross-Domain-Policies": "none"
         }
 
         # HSTS тільки для production
@@ -88,8 +89,8 @@ class SecurityHeadersManager:
         """Отримання CSP директив"""
         return {
             "default-src": ["'self'"],
-            "script-src": ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-            "style-src": ["'self'", "'unsafe-inline'"],
+            "script-src": ["'self'"],
+            "style-src": ["'self'"],
             "img-src": ["'self'", "data:", "https:"],
             "font-src": ["'self'", "data:"],
             "connect-src": ["'self'"],
@@ -281,6 +282,10 @@ class SecurityHeadersManager:
             response.headers["Content-Security-Policy-Report-Only"] = csp
         else:
             response.headers["Content-Security-Policy"] = csp
+
+        # Заборона індексації конфіденційних сторінок
+        if request.url.path.startswith(('/dashboard', '/api')):
+            response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive, nosnippet"
 
         # Додаткові headers для API endpoints
         if request.url.path.startswith("/api/"):

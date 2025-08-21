@@ -76,12 +76,11 @@ def mock_redis_manager(monkeypatch):
     mock_instance = MockRedisManager()
 
     # The patch target depends on where RedisManager is imported.
-    # Assuming it's in 'core.redis_manager.RedisManager'
-    # We might need to patch it in multiple places if it's imported directly elsewhere.
-    monkeypatch.setattr("core.redis_manager.RedisManager", lambda: mock_instance)
+    # Updated to the refactored path 'core.cache.redis.RedisManager'
+    monkeypatch.setattr("core.cache.redis.RedisManager", lambda: mock_instance)
     
     # If there's a singleton getInstance pattern, we patch that.
     if hasattr(mock_instance, 'get_instance'):
-        monkeypatch.setattr("core.redis_manager.RedisManager.get_instance", AsyncMock(return_value=mock_instance))
+        monkeypatch.setattr("core.cache.redis.RedisManager.get_instance", AsyncMock(return_value=mock_instance))
         
     return mock_instance 

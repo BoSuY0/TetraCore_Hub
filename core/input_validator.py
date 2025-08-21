@@ -153,8 +153,11 @@ class InputValidator:
                 if prev == value:
                     break
                     
-            # Remove all HTML tags and dangerous patterns
-            value = bleach.clean(value, tags=[], strip=True)
+            # Екрануємо HTML, а не видаляємо повністю, щоб зберегти явні мітки
+            # Наприклад, <script> стає &lt;script&gt;
+            # Екрануємо всі HTML теги замість видалення, щоб явно бачити небезпечний контент
+            # Наприклад, <script> стає &lt;script&gt;
+            value = bleach.clean(value, tags=[], strip=False)
             
             # Additional sanitization for event handlers and javascript
             dangerous_patterns = [

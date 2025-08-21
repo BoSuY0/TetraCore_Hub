@@ -247,49 +247,18 @@ const AdvancedProgress: React.FC<AdvancedProgressProps> = ({
 const SystemHealthWidget: React.FC = () => {
   const { t } = useI18n();
   const { auth } = useAuth();
-  const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
-
-  useEffect(() => {
-    const fetchMetrics = async () => {
-      // Only fetch if user is authenticated
-      if (!auth.isAuthenticated) {
-        return;
-      }
-      
-      try {
-        const sessionId = localStorage.getItem('sessionId');
-        const headers: HeadersInit = {
-          'Content-Type': 'application/json',
-        };
-        
-        if (sessionId) {
-          headers.Authorization = `Bearer ${sessionId}`;
-        }
-        
-        const response = await fetch(
-          buildUrl("/api/frontend/real-time-metrics"),
-          {
-            headers,
-          }
-        );
-        
-        if (response.ok) {
-          const data = await response.json();
-          setMetrics(data.performance_data);
-        } else if (response.status === 401) {
-          // Redirect to login on authentication failure
-          window.location.href = '/';
-        }
-      } catch (error) {
-        console.error("❌ Failed to fetch real-time metrics:", error);
-        // Не встановлюємо метрики як null при помилці, залишаємо попередні значення
-      }
-    };
-
-    fetchMetrics();
-    const interval = setInterval(fetchMetrics, 5000);
-    return () => clearInterval(interval);
-  }, [auth.isAuthenticated]);
+  const { state } = useStatus();
+  // Використовуємо живі метрики зі StatusContext (оновлюються через WebSocket)
+  const metrics = useMemo<SystemMetrics | null>(() => {
+    const sys = state.metrics?.system;
+    if (!sys) return null;
+    return {
+      cpu_usage: sys.cpu_usage || 0,
+      memory_usage: sys.memory_usage || 0,
+      network_in: 0,
+      network_out: 0,
+    } as any;
+  }, [state.metrics?.system]);
 
   const getHealthStatus = (cpu: number, memory: number) => {
     const safeCpu = cpu || 0;

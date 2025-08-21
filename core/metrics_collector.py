@@ -212,6 +212,16 @@ class MetricsCollector:
 
             # Створення базових метрик
             self._initialize_default_metrics()
+            # Реєструємо лічильники безпеки/WS
+            for name, desc in [
+                ("ws_origin_blocked", "Blocked WS origins in production"),
+                ("query_token_rejected", "WS connections rejected due to query token in production"),
+                ("hmac_failed", "Failed HMAC handshakes"),
+                ("nonce_replay", "Detected nonce replays"),
+                ("ip_rate_limited", "Connections rate-limited by IP"),
+                ("token_rate_limited", "Connections rate-limited by token"),
+            ]:
+                self.register_counter(name, desc)
 
             # Запуск фонових задач
             if self.settings.enable_metrics:

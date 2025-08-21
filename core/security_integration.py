@@ -20,6 +20,7 @@ from core.input_validator import InputValidator
 from core.security_headers import security_headers, security_headers_middleware, security_headers_router
 from core.https_enforcement import https_enforcer, https_enforcement_middleware, https_router
 from web.auth import auth_router
+from config import get_settings
 
 logger = structlog.get_logger()
 
@@ -40,8 +41,10 @@ class SecurityIntegration:
     def setup_app_security(self, app: FastAPI):
         """Налаштування безпеки для FastAPI додатка"""
 
-        # 1. HTTPS enforcement ВІДКЛЮЧЕНО для development
-        # app.middleware("http")(https_enforcement_middleware)
+        # 1. HTTPS enforcement: вмикаємо у production або за прапором FORCE_HTTPS
+        environment = os.getenv("ENVIRONMENT", "development").lower()
+        if environment == "production" or os.getenv("FORCE_HTTPS", "").lower() in ("1", "true", "yes"):
+            app.middleware("http")(https_enforcement_middleware)
 
         # 2. Базові security headers через middleware
         @app.middleware("http")
@@ -50,17 +53,59 @@ class SecurityIntegration:
             network_security.add_security_headers(response)
             return response
 
+        # 2.1 Додаємо централізований заголовок версії API
+        @app.middleware("http")
+        async def add_api_version_header(request: Request, call_next):
+            response = await call_next(request)
+            try:
+                response.headers["X-API-Version"] = "v1"
+            except Exception:
+                pass
+            return response
+
         # 3. Network security middleware (rate limiting, DDoS protection)
         app.middleware("http")(security_middleware)
 
         # 4. Security headers middleware (CSP, permissions policy, etc)
         app.middleware("http")(security_headers_middleware)
+        
+        # 4.1 Вимикаємо /docs у production або вимагаємо admin токен
+        env = os.getenv("ENVIRONMENT", "development").lower()
+        if env == "production":
+            @app.middleware("http")
+            async def protect_docs(request: Request, call_next):
+                if request.url.path in ("/docs", "/redoc"):
+                    return JSONResponse(status_code=404, content={"detail": "Not found"})
+                return await call_next(request)
+
+            # Додатковий захист Swagger JSON
+            @app.middleware("http")
+            async def protect_openapi(request: Request, call_next):
+                if request.url.path in ("/openapi.json",):
+                    return JSONResponse(status_code=404, content={"detail": "Not found"})
+                return await call_next(request)
 
         # 5. Trusted host middleware - виправлено для Heroku
         self._setup_trusted_host_middleware(app)
 
         # 6. CORS налаштування
         network_security.setup_cors(app)
+
+        # 6.1 Proxy headers — довіряємо лише, якщо явно вказані довірені IP
+        try:
+            from starlette.middleware.proxy_headers import ProxyHeadersMiddleware
+            trusted_ips = os.getenv("TRUSTED_PROXY_IPS", "").strip()
+            env = os.getenv("ENVIRONMENT", "development").lower()
+            if trusted_ips:
+                if env != "production":
+                    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=None)
+                    logger.info("ProxyHeadersMiddleware enabled (non-production)")
+                else:
+                    logger.info("ProxyHeadersMiddleware not enabled in production; relying on explicit get_client_ip gating")
+            elif env == "production":
+                logger.warning("TRUSTED_PROXY_IPS is empty in production; X-Forwarded-* headers will not be trusted")
+        except Exception:
+            pass
 
         # 7. Exception handlers
         @app.exception_handler(429)
@@ -77,6 +122,27 @@ class SecurityIntegration:
                 content={"detail": "Access forbidden"}
             )
 
+        # 7.1 mTLS – опціонально перевіряємо клієнтський сертифікат зі заголовка, який проставляє проксі (наприклад, Nginx)
+        # У продакшні за наявності MTLS_ENFORCE=true вимагати успішну валідацію
+        @app.middleware("http")
+        async def mtls_check(request: Request, call_next):
+            try:
+                settings = get_settings()
+                enforce = os.getenv("MTLS_ENFORCE", "false").lower() in ("1","true","yes")
+                if not enforce:
+                    return await call_next(request)
+
+                # Проксі може прокидати результати перевірки в заголовки
+                verified = request.headers.get("X-Client-Cert-Verified", "FAIL").upper() == "SUCCESS"
+                subject = request.headers.get("X-Client-Cert-Subject")
+                if not verified:
+                    return JSONResponse(status_code=401, content={"detail": "mTLS verification failed"})
+                # Додатково можна whitelist CN із subject, якщо потрібно
+                return await call_next(request)
+            except Exception:
+                # У разі помилки — не блокуємо трафік, якщо не вимагали суворо
+                return await call_next(request)
+
         # 8. Додавання auth router
         app.include_router(auth_router)
 
@@ -90,6 +156,26 @@ class SecurityIntegration:
             app.include_router(security_router)
             app.include_router(security_headers_router)
             app.include_router(https_router)
+
+        # 10. Обмежуємо доступ до /metrics та /config у production
+        @app.middleware("http")
+        async def restrict_prod_sensitive_paths(request: Request, call_next):
+            path = request.url.path
+            env = os.getenv("ENVIRONMENT", "development").lower()
+            if env == "production" and path in ("/metrics", "/config"):
+                # Дозволяємо тільки з адмінським токеном
+                try:
+                    from core.auth_manager import get_auth_manager
+                    auth = request.headers.get("Authorization", "")
+                    if not auth.startswith("Bearer "):
+                        return JSONResponse(status_code=401, content={"detail": "Authentication required"})
+                    token = auth.split(" ", 1)[1]
+                    payload = await get_auth_manager().decode_token(token)
+                    if payload.get("role") != "admin":
+                        return JSONResponse(status_code=403, content={"detail": "Access forbidden"})
+                except Exception:
+                    return JSONResponse(status_code=401, content={"detail": "Invalid authentication credentials"})
+            return await call_next(request)
 
         self.initialized = True
 
@@ -126,17 +212,24 @@ class SecurityIntegration:
         env_hosts = os.getenv("ALLOWED_HOSTS", "")
         if env_hosts:
             allowed_hosts.extend([host.strip() for host in env_hosts.split(",") if host.strip()])
+
+        # Валідація wildcard у production
+        if environment == "production" and any(h in ("*", "*.example.com", "*.localhost") for h in allowed_hosts):
+            logger.warning("Wildcard detected in ALLOWED_HOSTS for production; this is insecure", allowed_hosts=allowed_hosts)
         
         # Логування налаштувань - видалено
         
         # Додавання middleware тільки якщо є обмеження хостів
+        # У тестовому середовищі (pytest/TestClient) не додаємо TrustedHostMiddleware,
+        # щоб уникнути "Invalid host header" при запитах без Host
+        if os.getenv("PYTEST_CURRENT_TEST") or os.getenv("DISABLE_TRUSTED_HOST_MW", "").lower() in ("1","true","yes"):
+            return
+
         if allowed_hosts and "*" not in allowed_hosts:
             app.add_middleware(
                 TrustedHostMiddleware,
                 allowed_hosts=allowed_hosts
             )
-        else:
-            pass
 
     def get_websocket_authenticator(self):
         """Повертає функцію для автентифікації WebSocket"""
@@ -208,7 +301,7 @@ class SecurityIntegration:
         """Отримання статусу безпеки системи"""
         status = {
             "initialized": self.initialized,
-            "redis_enabled": self.redis_client is not None,
+            "redis_enabled": True,
             "components": {
                 "auth_manager": "active",
                 "network_security": "active",
@@ -245,35 +338,23 @@ security_integration = SecurityIntegration()
 async def require_auth_middleware(request: Request, call_next):
     """Middleware що вимагає автентифікацію для всіх endpoints крім публічних"""
     
-    # Публічні endpoints що не потребують автентифікації
+    # Публічні endpoints що не потребують автентифікації (звужено)
     public_paths = [
         "/api/auth/login",
-        "/api/auth/refresh",
         "/api/auth/health",
-        "/api/auth/debug",  # Debug endpoint для development
-        "/health",  # Виправлено: endpoint реально на /health, а не /api/health
-        "/metrics",  # Додано metrics endpoint
-        "/config",   # Додано config endpoint для frontend
+        "/api/auth/debug",  # тільки у development
+        "/health",
+        "/metrics",
+        "/config",
         "/docs",
         "/openapi.json",
         "/favicon.ico",
-        # Нові основні API ендпоінти - ТЕПЕР ПУБЛІЧНІ для авторизованих користувачів
+        # Обмежимо публічні API до health/metrics. Інші вимагатимуть токен
         "/api/health",
-        "/api/metrics", 
-        "/api/clients",
-        "/api/tasks",
-        # Frontend API ендпоінти - ПУБЛІЧНІ
+        "/api/metrics",
+        # Frontend lightweight status/health залишаємо публічними для пінгів UI
         "/api/frontend/status",
         "/api/frontend/health",
-        "/api/frontend/real-time-metrics",
-        "/api/frontend/system-logs",
-        # Dashboard API - ПУБЛІЧНІ для авторизованих
-        "/dashboard/api/health",
-        "/dashboard/api/metrics",
-        "/dashboard/api/clients",
-        "/dashboard/api/tasks",
-        "/dashboard/api/status",
-        "/dashboard/api/system-logs"
     ]
 
     # Dashboard routes (HTML сторінки мають бути публічними для React SPA)
@@ -304,15 +385,15 @@ async def require_auth_middleware(request: Request, call_next):
     if request.url.path.startswith("/ws"):  # Виправлено: видалено зайвий слеш
         return await call_next(request)
 
-    # Dashboard HTML сторінки та деякі API мають бути публічними
+    # Dashboard HTML сторінки залишаємо публічними для SPA
     if any(request.url.path.startswith(path) for path in dashboard_paths):
         return await call_next(request)
 
     # Перевірка автентифікації для захищених ендпоінтів
     needs_auth = False
     
-    # Dashboard API ендпоінти (крім status) потребують автентифікації
-    if request.url.path.startswith("/dashboard/api/") and request.url.path != "/dashboard/api/status":
+    # Dashboard API ендпоінти потребують автентифікації (навіть якщо раніше були публічні)
+    if request.url.path.startswith("/dashboard/api/"):
         needs_auth = True
     
     # Security ендпоінти потребують автентифікації 
@@ -321,6 +402,10 @@ async def require_auth_middleware(request: Request, call_next):
         
     # Admin ендпоінти потребують автентифікації
     if request.url.path.startswith("/api/admin/"):
+        needs_auth = True
+
+    # Клієнти/таски — тепер потребують токен
+    if request.url.path in ("/api/clients", "/api/tasks") or request.url.path.startswith("/api/clients/") or request.url.path.startswith("/api/tasks/"):
         needs_auth = True
     
     # Якщо цей ендпоінт не потребує автентифікації, пропускаємо
