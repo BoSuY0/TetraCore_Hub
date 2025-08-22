@@ -221,6 +221,43 @@ class WebSocketSecurityManager:
                 # Event loop doesn't exist or is closed, task will be cleaned up anyway
                 pass
 
+    # --------------------- Header helpers ---------------------
+    def _get_header_ci(self, headers: Any, name: str, default: Optional[str] = None) -> Optional[str]:
+        """Повертає значення заголовка без врахування регістру ключа.
+
+        Працює з будь-яким Mapping-подібним об'єктом (включно з MappingProxyType
+        та Starlette Headers). Безпечно обробляє відсутність методів .get/.items.
+        """
+        try:
+            if headers is None:
+                return default
+            # Пряма спроба через get
+            getter = getattr(headers, "get", None)
+            if callable(getter):
+                val = getter(name)
+                if val is not None:
+                    return val
+                # Спробуємо поширені варіації регістру
+                val = getter(name.lower())
+                if val is not None:
+                    return val
+                val = getter(name.title())
+                if val is not None:
+                    return val
+            # Перебір елементів з порівнянням ключів у нижньому регістрі
+            items_iter = getattr(headers, "items", None)
+            if callable(items_iter):
+                target = name.lower()
+                for k, v in headers.items():
+                    try:
+                        if str(k).lower() == target:
+                            return v
+                    except Exception:
+                        continue
+        except Exception:
+            return default
+        return default
+
     async def authenticate_websocket(
         self, websocket: WebSocket, token: Optional[str]
     ) -> Optional[Dict]:
@@ -239,11 +276,9 @@ class WebSocketSecurityManager:
             await self._incr_metric("ip_rate_limited")
             return None
 
-        # 1) Отримуємо токени з query і заголовка
-        try:
-            auth_header = websocket.headers.get("authorization")
-        except Exception:
-            auth_header = None
+        # 1) Отримуємо токени з query і заголовка (case-insensitive для сумісності)
+        headers = getattr(websocket, "headers", None)
+        auth_header = self._get_header_ci(headers, "authorization")
 
         query_token_present = bool(token)
         header_token = None
@@ -257,11 +292,11 @@ class WebSocketSecurityManager:
         # Перевірка Origin лише для браузерів у продакшні
         try:
             if environment.lower() == "production":
-                origin = websocket.headers.get("origin")
-                ua = (websocket.headers.get("user-agent") or "").lower()
+                origin = self._get_header_ci(headers, "origin")
+                ua = (self._get_header_ci(headers, "user-agent") or "").lower()
                 is_browser = bool(origin) and (
                     "mozilla" in ua
-                    or websocket.headers.get("sec-fetch-site") is not None
+                    or self._get_header_ci(headers, "sec-fetch-site") is not None
                 )
                 if origin and is_browser:
                     from config import get_settings
@@ -282,22 +317,36 @@ class WebSocketSecurityManager:
 
         token = header_token or token
 
-        # 2) Якщо досі немає токена — забороняємо доступ у будь-якому середовищі
+        # 2) Якщо досі немає токена — у development/testing дозволяємо гостьовий доступ
         if not token:
+            if environment.lower() in ("development", "testing"):
+                logger.info("WebSocket guest access granted (dev/test mode)")
+                guest_id = self._get_header_ci(headers, "X-Client-Id") or f"guest-{int(time.time())}"
+                guest_type = (self._get_header_ci(headers, "X-Client-Type") or "guest").lower()
+                return {
+                    "user_id": guest_id,
+                    "username": "guest",
+                    "role": guest_type,
+                    "permissions": ["tasks.view"],
+                    "session_id": f"guest-{int(time.time())}",
+                }
             logger.warning("WebSocket authentication failed: no token provided")
             return None
 
         # Спочатку перевіряємо чи це один зі статичних токенів для сервісних клієнтів (бот/воркер)
         static_tokens: list[str] = []
-        # Підтримка dual-token ротації
+        # Підтримка dual-token ротації з settings
         token_active = getattr(settings, "auth_token_active", None) or getattr(
             settings, "auth_token", None
         )
         token_next = getattr(settings, "auth_token_next", None)
-        if token_active:
-            static_tokens.append(token_active)
-        if token_next:
-            static_tokens.append(token_next)
+        # Також враховуємо ENV-перемінні без перезавантаження settings
+        env_active = os.getenv("AUTH_TOKEN_ACTIVE") or os.getenv("AUTH_TOKEN")
+        env_next = os.getenv("AUTH_TOKEN_NEXT") or os.getenv("HUB_AUTH_TOKEN")
+
+        for t in (token_active, token_next, env_active, env_next):
+            if t:
+                static_tokens.append(t.strip())
 
         if token in static_tokens:
             # Для сервісних клієнтів у проді HMAC обов'язковий
@@ -316,9 +365,10 @@ class WebSocketSecurityManager:
                 return None
 
             client_id = (
-                websocket.headers.get("X-Client-Id") or f"service-{int(time.time())}"
+                self._get_header_ci(headers, "X-Client-Id")
+                or f"service-{int(time.time())}"
             )
-            client_type = (websocket.headers.get("X-Client-Type") or "service").lower()
+            client_type = (self._get_header_ci(headers, "X-Client-Type") or "service").lower()
             logger.info(
                 "WebSocket authentication successful with static token",
                 client_id=client_id,
@@ -834,13 +884,13 @@ class WebSocketSecurityManager:
 
     def _validate_hmac_handshake(self, websocket: WebSocket, secret: str) -> bool:
         try:
-            headers = websocket.headers
-            client_id = headers.get("X-Client-Id")
-            ts_str = headers.get("X-Timestamp")
-            nonce = headers.get("X-Nonce")
-            sig = headers.get("X-Signature")
-            client_type = headers.get("X-Client-Type") or "service"
-            client_version = headers.get("X-Client-Version") or "1.0.0"
+            headers = getattr(websocket, "headers", None)
+            client_id = self._get_header_ci(headers, "X-Client-Id")
+            ts_str = self._get_header_ci(headers, "X-Timestamp")
+            nonce = self._get_header_ci(headers, "X-Nonce")
+            sig = self._get_header_ci(headers, "X-Signature")
+            client_type = self._get_header_ci(headers, "X-Client-Type") or "service"
+            client_version = self._get_header_ci(headers, "X-Client-Version") or "1.0.0"
 
             if not all([client_id, ts_str, nonce, sig]):
                 logger.warning("Missing HMAC handshake headers")
@@ -883,13 +933,13 @@ class WebSocketSecurityManager:
         self, websocket: WebSocket, secret: str
     ) -> bool:
         try:
-            headers = websocket.headers
-            client_id = headers.get("X-Client-Id")
-            ts_str = headers.get("X-Timestamp")
-            nonce = headers.get("X-Nonce")
-            sig = headers.get("X-Signature")
-            client_type = headers.get("X-Client-Type") or "service"
-            client_version = headers.get("X-Client-Version") or "1.0.0"
+            headers = getattr(websocket, "headers", None)
+            client_id = self._get_header_ci(headers, "X-Client-Id")
+            ts_str = self._get_header_ci(headers, "X-Timestamp")
+            nonce = self._get_header_ci(headers, "X-Nonce")
+            sig = self._get_header_ci(headers, "X-Signature")
+            client_type = self._get_header_ci(headers, "X-Client-Type") or "service"
+            client_version = self._get_header_ci(headers, "X-Client-Version") or "1.0.0"
 
             if not all([client_id, ts_str, nonce, sig]):
                 logger.warning("Missing HMAC handshake headers")

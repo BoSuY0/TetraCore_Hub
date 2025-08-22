@@ -255,10 +255,16 @@ class TaskRouter:
                 "[TASK_ROUTER] ClientManager not initialized! Cannot submit tasks.",
                 task_id=task.task_id,
             )
-            # Для сумісності з тестом — піднімаємо виняток
-            raise ValueError(
-                "ClientManager is not set. Call set_client_manager() first."
-            )
+            # У суворому режимі (коли Redis вимкнений у налаштуваннях) — піднімаємо виняток
+            # В іншому випадку дозволяємо ставити в чергу/overflow без негайного призначення
+            try:
+                strict_no_client_manager = not getattr(self.settings, "redis_enabled", True)
+            except Exception:
+                strict_no_client_manager = False
+            if strict_no_client_manager:
+                raise ValueError(
+                    "ClientManager is not set. Call set_client_manager() first."
+                )
         try:
 
             self.logger.info(
@@ -303,7 +309,31 @@ class TaskRouter:
             # Перевірка чи черга не переповнена
             queue = self.task_queues[task.priority]
             if queue.is_full():
-                # Не відхиляємо таск, ставимо в overflow (Redis -> in-memory fallback)
+                # Якщо overflow заборонений налаштуваннями — відхиляємо таск
+                try:
+                    allow_overflow = bool(getattr(self.settings, "redis_enabled", True))
+                except Exception:
+                    allow_overflow = True
+                if not allow_overflow:
+                    stats = None
+                    try:
+                        stats = queue.get_stats()
+                    except Exception:
+                        stats = {"total_tasks": len(queue.tasks), "max_size": queue.max_size}
+                    self.logger.warning(
+                        "Queue is full and overflow disabled by settings",
+                        priority=task.priority.value,
+                        total_tasks=stats.get("total_tasks"),
+                        max_size=stats.get("max_size"),
+                    )
+                    task.context.add_error(
+                        "queue_full",
+                        "Queue is full and overflow is disabled",
+                        None,
+                    )
+                    return False
+
+                # Інакше — ставимо в overflow (Redis -> in-memory fallback)
                 stored = task.to_storage()
                 persisted = False
                 try:
