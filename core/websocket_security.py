@@ -212,7 +212,14 @@ class WebSocketSecurityManager:
     def __del__(self):
         """Ensure cleanup task is cancelled on deletion"""
         if self._cleanup_task and not self._cleanup_task.done():
-            self._cleanup_task.cancel()
+            try:
+                # Try to get the event loop
+                loop = asyncio.get_event_loop()
+                if not loop.is_closed():
+                    self._cleanup_task.cancel()
+            except RuntimeError:
+                # Event loop doesn't exist or is closed, task will be cleaned up anyway
+                pass
 
     async def authenticate_websocket(
         self, websocket: WebSocket, token: Optional[str]
