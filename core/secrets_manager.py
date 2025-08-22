@@ -1112,9 +1112,9 @@ def get_secrets_manager() -> SecretsManager:
             dev_secrets = {
                 "JWT_SECRET_KEY": os.getenv("JWT_SECRET_KEY") or Fernet.generate_key().decode(),
                 "JWT_REFRESH_SECRET": os.getenv("JWT_REFRESH_SECRET") or Fernet.generate_key().decode(),
-                "ADMIN_USERNAME": settings.admin_username or os.getenv("ADMIN_USERNAME") or "admin",
-                # В non-prod допускаємо простий пароль тільки для локальної розробки
-                "ADMIN_PASSWORD": settings.admin_password or os.getenv("ADMIN_PASSWORD") or "TetraCore@Admin123!",
+                "ADMIN_USERNAME": settings.admin_username or os.getenv("ADMIN_USERNAME"),
+                # Credentials must be set via environment variables
+                "ADMIN_PASSWORD": settings.admin_password or os.getenv("ADMIN_PASSWORD"),
                 "ENCRYPTION_KEY": os.getenv("ENCRYPTION_KEY") or Fernet.generate_key().decode()
             }
             for key, value in dev_secrets.items():

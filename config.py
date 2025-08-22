@@ -257,13 +257,12 @@ class Settings:
 
         # Перевірка та налаштування дефолтних значень для розробки
         if not self.admin_username or not self.admin_password:
-            if self.environment == Environment.DEVELOPMENT:
-                self.admin_username = self.admin_username or "admin"
-                self.admin_password = self.admin_password or "TetraCore@Admin123!"
-            elif self.environment == Environment.PRODUCTION:
+            if self.environment == Environment.PRODUCTION:
                 raise ValueError(
                     "ADMIN_USERNAME та ADMIN_PASSWORD мають бути встановлені в продакшені!"
                 )
+            # В development також вимагаємо встановлення через змінні оточення
+            # для підвищення безпеки
 
     def _setup_cors_origins(self):
         """Налаштування CORS origins залежно від середовища"""
@@ -541,9 +540,8 @@ def get_user_permissions(user_id: str = None) -> List[str]:
     return settings.get_user_permissions(user_id)
 
 
-# Constants for backward compatibility
-ADMIN_USERNAME = settings.admin_username
-ADMIN_PASSWORD = settings.admin_password
+# Constants for backward compatibility (deprecated - use settings directly)
+# ADMIN_USERNAME and ADMIN_PASSWORD removed for security - use environment variables
 SESSION_DURATION_HOURS = settings.session_duration_hours
 CLEANUP_INTERVAL_MINUTES = settings.cleanup_interval_minutes
 REQUIRE_USERNAME = settings.require_username
