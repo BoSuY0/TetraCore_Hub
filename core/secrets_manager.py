@@ -606,9 +606,10 @@ class SecretsManager:
 
             if complexity_score < 3:
                 # У тестах допускається майстер-ключ без високої складності, якщо довжина >= 16
-                is_test = (
-                    os.getenv("ENVIRONMENT", "development").lower() in ["development", "testing"]
-                )
+                is_test = os.getenv("ENVIRONMENT", "development").lower() in [
+                    "development",
+                    "testing",
+                ]
                 if not is_test:
                     raise ValueError(
                         "Encryption key must contain at least 3 of: uppercase, lowercase, digits, special characters"
