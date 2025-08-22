@@ -1,0 +1,52 @@
+name: python-ci
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [ '3.12', '3.13' ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff black pytest
+
+      - name: Ruff (lint)
+        run: |
+          ruff --version
+          ruff check core web utils tools hub_launcher.py config.py
+
+      - name: Black (format check)
+        run: |
+          black --version
+          black --check core web utils tools hub_launcher.py config.py
+
+      - name: Run unit tests (safe subset)
+        env:
+          PYTHONPATH: .
+          ENVIRONMENT: testing
+        run: |
+          pytest -q -m "not integration" -k "not endpoints and not websocket_proxy and not websocket_direct and not connections_2Hub" --maxfail=1
