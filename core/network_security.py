@@ -13,7 +13,7 @@ from collections import defaultdict, deque
 from functools import wraps
 import os
 
-from fastapi import Request, Response, HTTPException
+from fastapi import Request, Response, HTTPException, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import structlog
@@ -509,8 +509,6 @@ def require_ip_whitelist(func):
 
 
 # API endpoints для управління безпекою
-from fastapi import APIRouter
-
 security_router = APIRouter(prefix="/api/security", tags=["security"])
 
 

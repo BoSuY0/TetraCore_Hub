@@ -9,6 +9,7 @@ import asyncio
 import json
 import time
 import functools
+import atexit
 from typing import Any, List, Optional, Callable, TypeVar, Coroutine, Union
 from pathlib import Path
 import aiofiles
@@ -450,5 +451,4 @@ def cleanup_thread_pool():
 
 
 # Реєстрація cleanup
-import atexit
 atexit.register(cleanup_thread_pool)

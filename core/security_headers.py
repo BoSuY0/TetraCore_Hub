@@ -3,11 +3,12 @@ Security Headers Module for TetraCore Hub
 Розширені security headers та Content Security Policy
 """
 
+import os
 import secrets
 from typing import Dict, List, Optional, Set, Any
 from datetime import datetime
 
-from fastapi import Request, Response
+from fastapi import Request, Response, APIRouter
 from fastapi.responses import JSONResponse
 import structlog
 
@@ -390,7 +391,6 @@ class SecurityHeadersManager:
 
 
 # Глобальний екземпляр з правильним environment
-import os
 environment = os.getenv("ENVIRONMENT", "development")
 security_headers = SecurityHeadersManager(environment=environment)
 
@@ -414,8 +414,6 @@ async def security_headers_middleware(request: Request, call_next):
 
 
 # API endpoint для CSP reports
-from fastapi import APIRouter
-
 security_headers_router = APIRouter(prefix="/api/security", tags=["security"])
 
 
