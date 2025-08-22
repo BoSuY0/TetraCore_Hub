@@ -4,11 +4,12 @@
 # Core Framework
 # Використовуємо точні версії, які перевірено працюють з Python 3.13
 fastapi==0.115.12
+starlette==0.47.2  # Explicitly set to fix CVE
 pydantic==2.11.5
 pydantic-core==2.33.2
 uvicorn[standard]==0.24.0
 websockets>=13,<14
-jinja2==3.1.2
+jinja2==3.1.6
 
 # Redis for Pub/Sub
 redis==5.0.1
@@ -33,7 +34,7 @@ PyJWT==2.10.1
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 bleach==6.1.0
-cryptography==42.0.5
+cryptography==44.0.1
 
 # System monitoring
 psutil==5.9.7
@@ -42,13 +43,13 @@ psutil==5.9.7
 typing-extensions>=4.12.2
 
 # Production
-gunicorn==21.2.0
+gunicorn==23.0.0
 
 # Development and testing
 pytest==7.4.4
 pytest-asyncio==0.21.1
 pytest-cov==4.1.0
-black==23.12.1
+black==24.3.0
 flake8==7.0.0
 
 # JSON handling
