@@ -12,14 +12,12 @@ import json
 import aiofiles
 import time
 import functools
-from datetime import datetime
-from typing import Dict, List, Any, Optional, Callable, TypeVar, Coroutine, Union
+from typing import Dict, List, Any, Optional, Callable, TypeVar, Coroutine, Tuple
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 import structlog
 from collections import deque
-import weakref
 import hashlib
 
 # Type definitions

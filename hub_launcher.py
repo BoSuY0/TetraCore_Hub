@@ -9,21 +9,14 @@ TetraCore StreamHub - Unified Secure Launcher
 
 import os
 import sys
-import json
-import time
-import signal
 import asyncio
 import subprocess
 import logging
 import shutil
-import shlex
 import secrets
-import hashlib
 from pathlib import Path
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import asynccontextmanager
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 # Додавання поточної директорії до Python path
 sys.path.insert(0, str(Path(__file__).parent.absolute()))
@@ -527,7 +520,7 @@ class StreamHubLauncher:
                     src_file = Path(root) / file
                     # Визначаємо відносний шлях відносно build
                     rel_path = src_file.relative_to(build_dir)
-                    original_path = str(rel_path)
+                    str(rel_path)
 
                     # Універсальний рекурсивний flatten: видаляємо проблематичні префікси
                     flatten_prefixes = ['static/', 'assets/static/', 'build/static/', 'public/static/', 'dist/static/', 'out/static/']
@@ -577,7 +570,7 @@ class StreamHubLauncher:
             static_subdirs = [d.name for d in self.static_dir.iterdir() if d.is_dir()]
             static_files = [f.name for f in self.static_dir.iterdir() if f.is_file()]
 
-            self.logger.info(f"✅ Frontend файли скопійовано в static")
+            self.logger.info("✅ Frontend файли скопійовано в static")
             self.logger.debug(f"📁 Директорії в static: {static_subdirs}")
             self.logger.debug(f"📄 Файли в static: {static_files}")
 
@@ -848,15 +841,12 @@ class StreamHubLauncher:
 
     def create_app(self):
         """Створює FastAPI додаток"""
-        from fastapi import FastAPI
         from fastapi.middleware.cors import CORSMiddleware
         from core.security_integration import integrate_security
         from web.jwks import router as jwks_router
         from web.dashboard import register_dashboard_routes
         from web.security_diagnostics import router as security_diag_router
-        from fastapi.staticfiles import StaticFiles
         from config import get_settings
-        import os
 
         # Глобальна змінна для збереження hub instance
         self._hub_instance = None
@@ -971,7 +961,6 @@ class StreamHubLauncher:
         """Звільняє порт, якщо він зайнятий"""
         import socket
         import platform
-        import subprocess
 
         # Перевіряємо чи порт зайнятий
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -1132,7 +1121,7 @@ class StreamHubLauncher:
                     return message
                 return custom_console_renderer
 
-            log_config = {
+            {
                 "version": 1,
                 "disable_existing_loggers": False,
                 "formatters": {
@@ -1440,11 +1429,11 @@ class StreamHubLauncher:
             
             # Імітуємо втрату з'єднання
             if simulate_disconnect:
-                print(f"\n💔 Тест 2: Симуляція втрати з'єднання")
+                print("\n💔 Тест 2: Симуляція втрати з'єднання")
                 await self._test_connection_loss()
             
             # Базовий тест неактивності
-            print(f"\n⏱️ Тест 3: Клієнт без активності")
+            print("\n⏱️ Тест 3: Клієнт без активності")
             await self._test_inactive_client()
             
             print("\n✅ Всі тести завершено!")
@@ -1487,14 +1476,14 @@ class StreamHubLauncher:
         info = settings.diagnose_environment()
 
         # Основна інформація
-        print(f"\n📊 ЗАГАЛЬНА ІНФОРМАЦІЯ")
+        print("\n📊 ЗАГАЛЬНА ІНФОРМАЦІЯ")
         print(f"Дата/час: {info['timestamp']}")
         print(f"Python: {info['python_version']}")
         print(f"Платформа: {info['platform']}")
         print(f"Hostname: {info['hostname']}")
 
         # Середовище
-        print(f"\n🌍 СЕРЕДОВИЩЕ")
+        print("\n🌍 СЕРЕДОВИЩЕ")
         env = info['environment']
         print(f"Heroku: {'ТАК' if env['is_heroku'] else 'НІ'}")
         print(f"DYNO: {env['dyno'] or '<не встановлено>'}")
@@ -1504,7 +1493,7 @@ class StreamHubLauncher:
         print(f"Log Level: {env['log_level']}")
 
         # URL конфігурація
-        print(f"\n🔗 URL КОНФІГУРАЦІЯ")
+        print("\n🔗 URL КОНФІГУРАЦІЯ")
         urls = info['urls']
         print(f"Backend: {urls['backend']}")
         print(f"Frontend: {urls['frontend']}")
@@ -1512,13 +1501,13 @@ class StreamHubLauncher:
         print(f"WebSocket: {urls['websocket']}")
 
         # Redis
-        print(f"\n🔴 REDIS")
+        print("\n🔴 REDIS")
         redis = info['redis']
         print(f"Enabled: {redis['enabled']}")
         print(f"URL: {redis['url_safe']}")
 
         # Автентифікація
-        print(f"\n🔐 АВТЕНТИФІКАЦІЯ")
+        print("\n🔐 АВТЕНТИФІКАЦІЯ")
         auth = info['auth']
         print(f"Require Auth: {auth['require_authentication']}")
         print(f"Admin Configured: {auth['admin_configured']}")
@@ -1526,11 +1515,11 @@ class StreamHubLauncher:
         # Валідація
         auth_errors = settings.validate_auth_config()
         if auth_errors:
-            print(f"\n⚠️ ПОМИЛКИ КОНФІГУРАЦІЇ:")
+            print("\n⚠️ ПОМИЛКИ КОНФІГУРАЦІЇ:")
             for error in auth_errors:
                 print(f"  • {error}")
         else:
-            print(f"\n✅ Конфігурація валідна")
+            print("\n✅ Конфігурація валідна")
 
         print("\n" + "=" * 60)
 
@@ -1561,7 +1550,7 @@ class StreamHubLauncher:
                     self.logger.warning("Frontend процес не відповідає, форсуємо завершення")
                     try:
                         self.frontend_process.kill()
-                    except:
+                    except Exception:
                         pass
                 except Exception as e:
                     self.logger.debug(f"Error terminating frontend: {e}")

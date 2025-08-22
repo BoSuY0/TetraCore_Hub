@@ -4,19 +4,16 @@ Input Validation Module for TetraCore Hub
 """
 
 import re
-import html
 import json
 import ipaddress
 from typing import Any, Dict, List, Optional, Union, Callable, TypeVar
-from datetime import datetime, date
-from decimal import Decimal
-from urllib.parse import urlparse, quote
+from urllib.parse import urlparse
 import bleach
 import structlog
 from pydantic import (
     BaseModel, Field, field_validator, model_validator,
-    constr, conint, confloat, HttpUrl, EmailStr,
-    ValidationError, ConfigDict
+    conint, EmailStr,
+    ConfigDict
 )
 from pydantic.functional_validators import AfterValidator
 from typing import Annotated
@@ -130,7 +127,7 @@ class InputValidator:
         # Decode Unicode escapes
         try:
             value = value.encode('utf-8').decode('unicode-escape')
-        except:
+        except Exception:
             pass
             
         # Remove null bytes

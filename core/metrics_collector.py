@@ -7,14 +7,12 @@ TetraCore StreamHub Metrics Collector
 """
 
 import asyncio
-import logging
 import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Set
+from typing import Dict, List, Optional, Any
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 import structlog
-import json
 
 from config import Settings
 

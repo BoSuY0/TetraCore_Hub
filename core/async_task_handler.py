@@ -8,16 +8,15 @@ TetraCore StreamHub Async Task Handler
 import asyncio
 import json
 from datetime import datetime
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from enum import Enum
 import structlog
 import httpx
 
 from models.messages import BaseMessage, MessageType, create_message
 from models.client import Client
-from models.task import Task, TaskStatus, TaskPriority, TaskType
+from models.task import Task, TaskPriority, TaskType
 # Celery імпорти видалено - завдання тепер обробляються через tetra-core-api
-from core.async_optimization import AsyncOptimizer, TaskPriority as AsyncTaskPriority
 
 
 class TaskProcessingMode(Enum):

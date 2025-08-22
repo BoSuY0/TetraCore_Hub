@@ -11,12 +11,10 @@ TetraCore StreamHub Main Class
 
 # Standard library
 import asyncio
-import logging
 import json
 import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Any, cast
-from contextlib import asynccontextmanager
 import os
 
 # Third-party libraries
@@ -39,7 +37,7 @@ from core.websocket_manager import WebSocketManager
 from core.health_monitor import HealthMonitor
 from core.metrics_collector import MetricsCollector
 from core.redis_manager import RedisManager
-from core.security_integration import security_integration, integrate_security
+from core.security_integration import integrate_security
 from core.async_optimization import AsyncOptimizer
 from core.auth_manager import get_current_user
 # Celery task queue видалено - завдання тепер обробляються через tetra-core-api
@@ -1068,8 +1066,6 @@ class StreamHub:
 
             if message.message_type == MessageType.TASK_SUBMIT:
                 # Перевірка наявності необхідних атрибутів перед логуванням
-                task_data = getattr(message, 'task_data', {}) or {}
-
                 self.logger.debug("[TASK_SUBMIT] Debug message attributes",
                     message_type=message.message_type,
                     has_task_type_attr=hasattr(message, 'task_type'),
@@ -1643,7 +1639,7 @@ class StreamHub:
             if client.websocket and client.info.is_connected():
                 try:
                     await client.websocket.send_json(message.model_dump(mode='json'))
-                except:
+                except Exception:
                     pass  # Ignore failed sends
 
     async def shutdown(self):
@@ -1907,7 +1903,6 @@ class StreamHub:
             while self.is_running:
                 await asyncio.sleep(interval_minutes * 60)
                 try:
-                    active = getattr(self.settings, 'auth_token_active', None)
                     next_t = getattr(self.settings, 'auth_token_next', None)
                     if next_t:
                         # Переключення next -> active

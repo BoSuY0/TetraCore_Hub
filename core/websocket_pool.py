@@ -6,15 +6,14 @@ WebSocket Connection Pool Manager for TetraCore Hub
 import asyncio
 import time
 import uuid
-from typing import Dict, List, Optional, Set, Any, Callable, Tuple
-from datetime import datetime, timedelta
+from typing import Dict, Optional, Set, Any, Callable
+from datetime import datetime
 from dataclasses import dataclass, field
 from collections import deque
 from enum import Enum
-import weakref
 from contextlib import asynccontextmanager
 
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket
 import structlog
 
 logger = structlog.get_logger()

@@ -5,8 +5,8 @@ Authentication endpoints for TetraCore Hub
 import os
 import json
 import uuid
-from datetime import datetime, timedelta
-from typing import Dict, Optional, List
+from datetime import datetime
+from typing import Dict, List
 
 from fastapi import APIRouter, HTTPException, Depends, Request, Security
 from fastapi.responses import JSONResponse
@@ -16,8 +16,7 @@ import structlog
 
 # Імпорт нового менеджера автентифікації
 from core.auth_manager import (
-    get_auth_manager, get_current_user, UserCredentials,
-    TokenPair, require_permission, require_role, SERVER_BOOT_ID,
+    get_auth_manager, get_current_user, require_permission, require_role, SERVER_BOOT_ID,
     REFRESH_TOKEN_EXPIRE_DAYS
 )
 from core.secrets_manager import get_secrets_manager
@@ -238,7 +237,6 @@ async def validate_token(credentials: HTTPAuthorizationCredentials = Security(se
                 has_credentials=bool(credentials))
 
     try:
-        token = credentials.credentials
         logger.debug("📋 Credentials received")
 
         user_data = await get_current_user(credentials)
@@ -335,7 +333,7 @@ async def logout(
         # Додатково очищаємо всі можливі сесії користувача
         if auth_mgr.redis_client:
             # Шукаємо всі сесії користувача
-            pattern = f"session:*"
+            pattern = "session:*"
             async for key in auth_mgr.redis_client.scan_iter(match=pattern):
                 try:
                     session_data = await auth_mgr.redis_client.get(key)

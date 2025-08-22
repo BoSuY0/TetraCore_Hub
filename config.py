@@ -9,7 +9,6 @@ import os
 from typing import Optional, List
 from enum import Enum
 from dataclasses import dataclass, field
-import socket
 
 # Redis конфігурація тепер через змінні середовища (.env файл)
 
@@ -450,7 +449,7 @@ class Settings:
 
         try:
             info["hostname"] = socket.gethostname()
-        except:
+        except Exception:
             info["hostname"] = "<unknown>"
 
         return info

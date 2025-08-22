@@ -9,7 +9,7 @@ import asyncio
 import json
 import time
 import functools
-from typing import Any, Dict, List, Optional, Callable, TypeVar, Coroutine, Union
+from typing import Any, List, Optional, Callable, TypeVar, Coroutine, Union
 from pathlib import Path
 import aiofiles
 import structlog
@@ -219,7 +219,6 @@ async def gather_with_progress(
     """
     total = len(coroutines)
     completed = 0
-    results = []
 
     async def wrapped_coro(index: int, coro: Coroutine):
         nonlocal completed

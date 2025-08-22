@@ -5,10 +5,9 @@ TetraCore StreamHub Web Dashboard Routes
 Забезпечує HTML інтерфейс та API endpoints для моніторингу.
 """
 
-import random
-from datetime import datetime, timedelta
+from datetime import datetime
 from fastapi import APIRouter, Request, HTTPException, Query, Depends
-from fastapi.responses import HTMLResponse, FileResponse, Response
+from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 import structlog
 from core.rate_limiter import get_rate_limiter
@@ -170,7 +169,6 @@ async def get_real_time_metrics():
     """Метрики реального часу для frontend (реальні з хабу)"""
     try:
         # Імпортуємо тут, щоб уникнути циклічних залежностей при імпорті модуля
-        from core.hub import StreamHub  # type: ignore
         # Поточний FastAPI app недоступний тут напряму; цей ендпоінт використовується
         # як standalone. Для реальних даних використовується перевизначення у register_dashboard_routes.
         # Тож тут залишаємо бековий fallback на випадок прямого виклику без інтеграції.

@@ -3,13 +3,14 @@ HTTPS/WSS Enforcement Module for TetraCore Hub
 Примусове використання безпечних протоколів в production
 """
 
-import os
 from typing import Optional, Dict, Any, List
 from urllib.parse import urlparse, urlunparse
 
-from fastapi import Request, Response, HTTPException
+from fastapi import Request, Response, HTTPException, APIRouter, Depends
 from fastapi.responses import RedirectResponse, JSONResponse
 import structlog
+
+from core.auth_manager import get_current_user, require_permission
 
 logger = structlog.get_logger()
 
@@ -84,7 +85,7 @@ class HTTPSEnforcer:
                 visitor_data = json.loads(cf_visitor)
                 if visitor_data.get("scheme") in SECURE_SCHEMES:
                     return True
-            except:
+            except Exception:
                 pass
 
         # Перевірка схеми URL
@@ -330,9 +331,6 @@ def configure_https_enforcement(
 
 
 # API endpoints для моніторингу
-from fastapi import APIRouter, Depends
-from core.auth_manager import get_current_user, require_permission
-
 https_router = APIRouter(prefix="/api/security/https", tags=["security"])
 
 
