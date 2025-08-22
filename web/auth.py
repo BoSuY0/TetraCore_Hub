@@ -123,7 +123,7 @@ async def login(request: Request, credentials: LoginRequest):
     # Перевірка lockout
     if (
         get_settings().environment == get_settings().environment.PRODUCTION
-        and auth_mgr.is_locked(credentials.username, client_ip)
+        and await auth_mgr.is_locked(credentials.username, client_ip)
     ):
         raise HTTPException(
             status_code=429, detail="Account temporarily locked due to failed attempts"
@@ -267,7 +267,7 @@ async def login(request: Request, credentials: LoginRequest):
             ip=client_ip,
         )
         # Застосувати lockout якщо перевищено ліміт
-        auth_mgr.apply_lockout_if_needed(credentials.username, client_ip)
+        await auth_mgr.apply_lockout_if_needed(credentials.username, client_ip)
         raise HTTPException(status_code=401, detail="Невірний логін або пароль")
 
 

@@ -31,18 +31,47 @@ logger = structlog.get_logger()
 ACCESS_TOKEN_EXPIRE_MINUTES = 15
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 ALGORITHM = "HS256"
-BCRYPT_ROUNDS = 12
+# Bcrypt cost factor (rounds) — налаштовується через змінну оточення BCRYPT_ROUNDS
+# У тестовому середовищі автоматично знижуємо cost для пришвидшення (уникаємо зависань)
+try:
+    _DEFAULT_BCRYPT_ROUNDS = int(os.getenv("BCRYPT_ROUNDS", "12"))
+except Exception:
+    _DEFAULT_BCRYPT_ROUNDS = 12
+
+if os.getenv("ENVIRONMENT", "development").lower() in (
+    "test",
+    "testing",
+):
+    # У тестовому середовищі використовуємо мінімально рекомендовані 4 раунди (без попереджень Passlib)
+    BCRYPT_ROUNDS = 4
+else:
+    # У будь-якому середовищі забезпечуємо мінімум 4 раунди
+    BCRYPT_ROUNDS = max(4, _DEFAULT_BCRYPT_ROUNDS)
 LOGIN_LOCKOUT_SECONDS = int(os.getenv("LOGIN_LOCKOUT_SECONDS", "900"))  # 15 хв
 MAX_LOGIN_ATTEMPTS = 5
 LOGIN_ATTEMPT_WINDOW_MINUTES = 15
 SESSION_CLEANUP_INTERVAL = 3600  # 1 година
+
+# Політика валідації сесій при збоях Redis/невідомих типах
+# За замовчуванням у продакшені — сувора (fail-closed), в інших середовищах — пом'якшена (fail-open)
+STRICT_SESSION_VALIDATION = (
+    os.getenv(
+        "STRICT_SESSION_VALIDATION",
+        "true"
+        if os.getenv("ENVIRONMENT", "development").lower() == "production"
+        else "false",
+    ).lower()
+    in ("1", "true", "yes")
+)
 
 # Генерація унікального ID для поточного запуску сервера
 # Це дозволяє інвалідувати всі токени після рестарту
 SERVER_BOOT_ID = str(uuid.uuid4())
 
 # Конфігурація для паролів
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(
+    schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=BCRYPT_ROUNDS
+)
 security = HTTPBearer()
 
 
@@ -460,28 +489,26 @@ class AuthManager:
                         if inspect.isawaitable(exists_result)
                         else exists_result
                     )
-                    # Якщо тип повернення невідомий (наприклад MagicMock), під час валідації access токена
-                    # за замовчуванням вважаємо, що сесія існує, щоб уникнути хибних негативів у тестах
                     if isinstance(exists_val, (bool, int)):
                         exists = bool(exists_val)
                     else:
-                        # Спроба fallback через get()
-                        get_res = self.redis_client.get(session_key)
-                        get_val = (
-                            await get_res if inspect.isawaitable(get_res) else get_res
-                        )
-                        try:
-                            # Якщо це json-рядок — ок
-                            if isinstance(get_val, (bytes, bytearray)):
-                                exists = True
-                            elif isinstance(get_val, str):
-                                exists = True
-                            else:
-                                # Невідомий тип (наприклад MagicMock) — вважаємо що існує
-                                exists = True
-                        except Exception:
-                            exists = True
-                    if not exists:
+                        exists = None
+
+                    if exists is None:
+                        if STRICT_SESSION_VALIDATION:
+                            logger.warning(
+                                "❌ Session validation error",
+                                session_id=payload["session_id"][:8] + "...",
+                                reason="unknown exists() result type",
+                            )
+                            raise HTTPException(
+                                status_code=401, detail="Session validation failed"
+                            )
+                        else:
+                            logger.debug(
+                                "Skipping session existence validation (non-strict mode)"
+                            )
+                    elif not exists:
                         logger.warning(
                             "❌ Session not found after server restart",
                             session_id=payload["session_id"][:8] + "...",
@@ -492,7 +519,6 @@ class AuthManager:
                         try:
                             await self.update_session_activity(payload["session_id"])
                         except Exception as _e:
-                            # Не валимо токен через проблеми моків/парсингу
                             logger.debug(
                                 "Session activity update skipped", error=str(_e)
                             )
@@ -500,11 +526,18 @@ class AuthManager:
                 except HTTPException:
                     raise
                 except Exception as redis_error:
-                    logger.debug(
-                        "⚠️ Redis operation non-fatal during token validation",
-                        error=str(redis_error),
-                    )
-                    # У тестах з MagicMock не перериваємо валідацію
+                    if STRICT_SESSION_VALIDATION:
+                        logger.warning(
+                            "❌ Redis error during session validation", error=str(redis_error)
+                        )
+                        raise HTTPException(
+                            status_code=401, detail="Session validation failed"
+                        )
+                    else:
+                        logger.debug(
+                            "⚠️ Redis operation non-fatal during token validation",
+                            error=str(redis_error),
+                        )
 
             logger.info(
                 "✅ Token validation successful", user_id=payload.get("user_id")
@@ -555,9 +588,25 @@ class AuthManager:
                 if inspect.isawaitable(exists_result)
                 else exists_result
             )
-            # Якщо тип невідомий (наприклад, MagicMock), вважаємо що сесія існує (не блокуємо тести)
-            exists = bool(exists_val) if isinstance(exists_val, (bool, int)) else True
-            if not exists:
+            if isinstance(exists_val, (bool, int)):
+                exists = bool(exists_val)
+            else:
+                exists = None
+            if exists is None:
+                if STRICT_SESSION_VALIDATION:
+                    logger.warning(
+                        "❌ Session validation error during refresh",
+                        session_id=session_id[:8] + "...",
+                        reason="unknown exists() result type",
+                    )
+                    raise HTTPException(
+                        status_code=401, detail="Session validation failed"
+                    )
+                else:
+                    logger.debug(
+                        "Skipping session existence validation during refresh (non-strict mode)"
+                    )
+            elif not exists:
                 logger.warning(
                     "❌ Session not found during refresh",
                     session_id=session_id[:8] + "...",
@@ -576,8 +625,16 @@ class AuthManager:
                     elif isinstance(session_data, str):
                         raw = session_data
                     else:
-                        # Невідомий тип моків — не блокуємо
-                        raw = None
+                        if STRICT_SESSION_VALIDATION:
+                            logger.warning(
+                                "❌ Invalid session data type during refresh",
+                                session_id=session_id[:8] + "...",
+                            )
+                            raise HTTPException(
+                                status_code=401, detail="Session validation failed"
+                            )
+                        else:
+                            raw = None
                     if raw:
                         data = await self.async_optimizer.json_loads(raw)
                         # Перевірка fingerprint (IP+UA hash) якщо присутній у токені та сесії
@@ -615,9 +672,17 @@ class AuthManager:
             except HTTPException:
                 raise
             except Exception as e:
-                logger.debug(
-                    "Non-fatal session validation issue during refresh", error=str(e)
-                )
+                if STRICT_SESSION_VALIDATION:
+                    logger.warning(
+                        "❌ Session validation error during refresh", error=str(e)
+                    )
+                    raise HTTPException(
+                        status_code=401, detail="Session validation failed"
+                    )
+                else:
+                    logger.debug(
+                        "Non-fatal session validation issue during refresh", error=str(e)
+                    )
 
         # Створюємо новий access токен з тими ж даними (ручне оновлення)
         token_data = {
@@ -865,8 +930,8 @@ class AuthManager:
     def _lock_key(self, username: str, ip_address: str) -> str:
         return f"lock:{self._normalize_username(username)}:{self._normalize_ip_address(ip_address)}"
 
-    def is_locked(self, username: str, ip_address: str) -> bool:
-        """Перевірка блокування акаунту/IP"""
+    async def is_locked(self, username: str, ip_address: str) -> bool:
+        """Перевірка блокування акаунту/IP (async)"""
         enable_lockout = os.getenv(
             "ENABLE_LOGIN_LOCKOUT", "true" if not self.is_development else "false"
         ).lower() in ("1", "true", "yes")
@@ -877,14 +942,10 @@ class AuthManager:
         if self.redis_client:
             try:
                 res = self.redis_client.exists(key)
-                if inspect.isawaitable(res):
-                    loop = asyncio.get_event_loop()
-                    # Якщо цикл вже запущено, уникаємо блокування та вважаємо, що lock відсутній
-                    if loop.is_running():
-                        return False
-                    exists = loop.run_until_complete(res)
-                    return bool(exists)
-                return bool(res)
+                exists_val = (
+                    await res if inspect.isawaitable(res) else res
+                )
+                return bool(exists_val)
             except Exception:
                 pass
         # In-memory
@@ -896,8 +957,8 @@ class AuthManager:
         exp_ts = self._locks.get(key)
         return bool(exp_ts and exp_ts > now_ts)
 
-    def apply_lockout_if_needed(self, username: str, ip_address: str):
-        """Встановлює блокування при перевищенні ліміту"""
+    async def apply_lockout_if_needed(self, username: str, ip_address: str):
+        """Встановлює блокування при перевищенні ліміту (async)"""
         enable_lockout = os.getenv(
             "ENABLE_LOGIN_LOCKOUT", "true" if not self.is_development else "false"
         ).lower() in ("1", "true", "yes")
@@ -922,11 +983,7 @@ class AuthManager:
                         lock_key, LOGIN_LOCKOUT_SECONDS, "1"
                     )
                     if inspect.isawaitable(setex_res):
-                        loop = asyncio.get_event_loop()
-                        if loop.is_running():
-                            loop.create_task(setex_res)
-                        else:
-                            loop.run_until_complete(setex_res)
+                        await setex_res
                 except Exception:
                     pass
             # In-memory lock
