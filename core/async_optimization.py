@@ -21,12 +21,13 @@ from collections import deque
 import hashlib
 
 # Type definitions
-T = TypeVar('T')
+T = TypeVar("T")
 AsyncFunc = Callable[..., Coroutine[Any, Any, T]]
 
 
 class TaskPriority(Enum):
     """Пріоритети задач"""
+
     LOW = 1
     NORMAL = 2
     HIGH = 3
@@ -36,6 +37,7 @@ class TaskPriority(Enum):
 @dataclass
 class BackgroundTask:
     """Модель фонової задачі"""
+
     id: str
     name: str
     func: Callable
@@ -59,7 +61,9 @@ class AsyncOptimizer:
         self.max_workers = max_workers
         self.max_tasks = max_tasks
         # Відключення фон-петель у тест-середовищі або за прапором
-        self.disable_background_tasks = bool(os.getenv("PYTEST_CURRENT_TEST")) or os.getenv("DISABLE_BACKGROUND_TASKS", "").lower() in ("1", "true", "yes")
+        self.disable_background_tasks = bool(
+            os.getenv("PYTEST_CURRENT_TEST")
+        ) or os.getenv("DISABLE_BACKGROUND_TASKS", "").lower() in ("1", "true", "yes")
 
         # Пули для виконання задач
         self.thread_pool = ThreadPoolExecutor(max_workers=max_workers)
@@ -87,14 +91,16 @@ class AsyncOptimizer:
             "tasks_completed": 0,
             "tasks_failed": 0,
             "cache_hits": 0,
-            "cache_misses": 0
+            "cache_misses": 0,
         }
 
     async def initialize(self):
         """Ініціалізація оптимізатора"""
-        self.logger.info("Initializing AsyncOptimizer",
-                        max_workers=self.max_workers,
-                        max_tasks=self.max_tasks)
+        self.logger.info(
+            "Initializing AsyncOptimizer",
+            max_workers=self.max_workers,
+            max_tasks=self.max_tasks,
+        )
 
         if self.disable_background_tasks:
             self.logger.debug("AsyncOptimizer background tasks disabled (test env)")
@@ -111,14 +117,14 @@ class AsyncOptimizer:
         self.logger.info("Shutting down AsyncOptimizer")
 
         # Зупинка воркерів
-        if hasattr(self, 'worker_task'):
+        if hasattr(self, "worker_task"):
             self.worker_task.cancel()
             try:
                 await self.worker_task
             except asyncio.CancelledError:
                 pass
 
-        if hasattr(self, 'cache_cleanup_task'):
+        if hasattr(self, "cache_cleanup_task"):
             self.cache_cleanup_task.cancel()
             try:
                 await self.cache_cleanup_task
@@ -139,25 +145,24 @@ class AsyncOptimizer:
         """Асинхронна серіалізація JSON"""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            self.thread_pool,
-            functools.partial(json.dumps, obj, **kwargs)
+            self.thread_pool, functools.partial(json.dumps, obj, **kwargs)
         )
 
     async def json_loads(self, s: str) -> Any:
         """Асинхронна десеріалізація JSON"""
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            self.thread_pool,
-            json.loads,
-            s
-        )
+        return await loop.run_in_executor(self.thread_pool, json.loads, s)
 
-    async def read_file(self, path: str, mode: str = 'r', encoding: str = 'utf-8') -> str:
+    async def read_file(
+        self, path: str, mode: str = "r", encoding: str = "utf-8"
+    ) -> str:
         """Асинхронне читання файлу"""
         async with aiofiles.open(path, mode=mode, encoding=encoding) as f:
             return await f.read()
 
-    async def write_file(self, path: str, content: str, mode: str = 'w', encoding: str = 'utf-8'):
+    async def write_file(
+        self, path: str, content: str, mode: str = "w", encoding: str = "utf-8"
+    ):
         """Асинхронний запис у файл"""
         async with aiofiles.open(path, mode=mode, encoding=encoding) as f:
             await f.write(content)
@@ -166,27 +171,27 @@ class AsyncOptimizer:
         """Виконання блокуючої функції в окремому потоці"""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            self.thread_pool,
-            functools.partial(func, *args, **kwargs)
+            self.thread_pool, functools.partial(func, *args, **kwargs)
         )
 
     async def run_in_process(self, func: Callable, *args, **kwargs) -> Any:
         """Виконання CPU-інтенсивної функції в окремому процесі"""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            self.process_pool,
-            functools.partial(func, *args, **kwargs)
+            self.process_pool, functools.partial(func, *args, **kwargs)
         )
 
     # === Управління фоновими задачами ===
 
-    async def create_background_task(self,
-                                   name: str,
-                                   func: Callable,
-                                   *args,
-                                   priority: TaskPriority = TaskPriority.NORMAL,
-                                   use_cache: bool = True,
-                                   **kwargs) -> str:
+    async def create_background_task(
+        self,
+        name: str,
+        func: Callable,
+        *args,
+        priority: TaskPriority = TaskPriority.NORMAL,
+        use_cache: bool = True,
+        **kwargs,
+    ) -> str:
         """Створення фонової задачі"""
         # Генерація ID задачі
         task_id = self._generate_task_id(name, args, kwargs)
@@ -216,12 +221,14 @@ class AsyncOptimizer:
                     priority=priority,
                     started_at=time.time(),
                     completed_at=time.time(),
-                    result=result
+                    result=result,
                 )
                 self.completed_tasks[task_id] = bt
                 self.result_cache[task_id] = result
                 self.stats["tasks_completed"] += 1
-                self.logger.debug("Background task executed inline (test mode)", task_id=task_id)
+                self.logger.debug(
+                    "Background task executed inline (test mode)", task_id=task_id
+                )
                 return task_id
             except Exception as e:
                 bt = BackgroundTask(
@@ -233,11 +240,15 @@ class AsyncOptimizer:
                     priority=priority,
                     started_at=time.time(),
                     completed_at=time.time(),
-                    error=e
+                    error=e,
                 )
                 self.completed_tasks[task_id] = bt
                 self.stats["tasks_failed"] += 1
-                self.logger.error("Inline background task failed (test mode)", task_id=task_id, error=str(e))
+                self.logger.error(
+                    "Inline background task failed (test mode)",
+                    task_id=task_id,
+                    error=str(e),
+                )
                 return task_id
 
         # Інакше — звичайний шлях через чергу та воркер
@@ -247,14 +258,16 @@ class AsyncOptimizer:
             func=func,
             args=args,
             kwargs=kwargs,
-            priority=priority
+            priority=priority,
         )
         self.task_queues[priority].append(task)
         self.stats["tasks_created"] += 1
-        self.logger.info("Background task created",
-                        task_id=task_id,
-                        name=name,
-                        priority=priority.name)
+        self.logger.info(
+            "Background task created",
+            task_id=task_id,
+            name=name,
+            priority=priority.name,
+        )
         return task_id
 
     async def get_task_result(self, task_id: str, timeout: float = None) -> Any:
@@ -273,10 +286,7 @@ class AsyncOptimizer:
         # Очікування виконання
         if task_id in self.active_tasks:
             try:
-                await asyncio.wait_for(
-                    self.active_tasks[task_id],
-                    timeout=timeout
-                )
+                await asyncio.wait_for(self.active_tasks[task_id], timeout=timeout)
             except asyncio.TimeoutError:
                 raise TimeoutError(f"Task {task_id} timeout")
 
@@ -309,15 +319,17 @@ class AsyncOptimizer:
 
     # === Паралельне виконання ===
 
-    async def gather_with_timeout(self,
-                                *coroutines: Coroutine,
-                                timeout: float = None,
-                                return_exceptions: bool = True) -> List[Any]:
+    async def gather_with_timeout(
+        self,
+        *coroutines: Coroutine,
+        timeout: float = None,
+        return_exceptions: bool = True,
+    ) -> List[Any]:
         """Виконання кількох корутин паралельно з таймаутом"""
         try:
             return await asyncio.wait_for(
                 asyncio.gather(*coroutines, return_exceptions=return_exceptions),
-                timeout=timeout
+                timeout=timeout,
             )
         except asyncio.TimeoutError:
             self.logger.warning("Gather operation timeout", count=len(coroutines))
@@ -327,10 +339,9 @@ class AsyncOptimizer:
                     coro.close()
             raise
 
-    async def map_async(self,
-                       func: AsyncFunc,
-                       items: List[Any],
-                       max_concurrent: int = 10) -> List[Any]:
+    async def map_async(
+        self, func: AsyncFunc, items: List[Any], max_concurrent: int = 10
+    ) -> List[Any]:
         """Асинхронний map з обмеженням конкурентності"""
         semaphore = asyncio.Semaphore(max_concurrent)
 
@@ -339,22 +350,19 @@ class AsyncOptimizer:
                 return await func(item)
 
         return await asyncio.gather(
-            *[limited_func(item) for item in items],
-            return_exceptions=False
+            *[limited_func(item) for item in items], return_exceptions=False
         )
 
-    async def batch_process(self,
-                          func: AsyncFunc,
-                          items: List[Any],
-                          batch_size: int = 100) -> List[Any]:
+    async def batch_process(
+        self, func: AsyncFunc, items: List[Any], batch_size: int = 100
+    ) -> List[Any]:
         """Обробка елементів батчами"""
         results = []
 
         for i in range(0, len(items), batch_size):
-            batch = items[i:i + batch_size]
+            batch = items[i : i + batch_size]
             batch_results = await asyncio.gather(
-                *[func(item) for item in batch],
-                return_exceptions=False
+                *[func(item) for item in batch], return_exceptions=False
             )
             results.extend(batch_results)
 
@@ -413,9 +421,11 @@ class AsyncOptimizer:
             self.completed_tasks[task.id] = task
             self.stats["tasks_completed"] += 1
 
-            self.logger.info("Task completed",
-                           task_id=task.id,
-                           duration=task.completed_at - task.started_at)
+            self.logger.info(
+                "Task completed",
+                task_id=task.id,
+                duration=task.completed_at - task.started_at,
+            )
 
         except Exception as e:
             task.error = e
@@ -423,18 +433,16 @@ class AsyncOptimizer:
             self.completed_tasks[task.id] = task
             self.stats["tasks_failed"] += 1
 
-            self.logger.error("Task failed",
-                            task_id=task.id,
-                            error=str(e))
+            self.logger.error("Task failed", task_id=task.id, error=str(e))
 
             # Retry логіка
             if task.retries < task.max_retries:
                 task.retries += 1
                 task.error = None
                 self.task_queues[task.priority].append(task)
-                self.logger.info("Task retry scheduled",
-                               task_id=task.id,
-                               retry=task.retries)
+                self.logger.info(
+                    "Task retry scheduled", task_id=task.id, retry=task.retries
+                )
 
         finally:
             # Видалення з активних
@@ -449,7 +457,8 @@ class AsyncOptimizer:
 
                 now = time.time()
                 expired_keys = [
-                    key for key, value in self.completed_tasks.items()
+                    key
+                    for key, value in self.completed_tasks.items()
                     if now - value.completed_at > self.cache_ttl
                 ]
 
@@ -480,14 +489,16 @@ class AsyncOptimizer:
             "active_tasks": len(self.active_tasks),
             "queued_tasks": sum(len(q) for q in self.task_queues.values()),
             "completed_tasks": len(self.completed_tasks),
-            "cache_size": len(self.result_cache)
+            "cache_size": len(self.result_cache),
         }
 
 
 # === Декоратори для оптимізації ===
 
+
 def async_cached(ttl: int = 300):
     """Декоратор для кешування результатів асинхронних функцій"""
+
     def decorator(func: AsyncFunc) -> AsyncFunc:
         cache = {}
         cache_times = {}
@@ -512,11 +523,13 @@ def async_cached(ttl: int = 300):
             return result
 
         return wrapper
+
     return decorator
 
 
 def async_retry(max_attempts: int = 3, delay: float = 1.0):
     """Декоратор для автоматичного повтору асинхронних операцій"""
+
     def decorator(func: AsyncFunc) -> AsyncFunc:
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
@@ -533,28 +546,30 @@ def async_retry(max_attempts: int = 3, delay: float = 1.0):
             raise last_exception
 
         return wrapper
+
     return decorator
 
 
-def run_in_background(optimizer: AsyncOptimizer, priority: TaskPriority = TaskPriority.NORMAL):
+def run_in_background(
+    optimizer: AsyncOptimizer, priority: TaskPriority = TaskPriority.NORMAL
+):
     """Декоратор для автоматичного виконання функції у фоні"""
+
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
             task_id = await optimizer.create_background_task(
-                name=func.__name__,
-                func=func,
-                *args,
-                priority=priority,
-                **kwargs
+                name=func.__name__, func=func, *args, priority=priority, **kwargs
             )
             return task_id
 
         return wrapper
+
     return decorator
 
 
 # === Утиліти для міграції коду ===
+
 
 class AsyncContextManager:
     """Базовий клас для асинхронних контекстних менеджерів"""
@@ -615,10 +630,9 @@ class AsyncBatcher:
             else:
                 # Виконання в thread pool
                 loop = asyncio.get_event_loop()
-                await asyncio.gather(*[
-                    loop.run_in_executor(None, func, item)
-                    for item in items
-                ])
+                await asyncio.gather(
+                    *[loop.run_in_executor(None, func, item) for item in items]
+                )
 
     async def _auto_flush(self):
         """Автоматичне виконання через інтервал"""

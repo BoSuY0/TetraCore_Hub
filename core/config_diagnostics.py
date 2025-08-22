@@ -3,6 +3,7 @@
 Produces a structured report of security-related configuration issues
 with severities: critical, warning, info.
 """
+
 from __future__ import annotations
 
 import os
@@ -17,13 +18,21 @@ def _bool(env: str, default: bool = False) -> bool:
     return val.strip().lower() in ("1", "true", "yes", "on")
 
 
-def _add(issues: List[Dict[str, Any]], severity: str, code: str, message: str, remedy: str | None = None):
-    issues.append({
-        "severity": severity,
-        "code": code,
-        "message": message,
-        "remedy": remedy,
-    })
+def _add(
+    issues: List[Dict[str, Any]],
+    severity: str,
+    code: str,
+    message: str,
+    remedy: str | None = None,
+):
+    issues.append(
+        {
+            "severity": severity,
+            "code": code,
+            "message": message,
+            "remedy": remedy,
+        }
+    )
 
 
 def run_security_config_diagnostics(settings) -> Dict[str, Any]:
@@ -44,100 +53,244 @@ def run_security_config_diagnostics(settings) -> Dict[str, Any]:
     if prod:
         if jwt_alg.startswith("HS"):
             if len(secret_key) < 32:
-                _add(issues, "critical", "JWT_SECRET_WEAK", "SECRET_KEY занадто короткий для HS* у проді", "Використати RS256 з ключами або довший секрет (>=32) і краще RS/EdDSA")
+                _add(
+                    issues,
+                    "critical",
+                    "JWT_SECRET_WEAK",
+                    "SECRET_KEY занадто короткий для HS* у проді",
+                    "Використати RS256 з ключами або довший секрет (>=32) і краще RS/EdDSA",
+                )
         else:
             if not pub_pem or not priv_pem:
-                _add(issues, "critical", "JWT_KEYS_MISSING", "Відсутні пари асиметричних ключів JWT (PUBLIC/PRIVATE)", "Встановити JWT_PRIVATE_KEY_PEM і JWT_PUBLIC_KEY_PEM")
+                _add(
+                    issues,
+                    "critical",
+                    "JWT_KEYS_MISSING",
+                    "Відсутні пари асиметричних ключів JWT (PUBLIC/PRIVATE)",
+                    "Встановити JWT_PRIVATE_KEY_PEM і JWT_PUBLIC_KEY_PEM",
+                )
             if not kid:
-                _add(issues, "warning", "JWT_KID_MISSING", "Відсутній JWT_KEY_ID для JWKS ротації", "Задати JWT_KEY_ID")
+                _add(
+                    issues,
+                    "warning",
+                    "JWT_KID_MISSING",
+                    "Відсутній JWT_KEY_ID для JWKS ротації",
+                    "Задати JWT_KEY_ID",
+                )
         if not enforce_claims:
-            _add(issues, "warning", "JWT_CLAIMS_DISABLED", "Перевірка iss/aud вимкнена у проді", "ENFORCE_JWT_CLAIMS=true")
+            _add(
+                issues,
+                "warning",
+                "JWT_CLAIMS_DISABLED",
+                "Перевірка iss/aud вимкнена у проді",
+                "ENFORCE_JWT_CLAIMS=true",
+            )
         if not rotate_refresh:
-            _add(issues, "warning", "REFRESH_ROTATION_DISABLED", "Ротація refresh токенів вимкнена", "ROTATE_REFRESH_TOKENS=true")
+            _add(
+                issues,
+                "warning",
+                "REFRESH_ROTATION_DISABLED",
+                "Ротація refresh токенів вимкнена",
+                "ROTATE_REFRESH_TOKENS=true",
+            )
 
     # Proxy / client IP
-    trusted = [ip.strip() for ip in os.getenv("TRUSTED_PROXY_IPS", "").split(",") if ip.strip()]
+    trusted = [
+        ip.strip() for ip in os.getenv("TRUSTED_PROXY_IPS", "").split(",") if ip.strip()
+    ]
     if prod:
         if not trusted:
-            _add(issues, "warning", "PROXY_TRUST_EMPTY", "TRUSTED_PROXY_IPS не заданий у проді", "Задати IP балансера/проксі")
+            _add(
+                issues,
+                "warning",
+                "PROXY_TRUST_EMPTY",
+                "TRUSTED_PROXY_IPS не заданий у проді",
+                "Задати IP балансера/проксі",
+            )
         else:
             for ip in trusted:
                 try:
                     ipaddress.ip_address(ip)
                 except ValueError:
-                    _add(issues, "warning", "PROXY_TRUST_INVALID", f"Невалідний IP у TRUSTED_PROXY_IPS: {ip}", "Вказати коректні IP-адреси")
+                    _add(
+                        issues,
+                        "warning",
+                        "PROXY_TRUST_INVALID",
+                        f"Невалідний IP у TRUSTED_PROXY_IPS: {ip}",
+                        "Вказати коректні IP-адреси",
+                    )
 
     # CORS/Hosts
-    allowed_origins = os.getenv("ALLOWED_ORIGINS", ",".join(settings.allowed_origins or [])).split(",")
+    allowed_origins = os.getenv(
+        "ALLOWED_ORIGINS", ",".join(settings.allowed_origins or [])
+    ).split(",")
     allowed_origins = [o.strip() for o in allowed_origins if o.strip()]
     allowed_hosts = os.getenv("ALLOWED_HOSTS", "").split(",")
     allowed_hosts = [h.strip() for h in allowed_hosts if h.strip()]
 
     if prod:
         if not allowed_origins:
-            _add(issues, "warning", "CORS_EMPTY", "ALLOWED_ORIGINS порожній у проді", "Додати прод-домени у ALLOWED_ORIGINS")
+            _add(
+                issues,
+                "warning",
+                "CORS_EMPTY",
+                "ALLOWED_ORIGINS порожній у проді",
+                "Додати прод-домени у ALLOWED_ORIGINS",
+            )
         if "*" in allowed_origins:
-            _add(issues, "critical", "CORS_WILDCARD", "CORS містить '*' у проді", "Прибрати '*' із ALLOWED_ORIGINS")
+            _add(
+                issues,
+                "critical",
+                "CORS_WILDCARD",
+                "CORS містить '*' у проді",
+                "Прибрати '*' із ALLOWED_ORIGINS",
+            )
         if not allowed_hosts:
-            _add(issues, "warning", "HOSTS_EMPTY", "ALLOWED_HOSTS порожній у проді", "Додати прод-хости у ALLOWED_HOSTS")
+            _add(
+                issues,
+                "warning",
+                "HOSTS_EMPTY",
+                "ALLOWED_HOSTS порожній у проді",
+                "Додати прод-хости у ALLOWED_HOSTS",
+            )
         if any(h == "*" for h in allowed_hosts):
-            _add(issues, "warning", "HOSTS_WILDCARD", "ALLOWED_HOSTS містить '*'", "Прибрати wildcard у ALLOWED_HOSTS")
+            _add(
+                issues,
+                "warning",
+                "HOSTS_WILDCARD",
+                "ALLOWED_HOSTS містить '*'",
+                "Прибрати wildcard у ALLOWED_HOSTS",
+            )
 
     # Redis (REDIS_ENABLED deprecated; Redis завжди увімкнений, контролюється REDIS_URL)
     if os.getenv("REDIS_ENABLED") is not None:
         url = os.getenv("REDIS_URL", "")
         tls_cert_reqs = os.getenv("REDIS_SSL_CERT_REQS", "required").lower()
-        check_host = os.getenv("REDIS_SSL_CHECK_HOSTNAME", "true").lower() in ("1","true","yes")
+        check_host = os.getenv("REDIS_SSL_CHECK_HOSTNAME", "true").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
         if url.startswith("rediss://"):
             if tls_cert_reqs != "required":
-                _add(issues, "warning", "REDIS_TLS_WEAK", "REDIS_SSL_CERT_REQS != 'required' при TLS", "Встановити REDIS_SSL_CERT_REQS=required")
+                _add(
+                    issues,
+                    "warning",
+                    "REDIS_TLS_WEAK",
+                    "REDIS_SSL_CERT_REQS != 'required' при TLS",
+                    "Встановити REDIS_SSL_CERT_REQS=required",
+                )
             if not check_host:
-                _add(issues, "warning", "REDIS_TLS_HOSTNAME", "REDIS_SSL_CHECK_HOSTNAME вимкнено", "Увімкнути REDIS_SSL_CHECK_HOSTNAME=true")
+                _add(
+                    issues,
+                    "warning",
+                    "REDIS_TLS_HOSTNAME",
+                    "REDIS_SSL_CHECK_HOSTNAME вимкнено",
+                    "Увімкнути REDIS_SSL_CHECK_HOSTNAME=true",
+                )
         else:
-            _add(issues, "warning", "REDIS_NO_TLS", "REDIS_URL без TLS (не rediss://)", "Використати TLS (rediss://)")
+            _add(
+                issues,
+                "warning",
+                "REDIS_NO_TLS",
+                "REDIS_URL без TLS (не rediss://)",
+                "Використати TLS (rediss://)",
+            )
 
     # Secret provider
     secret_provider = os.getenv("SECRET_PROVIDER", "env").lower()
     if prod and secret_provider == "env":
-        _add(issues, "critical", "SECRETS_ENV", "SECRET_PROVIDER=env у проді", "Використати AWS/Vault секрети")
+        _add(
+            issues,
+            "critical",
+            "SECRETS_ENV",
+            "SECRET_PROVIDER=env у проді",
+            "Використати AWS/Vault секрети",
+        )
 
     # Auth & admin
     require_auth = _bool("REQUIRE_AUTHENTICATION", True)
     if prod and not require_auth:
-        _add(issues, "critical", "AUTH_DISABLED", "REQUIRE_AUTHENTICATION=false у проді", "Увімкнути автентифікацію")
+        _add(
+            issues,
+            "critical",
+            "AUTH_DISABLED",
+            "REQUIRE_AUTHENTICATION=false у проді",
+            "Увімкнути автентифікацію",
+        )
     admin_password = os.getenv("ADMIN_PASSWORD")
     if prod and admin_password and not admin_password.startswith("$2"):
-        _add(issues, "critical", "ADMIN_PLAIN", "ADMIN_PASSWORD не є bcrypt-хешем у проді", "Встановити bcrypt-хеш у ADMIN_PASSWORD")
+        _add(
+            issues,
+            "critical",
+            "ADMIN_PLAIN",
+            "ADMIN_PASSWORD не є bcrypt-хешем у проді",
+            "Встановити bcrypt-хеш у ADMIN_PASSWORD",
+        )
 
     # Docs/OpenAPI
     enable_sec_endpoints = _bool("ENABLE_SECURITY_ENDPOINTS", env == "development")
     if prod and enable_sec_endpoints:
-        _add(issues, "warning", "SEC_ENDPOINTS_ENABLED", "ENABLE_SECURITY_ENDPOINTS=true у проді", "Вимкнути ENABLE_SECURITY_ENDPOINTS")
+        _add(
+            issues,
+            "warning",
+            "SEC_ENDPOINTS_ENABLED",
+            "ENABLE_SECURITY_ENDPOINTS=true у проді",
+            "Вимкнути ENABLE_SECURITY_ENDPOINTS",
+        )
 
     # HTTPS/HSTS
     force_https = _bool("FORCE_HTTPS", prod)
     if prod and not force_https:
-        _add(issues, "warning", "HTTPS_NOT_FORCED", "FORCE_HTTPS вимкнено у проді", "FORCE_HTTPS=true")
+        _add(
+            issues,
+            "warning",
+            "HTTPS_NOT_FORCED",
+            "FORCE_HTTPS вимкнено у проді",
+            "FORCE_HTTPS=true",
+        )
 
     # Logging
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
     if prod and log_level == "DEBUG":
-        _add(issues, "warning", "DEBUG_LOG", "LOG_LEVEL=DEBUG у проді", "Змінити на INFO або вище")
+        _add(
+            issues,
+            "warning",
+            "DEBUG_LOG",
+            "LOG_LEVEL=DEBUG у проді",
+            "Змінити на INFO або вище",
+        )
 
     # TrustedHost middleware override
-    if prod and os.getenv("DISABLE_TRUSTED_HOST_MW", "").lower() in ("1","true","yes"):
-        _add(issues, "critical", "TRUSTED_HOST_DISABLED", "Вимкнено TrustedHostMiddleware у проді", "Прибрати DISABLE_TRUSTED_HOST_MW")
+    if prod and os.getenv("DISABLE_TRUSTED_HOST_MW", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        _add(
+            issues,
+            "critical",
+            "TRUSTED_HOST_DISABLED",
+            "Вимкнено TrustedHostMiddleware у проді",
+            "Прибрати DISABLE_TRUSTED_HOST_MW",
+        )
 
     # WS
     auth_token = os.getenv("AUTH_TOKEN")
     if prod and auth_token:
-        _add(issues, "info", "WS_STATIC_TOKEN", "Встановлено статичний AUTH_TOKEN для WS (переконайтесь у його мінімальному доступі)", "Розглянути перехід на JWT тільки")
+        _add(
+            issues,
+            "info",
+            "WS_STATIC_TOKEN",
+            "Встановлено статичний AUTH_TOKEN для WS (переконайтесь у його мінімальному доступі)",
+            "Розглянути перехід на JWT тільки",
+        )
 
-    status = "ok" if not any(i["severity"] == "critical" for i in issues) else "attention"
+    status = (
+        "ok" if not any(i["severity"] == "critical" for i in issues) else "attention"
+    )
     return {
         "environment": env,
         "status": status,
         "issues": issues,
     }
-
-

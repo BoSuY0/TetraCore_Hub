@@ -42,6 +42,7 @@ BLOOM_FILTER_ERROR_RATE = 0.01
 
 class RedisMode(Enum):
     """Режими роботи Redis"""
+
     SINGLE = "single"
     CLUSTER = "cluster"
     SENTINEL = "sentinel"
@@ -49,6 +50,7 @@ class RedisMode(Enum):
 
 class CacheStrategy(Enum):
     """Стратегії кешування"""
+
     LRU = "lru"  # Least Recently Used
     LFU = "lfu"  # Least Frequently Used
     TTL = "ttl"  # Time To Live based
@@ -58,6 +60,7 @@ class CacheStrategy(Enum):
 @dataclass
 class CacheEntry:
     """Запис в кеші"""
+
     key: str
     value: Any
     size: int
@@ -96,7 +99,7 @@ class RedisOptimizer:
         cache_strategy: CacheStrategy = CacheStrategy.ADAPTIVE,
         cluster_nodes: Optional[List[str]] = None,
         sentinel_hosts: Optional[List[Tuple[str, int]]] = None,
-        sentinel_service: str = "mymaster"
+        sentinel_service: str = "mymaster",
     ):
         self.redis_url = redis_url
         self.mode = mode
@@ -115,7 +118,9 @@ class RedisOptimizer:
         self.sentinel_service = sentinel_service
 
         # Pipeline батчінг
-        self.pipeline_queue: Dict[str, List[Tuple[str, Callable, tuple, dict]]] = defaultdict(list)
+        self.pipeline_queue: Dict[str, List[Tuple[str, Callable, tuple, dict]]] = (
+            defaultdict(list)
+        )
         self.pipeline_timers: Dict[str, asyncio.Task] = {}
 
         # Локальний кеш
@@ -131,7 +136,7 @@ class RedisOptimizer:
             "compressed_values": 0,
             "bytes_saved": 0,
             "errors": 0,
-            "retries": 0
+            "retries": 0,
         }
 
         # Pub/Sub оптимізації
@@ -141,10 +146,12 @@ class RedisOptimizer:
         # Distributed locks
         self.locks: Dict[str, asyncio.Lock] = {}
 
-        logger.info("Redis optimizer initialized",
-                   mode=mode.value,
-                   pool_size=pool_size,
-                   compression=enable_compression)
+        logger.info(
+            "Redis optimizer initialized",
+            mode=mode.value,
+            pool_size=pool_size,
+            compression=enable_compression,
+        )
 
     async def connect(self):
         """Підключення до Redis"""
@@ -175,7 +182,7 @@ class RedisOptimizer:
             socket_timeout=DEFAULT_TIMEOUT,
             socket_connect_timeout=DEFAULT_TIMEOUT,
             retry_on_timeout=True,
-            retry_on_error=[ConnectionError, TimeoutError]
+            retry_on_error=[ConnectionError, TimeoutError],
         )
 
     async def _connect_cluster(self):
@@ -193,7 +200,7 @@ class RedisOptimizer:
             decode_responses=False,
             skip_full_coverage_check=True,
             max_connections=self.pool_size,
-            socket_timeout=DEFAULT_TIMEOUT
+            socket_timeout=DEFAULT_TIMEOUT,
         )
 
     async def _connect_sentinel(self):
@@ -201,25 +208,20 @@ class RedisOptimizer:
         if not self.sentinel_hosts:
             raise ValueError("Sentinel hosts not provided")
 
-        sentinel = Sentinel(
-            self.sentinel_hosts,
-            socket_timeout=DEFAULT_TIMEOUT
-        )
+        sentinel = Sentinel(self.sentinel_hosts, socket_timeout=DEFAULT_TIMEOUT)
 
         # Отримуємо master для запису
         self.redis_client = await sentinel.master_for(
             self.sentinel_service,
             decode_responses=False,
-            max_connections=self.pool_size
+            max_connections=self.pool_size,
         )
 
     async def _create_pubsub_client(self) -> aioredis.Redis:
         """Створення окремого клієнта для Pub/Sub"""
         if self.mode == RedisMode.SINGLE:
             return await aioredis.from_url(
-                self.redis_url,
-                decode_responses=False,
-                max_connections=5
+                self.redis_url, decode_responses=False, max_connections=5
             )
         else:
             # Для cluster/sentinel використовуємо основний клієнт
@@ -261,10 +263,7 @@ class RedisOptimizer:
 
         try:
             # Отримання з Redis
-            value = await self._execute_with_retry(
-                self.redis_client.get,
-                full_key
-            )
+            value = await self._execute_with_retry(self.redis_client.get, full_key)
 
             if value is None:
                 return None
@@ -284,11 +283,7 @@ class RedisOptimizer:
             return None
 
     async def set(
-        self,
-        key: str,
-        value: Any,
-        ttl: Optional[int] = None,
-        use_pipeline: bool = None
+        self, key: str, value: Any, ttl: Optional[int] = None, use_pipeline: bool = None
     ) -> bool:
         """Оптимізоване збереження значення"""
         full_key = f"{CACHE_PREFIX}{key}"
@@ -302,15 +297,14 @@ class RedisOptimizer:
             use_pipeline = self.enable_pipeline
 
         if use_pipeline and not self._is_large_value(encoded_value):
-            return await self._add_to_pipeline("default", self._set_with_ttl, full_key, encoded_value, ttl)
+            return await self._add_to_pipeline(
+                "default", self._set_with_ttl, full_key, encoded_value, ttl
+            )
 
         # Безпосереднє збереження
         try:
             result = await self._execute_with_retry(
-                self.redis_client.set,
-                full_key,
-                encoded_value,
-                ex=ttl
+                self.redis_client.set, full_key, encoded_value, ex=ttl
             )
 
             # Оновлення локального кешу
@@ -336,8 +330,7 @@ class RedisOptimizer:
 
         try:
             result = await self._execute_with_retry(
-                self.redis_client.delete,
-                *full_keys
+                self.redis_client.delete, *full_keys
             )
 
             # Видалення з локального кешу
@@ -354,23 +347,19 @@ class RedisOptimizer:
     # === Pipeline операції ===
 
     async def _add_to_pipeline(
-        self,
-        pipeline_id: str,
-        operation: Callable,
-        *args,
-        **kwargs
+        self, pipeline_id: str, operation: Callable, *args, **kwargs
     ) -> Any:
         """Додавання операції в pipeline"""
         # Додаємо в чергу
-        self.pipeline_queue[pipeline_id].append((
-            f"op_{time.time()}",
-            operation,
-            args,
-            kwargs
-        ))
+        self.pipeline_queue[pipeline_id].append(
+            (f"op_{time.time()}", operation, args, kwargs)
+        )
 
         # Запускаємо timer якщо потрібно
-        if pipeline_id not in self.pipeline_timers or self.pipeline_timers[pipeline_id].done():
+        if (
+            pipeline_id not in self.pipeline_timers
+            or self.pipeline_timers[pipeline_id].done()
+        ):
             self.pipeline_timers[pipeline_id] = asyncio.create_task(
                 self._pipeline_timer(pipeline_id)
             )
@@ -403,7 +392,7 @@ class RedisOptimizer:
                 # Додаємо всі операції
                 for _, operation, args, kwargs in operations:
                     # Викликаємо операцію в контексті pipeline
-                    method_name = operation.__name__.replace('_', '')
+                    method_name = operation.__name__.replace("_", "")
                     if hasattr(pipe, method_name):
                         getattr(pipe, method_name)(*args, **kwargs)
 
@@ -413,16 +402,18 @@ class RedisOptimizer:
                 self.metrics["pipeline_batches"] += 1
                 self.metrics["operations"] += len(operations)
 
-                logger.debug("Pipeline executed",
-                           pipeline_id=pipeline_id,
-                           operations=len(operations))
+                logger.debug(
+                    "Pipeline executed",
+                    pipeline_id=pipeline_id,
+                    operations=len(operations),
+                )
 
                 return results
 
         except Exception as e:
-            logger.error("Pipeline execution failed",
-                       pipeline_id=pipeline_id,
-                       error=str(e))
+            logger.error(
+                "Pipeline execution failed", pipeline_id=pipeline_id, error=str(e)
+            )
             self.metrics["errors"] += 1
 
     # === Pub/Sub оптимізації ===
@@ -436,9 +427,7 @@ class RedisOptimizer:
 
         try:
             return await self._execute_with_retry(
-                self.pubsub_client.publish,
-                full_channel,
-                encoded_message
+                self.pubsub_client.publish, full_channel, encoded_message
             )
         except Exception as e:
             logger.error("Publish failed", channel=channel, error=str(e))
@@ -451,7 +440,7 @@ class RedisOptimizer:
         self.subscriptions[full_channel].add(callback)
 
         # Запускаємо listener якщо ще не запущений
-        if not hasattr(self, '_pubsub_listener_task'):
+        if not hasattr(self, "_pubsub_listener_task"):
             self._pubsub_listener_task = asyncio.create_task(self._pubsub_listener())
 
         logger.info("Subscribed to channel", channel=channel)
@@ -468,9 +457,13 @@ class RedisOptimizer:
 
             # Слухаємо повідомлення
             async for message in pubsub.listen():
-                if message['type'] in ('message', 'pmessage'):
-                    channel = message['channel'].decode() if isinstance(message['channel'], bytes) else message['channel']
-                    data = message['data']
+                if message["type"] in ("message", "pmessage"):
+                    channel = (
+                        message["channel"].decode()
+                        if isinstance(message["channel"], bytes)
+                        else message["channel"]
+                    )
+                    data = message["data"]
 
                     # Декодуємо повідомлення
                     try:
@@ -483,7 +476,9 @@ class RedisOptimizer:
                         try:
                             await callback(channel, decoded_data)
                         except Exception as e:
-                            logger.error("Callback error", channel=channel, error=str(e))
+                            logger.error(
+                                "Callback error", channel=channel, error=str(e)
+                            )
 
         except asyncio.CancelledError:
             await pubsub.unsubscribe()
@@ -494,10 +489,7 @@ class RedisOptimizer:
     # === Distributed Locks ===
 
     async def acquire_lock(
-        self,
-        resource: str,
-        timeout: float = 10.0,
-        blocking: bool = True
+        self, resource: str, timeout: float = 10.0, blocking: bool = True
     ) -> bool:
         """Отримання distributed lock"""
         lock_key = f"{LOCK_PREFIX}{resource}"
@@ -509,10 +501,7 @@ class RedisOptimizer:
                 start_time = time.time()
                 while time.time() - start_time < timeout:
                     result = await self.redis_client.set(
-                        lock_key,
-                        identifier,
-                        nx=True,
-                        ex=int(timeout)
+                        lock_key, identifier, nx=True, ex=int(timeout)
                     )
                     if result:
                         self.locks[resource] = identifier
@@ -522,10 +511,7 @@ class RedisOptimizer:
             else:
                 # Спробуємо отримати lock без очікування
                 result = await self.redis_client.set(
-                    lock_key,
-                    identifier,
-                    nx=True,
-                    ex=int(timeout)
+                    lock_key, identifier, nx=True, ex=int(timeout)
                 )
                 if result:
                     self.locks[resource] = identifier
@@ -553,12 +539,7 @@ class RedisOptimizer:
             end
             """
 
-            result = await self.redis_client.eval(
-                lua_script,
-                1,
-                lock_key,
-                identifier
-            )
+            result = await self.redis_client.eval(lua_script, 1, lock_key, identifier)
 
             if result:
                 del self.locks[resource]
@@ -578,7 +559,9 @@ class RedisOptimizer:
             serialized = value
         else:
             try:
-                serialized = json.dumps(value, default=str, ensure_ascii=False).encode("utf-8")
+                serialized = json.dumps(value, default=str, ensure_ascii=False).encode(
+                    "utf-8"
+                )
             except Exception:
                 # Фолбек: перетворити у рядок
                 serialized = str(value).encode("utf-8")
@@ -589,7 +572,7 @@ class RedisOptimizer:
             if len(compressed) < len(serialized) * 0.9:
                 self.metrics["compressed_values"] += 1
                 self.metrics["bytes_saved"] += len(serialized) - len(compressed)
-                return b'C:' + compressed  # Префікс для позначення компресії
+                return b"C:" + compressed  # Префікс для позначення компресії
 
         return serialized
 
@@ -599,7 +582,7 @@ class RedisOptimizer:
             return None
 
         # Перевірка на компресію
-        if value.startswith(b'C:'):
+        if value.startswith(b"C:"):
             try:
                 decompressed = zlib.decompress(value[2:])
                 try:
@@ -641,9 +624,9 @@ class RedisOptimizer:
 
                 if attempt < RETRY_ATTEMPTS - 1:
                     await asyncio.sleep(RETRY_DELAY * (attempt + 1))
-                    logger.warning("Retrying operation",
-                                 attempt=attempt + 1,
-                                 error=str(e))
+                    logger.warning(
+                        "Retrying operation", attempt=attempt + 1, error=str(e)
+                    )
 
             except Exception as e:
                 logger.error("Operation failed", error=str(e))
@@ -653,11 +636,7 @@ class RedisOptimizer:
 
     def _add_to_local_cache(self, key: str, value: Any, size: int):
         """Додавання в локальний кеш з врахуванням стратегії"""
-        entry = CacheEntry(
-            key=key,
-            value=value,
-            size=size
-        )
+        entry = CacheEntry(key=key, value=value, size=size)
 
         # Додаємо в кеш
         self.local_cache[key] = entry
@@ -672,16 +651,14 @@ class RedisOptimizer:
         if self.cache_strategy == CacheStrategy.LRU:
             # Видаляємо найстарший за доступом
             oldest_key = min(
-                self.local_cache.keys(),
-                key=lambda k: self.local_cache[k].last_accessed
+                self.local_cache.keys(), key=lambda k: self.local_cache[k].last_accessed
             )
             del self.local_cache[oldest_key]
 
         elif self.cache_strategy == CacheStrategy.LFU:
             # Видаляємо найменш використовуваний
             least_used_key = min(
-                self.local_cache.keys(),
-                key=lambda k: self.local_cache[k].hits
+                self.local_cache.keys(), key=lambda k: self.local_cache[k].hits
             )
             del self.local_cache[least_used_key]
 
@@ -701,8 +678,8 @@ class RedisOptimizer:
         """Отримання статистики"""
         cache_size = sum(entry.size for entry in self.local_cache.values())
         hit_rate = (
-            self.metrics["cache_hits"] /
-            (self.metrics["cache_hits"] + self.metrics["cache_misses"] + 1)
+            self.metrics["cache_hits"]
+            / (self.metrics["cache_hits"] + self.metrics["cache_misses"] + 1)
         ) * 100
 
         return {
@@ -711,18 +688,16 @@ class RedisOptimizer:
             "local_cache": {
                 "entries": len(self.local_cache),
                 "size_bytes": cache_size,
-                "hit_rate": f"{hit_rate:.1f}%"
+                "hit_rate": f"{hit_rate:.1f}%",
             },
             "pipeline": {
                 "queued_operations": sum(len(q) for q in self.pipeline_queue.values()),
-                "active_timers": len(self.pipeline_timers)
+                "active_timers": len(self.pipeline_timers),
             },
             "pubsub": {
                 "subscriptions": sum(len(s) for s in self.subscriptions.values())
             },
-            "locks": {
-                "held": len(self.locks)
-            }
+            "locks": {"held": len(self.locks)},
         }
 
 

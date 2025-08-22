@@ -46,6 +46,7 @@ PERFORMANCE_SAMPLE_SIZE = 100  # Розмір вибірки для метрик
 
 class CompressionType(Enum):
     """Типи compression"""
+
     NONE = "none"
     GZIP = "gzip"
     ZLIB = "zlib"
@@ -55,6 +56,7 @@ class CompressionType(Enum):
 
 class MessagePriority(Enum):
     """Пріоритети повідомлень"""
+
     LOW = 0
     NORMAL = 1
     HIGH = 2
@@ -65,6 +67,7 @@ class MessagePriority(Enum):
 @dataclass
 class OptimizedMessage:
     """Оптимізоване повідомлення"""
+
     id: str
     data: Any
     priority: MessagePriority = MessagePriority.NORMAL
@@ -82,6 +85,7 @@ class OptimizedMessage:
 @dataclass
 class HeartbeatInfo:
     """Інформація про heartbeat для клієнта"""
+
     client_id: str
     last_ping: Optional[float] = None
     last_pong: Optional[float] = None
@@ -125,7 +129,7 @@ class WebSocketOptimizer:
         enable_compression: bool = True,
         enable_batching: bool = True,
         enable_adaptive_heartbeat: bool = True,
-        compression_type: CompressionType = CompressionType.ZLIB
+        compression_type: CompressionType = CompressionType.ZLIB,
     ):
         self.enable_compression = enable_compression
         self.enable_batching = enable_batching
@@ -148,7 +152,7 @@ class WebSocketOptimizer:
             "batches_sent": 0,
             "heartbeats_sent": 0,
             "average_compression_ratio": 0.0,
-            "average_batch_size": 0.0
+            "average_batch_size": 0.0,
         }
 
         # Compression stats
@@ -157,10 +161,12 @@ class WebSocketOptimizer:
         # WebSocket references (weak to avoid memory leaks)
         self.websockets: Dict[str, weakref.ref[WebSocket]] = {}
 
-        logger.info("WebSocket optimizer initialized",
-                   compression=enable_compression,
-                   batching=enable_batching,
-                   adaptive_heartbeat=enable_adaptive_heartbeat)
+        logger.info(
+            "WebSocket optimizer initialized",
+            compression=enable_compression,
+            batching=enable_batching,
+            adaptive_heartbeat=enable_adaptive_heartbeat,
+        )
 
     def register_client(self, client_id: str, websocket: WebSocket):
         """Реєстрація клієнта для оптимізації"""
@@ -198,14 +204,12 @@ class WebSocketOptimizer:
         client_id: str,
         data: Any,
         priority: MessagePriority = MessagePriority.NORMAL,
-        force_immediate: bool = False
+        force_immediate: bool = False,
     ) -> bool:
         """Оптимізована відправка повідомлення"""
         # Створюємо оптимізоване повідомлення
         message = OptimizedMessage(
-            id=f"{client_id}:{time.time()}",
-            data=data,
-            priority=priority
+            id=f"{client_id}:{time.time()}", data=data, priority=priority
         )
 
         # Обчислюємо розмір
@@ -213,7 +217,11 @@ class WebSocketOptimizer:
         message.size = len(serialized)
 
         # Для критичних повідомлень - відправляємо одразу
-        if priority >= MessagePriority.CRITICAL or force_immediate or not self.enable_batching:
+        if (
+            priority >= MessagePriority.CRITICAL
+            or force_immediate
+            or not self.enable_batching
+        ):
             return await self._send_immediate(client_id, message)
 
         # Додаємо в чергу для batching
@@ -255,9 +263,9 @@ class WebSocketOptimizer:
             return True
 
         except Exception as e:
-            logger.error("Error sending immediate message",
-                        client_id=client_id,
-                        error=str(e))
+            logger.error(
+                "Error sending immediate message", client_id=client_id, error=str(e)
+            )
             return False
 
     def _should_send_batch(self, client_id: str) -> bool:
@@ -333,12 +341,12 @@ class WebSocketOptimizer:
                         "id": msg.id,
                         "data": msg.data,
                         "priority": msg.priority.value,
-                        "timestamp": msg.timestamp
+                        "timestamp": msg.timestamp,
                     }
                     for msg in batch_messages
                 ],
                 "count": len(batch_messages),
-                "timestamp": time.time()
+                "timestamp": time.time(),
             }
 
             # Compression для batch
@@ -358,15 +366,15 @@ class WebSocketOptimizer:
             # Оновлюємо середній розмір batch
             self._update_average_metric("average_batch_size", len(batch_messages))
 
-            logger.debug("Batch sent",
-                        client_id=client_id,
-                        messages=len(batch_messages),
-                        size=batch_size)
+            logger.debug(
+                "Batch sent",
+                client_id=client_id,
+                messages=len(batch_messages),
+                size=batch_size,
+            )
 
         except Exception as e:
-            logger.error("Error sending batch",
-                        client_id=client_id,
-                        error=str(e))
+            logger.error("Error sending batch", client_id=client_id, error=str(e))
 
             # Повертаємо повідомлення в чергу
             for msg in reversed(batch_messages):
@@ -407,8 +415,7 @@ class WebSocketOptimizer:
             return zlib.compress(data, level=COMPRESSION_LEVEL)
         elif self.compression_type == CompressionType.DEFLATE:
             compressor = zlib.compressobj(
-                level=COMPRESSION_LEVEL,
-                wbits=-MAX_WINDOW_BITS
+                level=COMPRESSION_LEVEL, wbits=-MAX_WINDOW_BITS
             )
             return compressor.compress(data) + compressor.flush()
         else:
@@ -430,7 +437,11 @@ class WebSocketOptimizer:
         while True:
             try:
                 # Використовуємо адаптивний інтервал
-                interval = heartbeat.adaptive_interval if self.enable_adaptive_heartbeat else HEARTBEAT_INTERVAL
+                interval = (
+                    heartbeat.adaptive_interval
+                    if self.enable_adaptive_heartbeat
+                    else HEARTBEAT_INTERVAL
+                )
                 await asyncio.sleep(interval)
 
                 ws_ref = self.websockets.get(client_id)
@@ -456,30 +467,34 @@ class WebSocketOptimizer:
 
                     self.metrics["heartbeats_sent"] += 1
 
-                    logger.debug("Heartbeat successful",
-                               client_id=client_id,
-                               latency=f"{latency*1000:.1f}ms",
-                               interval=interval)
+                    logger.debug(
+                        "Heartbeat successful",
+                        client_id=client_id,
+                        latency=f"{latency*1000:.1f}ms",
+                        interval=interval,
+                    )
 
                 except asyncio.TimeoutError:
                     heartbeat.missed_pongs += 1
-                    logger.warning("Heartbeat timeout",
-                                 client_id=client_id,
-                                 missed=heartbeat.missed_pongs)
+                    logger.warning(
+                        "Heartbeat timeout",
+                        client_id=client_id,
+                        missed=heartbeat.missed_pongs,
+                    )
 
                     if not heartbeat.is_responsive:
                         # Клієнт не відповідає, розриваємо з'єднання
-                        logger.error("Client unresponsive, closing connection",
-                                   client_id=client_id)
+                        logger.error(
+                            "Client unresponsive, closing connection",
+                            client_id=client_id,
+                        )
                         await websocket.close()
                         break
 
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error("Heartbeat error",
-                           client_id=client_id,
-                           error=str(e))
+                logger.error("Heartbeat error", client_id=client_id, error=str(e))
                 break
 
     def _update_average_metric(self, metric_name: str, value: float):
@@ -492,7 +507,9 @@ class WebSocketOptimizer:
     def _update_compression_ratio(self):
         """Оновлення середнього compression ratio"""
         if self.compression_samples:
-            self.metrics["average_compression_ratio"] = statistics.mean(self.compression_samples)
+            self.metrics["average_compression_ratio"] = statistics.mean(
+                self.compression_samples
+            )
 
     def get_client_stats(self, client_id: str) -> Dict[str, Any]:
         """Статистика для конкретного клієнта"""
@@ -501,16 +518,18 @@ class WebSocketOptimizer:
 
         stats = {
             "queued_messages": len(queue),
-            "queue_size_bytes": sum(msg.size for msg in queue)
+            "queue_size_bytes": sum(msg.size for msg in queue),
         }
 
         if heartbeat:
-            stats.update({
-                "average_latency": heartbeat.average_latency,
-                "adaptive_interval": heartbeat.adaptive_interval,
-                "missed_pongs": heartbeat.missed_pongs,
-                "is_responsive": heartbeat.is_responsive
-            })
+            stats.update(
+                {
+                    "average_latency": heartbeat.average_latency,
+                    "adaptive_interval": heartbeat.adaptive_interval,
+                    "missed_pongs": heartbeat.missed_pongs,
+                    "is_responsive": heartbeat.is_responsive,
+                }
+            )
 
         return stats
 
@@ -518,8 +537,7 @@ class WebSocketOptimizer:
         """Глобальна статистика оптимізатора"""
         total_queued = sum(len(q) for q in self.message_queues.values())
         total_queue_size = sum(
-            sum(msg.size for msg in q)
-            for q in self.message_queues.values()
+            sum(msg.size for msg in q) for q in self.message_queues.values()
         )
 
         return {
@@ -530,7 +548,7 @@ class WebSocketOptimizer:
             "total_queue_size_bytes": total_queue_size,
             "compression_enabled": self.enable_compression,
             "batching_enabled": self.enable_batching,
-            "adaptive_heartbeat_enabled": self.enable_adaptive_heartbeat
+            "adaptive_heartbeat_enabled": self.enable_adaptive_heartbeat,
         }
 
 
@@ -540,9 +558,7 @@ websocket_optimizer = WebSocketOptimizer()
 
 # Допоміжні функції
 async def optimize_send(
-    client_id: str,
-    data: Any,
-    priority: MessagePriority = MessagePriority.NORMAL
+    client_id: str, data: Any, priority: MessagePriority = MessagePriority.NORMAL
 ) -> bool:
     """Швидка оптимізована відправка через глобальний оптимізатор"""
     return await websocket_optimizer.send_message(client_id, data, priority)

@@ -20,7 +20,7 @@ __all__ = [
     "RedisManager",
     "WebSocketManager",
     "HealthMonitor",
-    "MetricsCollector"
+    "MetricsCollector",
 ]
 
 __version__ = "1.0.0"

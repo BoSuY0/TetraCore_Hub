@@ -23,6 +23,7 @@ logger = structlog.get_logger()
 # Спробувати імпортувати опціональні залежності
 try:
     import boto3  # type: ignore[import-untyped]
+
     HAS_AWS = True
 except ImportError:
     boto3 = None  # type: ignore[assignment]
@@ -30,6 +31,7 @@ except ImportError:
 
 try:
     import hvac  # type: ignore[import-untyped]
+
     HAS_VAULT = True
 except ImportError:
     hvac = None  # type: ignore[assignment]
@@ -37,6 +39,7 @@ except ImportError:
 
 try:
     import redis  # type: ignore[import-untyped]
+
     HAS_REDIS = True
 except ImportError:
     redis = None  # type: ignore[assignment]
@@ -53,6 +56,7 @@ CACHE_TTL = 300  # 5 хвилин кешування
 
 class SecretProvider(Enum):
     """Типи провайдерів секретів"""
+
     ENV = "env"
     AWS = "aws"
     VAULT = "vault"
@@ -122,11 +126,12 @@ class AWSSecretProvider(SecretProviderInterface):
         if not HAS_AWS or boto3 is None:
             raise ImportError("boto3 не встановлено. Виконайте: pip install boto3")
         try:
-            self.client = boto3.client('secretsmanager', region_name=region)
+            self.client = boto3.client("secretsmanager", region_name=region)
         except Exception as e:
             # Санітуємо можливі ключі типу AKIA... у повідомленні
             import re
-            sanitized = re.sub(r'AKIA[A-Z0-9]{16}', 'AKIA****************', str(e))
+
+            sanitized = re.sub(r"AKIA[A-Z0-9]{16}", "AKIA****************", str(e))
             raise Exception(sanitized)
         self.prefix = prefix
         self._cache = {}
@@ -148,7 +153,7 @@ class AWSSecretProvider(SecretProviderInterface):
 
         try:
             response = self.client.get_secret_value(SecretId=self._get_full_key(key))
-            value = response.get('SecretString') if isinstance(response, dict) else None
+            value = response.get("SecretString") if isinstance(response, dict) else None
 
             # Оновити кеш
             self._cache[key] = value
@@ -160,7 +165,8 @@ class AWSSecretProvider(SecretProviderInterface):
         except Exception as e:
             # Маскуємо можливі патерни ключів AWS у повідомленнях помилок
             import re
-            sanitized = re.sub(r'AKIA[A-Z0-9]{16}', 'AKIA****************', str(e))
+
+            sanitized = re.sub(r"AKIA[A-Z0-9]{16}", "AKIA****************", str(e))
             logger.error(f"AWS Secrets Manager error: {sanitized}")
             return None
 
@@ -179,15 +185,15 @@ class AWSSecretProvider(SecretProviderInterface):
             return True
         except Exception as e:
             import re
-            sanitized = re.sub(r'AKIA[A-Z0-9]{16}', 'AKIA****************', str(e))
+
+            sanitized = re.sub(r"AKIA[A-Z0-9]{16}", "AKIA****************", str(e))
             logger.error(f"AWS Secrets Manager error: {sanitized}")
             return False
 
     def delete(self, key: str) -> bool:
         try:
             self.client.delete_secret(
-                SecretId=self._get_full_key(key),
-                ForceDeleteWithoutRecovery=False
+                SecretId=self._get_full_key(key), ForceDeleteWithoutRecovery=False
             )
 
             # Видалити з кешу
@@ -197,7 +203,8 @@ class AWSSecretProvider(SecretProviderInterface):
             return True
         except Exception as e:
             import re
-            sanitized = re.sub(r'AKIA[A-Z0-9]{16}', 'AKIA****************', str(e))
+
+            sanitized = re.sub(r"AKIA[A-Z0-9]{16}", "AKIA****************", str(e))
             logger.error(f"AWS Secrets Manager error: {sanitized}")
             return False
 
@@ -213,12 +220,12 @@ class AWSSecretProvider(SecretProviderInterface):
     def list_keys(self, prefix: Optional[str] = None) -> List[str]:
         try:
             keys = []
-            paginator = self.client.get_paginator('list_secrets')
+            paginator = self.client.get_paginator("list_secrets")
 
             for page in paginator.paginate():
-                for secret in page['SecretList']:
-                    if secret['Name'].startswith(self.prefix):
-                        key = secret['Name'][len(self.prefix):]
+                for secret in page["SecretList"]:
+                    if secret["Name"].startswith(self.prefix):
+                        key = secret["Name"][len(self.prefix) :]
                         if not prefix or key.startswith(prefix):
                             keys.append(key)
 
@@ -240,10 +247,9 @@ class VaultSecretProvider(SecretProviderInterface):
     def get(self, key: str) -> Optional[str]:
         try:
             response = self.client.secrets.kv.v2.read_secret_version(
-                path=key,
-                mount_point=self.mount_point
+                path=key, mount_point=self.mount_point
             )
-            return response['data']['data'].get('value')
+            return response["data"]["data"].get("value")
         except Exception as e:
             logger.error(f"Vault error: {e}")
             return None
@@ -251,9 +257,7 @@ class VaultSecretProvider(SecretProviderInterface):
     def set(self, key: str, value: str) -> bool:
         try:
             self.client.secrets.kv.v2.create_or_update_secret(
-                path=key,
-                secret={'value': value},
-                mount_point=self.mount_point
+                path=key, secret={"value": value}, mount_point=self.mount_point
             )
             return True
         except Exception as e:
@@ -263,8 +267,7 @@ class VaultSecretProvider(SecretProviderInterface):
     def delete(self, key: str) -> bool:
         try:
             self.client.secrets.kv.v2.delete_metadata_and_all_versions(
-                path=key,
-                mount_point=self.mount_point
+                path=key, mount_point=self.mount_point
             )
             return True
         except Exception as e:
@@ -274,8 +277,7 @@ class VaultSecretProvider(SecretProviderInterface):
     def exists(self, key: str) -> bool:
         try:
             self.client.secrets.kv.v2.read_secret_version(
-                path=key,
-                mount_point=self.mount_point
+                path=key, mount_point=self.mount_point
             )
             return True
         except Exception:
@@ -286,7 +288,7 @@ class VaultSecretProvider(SecretProviderInterface):
             response = self.client.secrets.kv.v2.list_secrets(
                 mount_point=self.mount_point
             )
-            keys = response['data']['keys']
+            keys = response["data"]["keys"]
 
             if prefix:
                 keys = [k for k in keys if k.startswith(prefix)]
@@ -313,7 +315,7 @@ class RedisSecretProvider(SecretProviderInterface):
     def get(self, key: str) -> Optional[str]:
         try:
             value = self.client.get(self._get_full_key(key))
-            return value.decode('utf-8') if value else None
+            return value.decode("utf-8") if value else None
         except Exception as e:
             logger.error(f"Redis error: {e}")
             return None
@@ -321,9 +323,7 @@ class RedisSecretProvider(SecretProviderInterface):
     def set(self, key: str, value: str) -> bool:
         try:
             return self.client.setex(
-                self._get_full_key(key),
-                self.ttl,
-                value.encode('utf-8')
+                self._get_full_key(key), self.ttl, value.encode("utf-8")
             )
         except Exception as e:
             logger.error(f"Redis error: {e}")
@@ -349,9 +349,9 @@ class RedisSecretProvider(SecretProviderInterface):
             keys = []
 
             for key in self.client.scan_iter(match=pattern):
-                key_str = key.decode('utf-8')
+                key_str = key.decode("utf-8")
                 if key_str.startswith(self.prefix):
-                    keys.append(key_str[len(self.prefix):])
+                    keys.append(key_str[len(self.prefix) :])
 
             return keys
         except Exception as e:
@@ -361,26 +361,26 @@ class RedisSecretProvider(SecretProviderInterface):
 
 class MemorySecretProvider(SecretProviderInterface):
     """In-memory secret provider для тестування"""
-    
+
     def __init__(self):
         self._secrets = {}
-    
+
     def get(self, key: str) -> Optional[str]:
         return self._secrets.get(key)
-    
+
     def set(self, key: str, value: str) -> bool:
         self._secrets[key] = value
         return True
-    
+
     def delete(self, key: str) -> bool:
         if key in self._secrets:
             del self._secrets[key]
             return True
         return False
-    
+
     def exists(self, key: str) -> bool:
         return key in self._secrets
-    
+
     def list_keys(self, prefix: Optional[str] = None) -> List[str]:
         if prefix:
             return [k for k in self._secrets.keys() if k.startswith(prefix)]
@@ -390,8 +390,12 @@ class MemorySecretProvider(SecretProviderInterface):
 class SecretsManager:
     """Менеджер для безпечної роботи з секретами"""
 
-    def __init__(self, master_key: Optional[str] = None, provider: Optional[SecretProvider] = None,
-                 allow_env_fallback: bool = False):
+    def __init__(
+        self,
+        master_key: Optional[str] = None,
+        provider: Optional[SecretProvider] = None,
+        allow_env_fallback: bool = False,
+    ):
         """
         Ініціалізація менеджера секретів
 
@@ -413,11 +417,13 @@ class SecretsManager:
 
         # Ініціалізація шифрування
         self._initialize_encryption()
-        
+
         # Завантаження секретів
         self._load_secrets()
 
-    def _initialize_provider(self, provider: Optional[SecretProvider]) -> SecretProviderInterface:
+    def _initialize_provider(
+        self, provider: Optional[SecretProvider]
+    ) -> SecretProviderInterface:
         """Ініціалізувати провайдер секретів"""
         env = os.getenv("ENVIRONMENT", "development").lower()
         provider_type = provider or SecretProvider(os.getenv("SECRET_PROVIDER", "env"))
@@ -426,7 +432,9 @@ class SecretsManager:
         if env == "production" and provider_type == SecretProvider.ENV:
             # Дозволяємо у середовищі тестів (pytest), щоб не падали інтеграційні тести
             if not os.getenv("PYTEST_CURRENT_TEST"):
-                raise ValueError("SECRET_PROVIDER=env заборонено у production. Налаштуйте AWS/Vault/Redis/MEMORY провайдер.")
+                raise ValueError(
+                    "SECRET_PROVIDER=env заборонено у production. Налаштуйте AWS/Vault/Redis/MEMORY провайдер."
+                )
 
         if provider_type == SecretProvider.ENV:
             return EnvSecretProvider()
@@ -463,34 +471,33 @@ class SecretsManager:
                 "required": True,
                 "min_length": 32,
                 "description": "Secret key for JWT tokens",
-                "rotation_days": 90
+                "rotation_days": 90,
             },
             "JWT_REFRESH_SECRET": {
                 "required": True,
                 "min_length": 32,
                 "description": "Secret key for refresh tokens",
-                "rotation_days": 90
+                "rotation_days": 90,
             },
             "ADMIN_USERNAME": {
                 "required": True,
                 "min_length": 3,
                 "description": "Admin username",
-                "rotation_days": None  # Не потребує ротації
+                "rotation_days": None,  # Не потребує ротації
             },
             "ADMIN_PASSWORD": {
                 "required": True,
                 "min_length": 12,
                 "description": "Admin password",
                 "rotation_days": 30,
-                "complexity": True  # Вимагає складного пароля
+                "complexity": True,  # Вимагає складного пароля
             },
-
             # External services
             "REDIS_PASSWORD": {
                 "required": False,
                 "min_length": 8,
                 "description": "Redis password",
-                "rotation_days": 180
+                "rotation_days": 180,
             },
             "BOT_TOKEN_PROD": {
                 "required": False,
@@ -498,31 +505,29 @@ class SecretsManager:
                 "description": "Telegram bot token for production",
                 "rotation_days": None,  # Telegram tokens don't expire
                 "pattern": r"^\d+:[A-Za-z0-9_-]+$",
-                "dev_only": True  # Не перевіряти в development режимі
+                "dev_only": True,  # Не перевіряти в development режимі
             },
-
             # AWS (optional)
             "AWS_ACCESS_KEY_ID": {
                 "required": False,
                 "min_length": 20,
                 "description": "AWS access key",
                 "rotation_days": 90,
-                "pattern": r"^AKIA[A-Z0-9]{16}$"
+                "pattern": r"^AKIA[A-Z0-9]{16}$",
             },
             "AWS_SECRET_ACCESS_KEY": {
                 "required": False,
                 "min_length": 40,
                 "description": "AWS secret key",
-                "rotation_days": 90
+                "rotation_days": 90,
             },
-
             # Encryption
             "ENCRYPTION_KEY": {
                 "required": True,
                 "min_length": 32,
                 "description": "Master encryption key",
-                "rotation_days": 180
-            }
+                "rotation_days": 180,
+            },
         }
 
     def _initialize_encryption(self):
@@ -536,7 +541,7 @@ class SecretsManager:
 
         try:
             # Якщо ключ вже у форматі Fernet
-            if len(self._master_key) == 44 and self._master_key.endswith('='):
+            if len(self._master_key) == 44 and self._master_key.endswith("="):
                 self._cipher_suite = Fernet(self._master_key.encode())
             else:
                 # Генеруємо ключ з пароля
@@ -549,7 +554,7 @@ class SecretsManager:
                 )
                 key = base64.urlsafe_b64encode(kdf.derive(self._master_key.encode()))
                 self._cipher_suite = Fernet(key)
-                
+
                 # Store salt for future use
                 self._encryption_salt = salt
 
@@ -561,26 +566,33 @@ class SecretsManager:
         """Validate encryption key strength"""
         if not key:
             raise ValueError("Encryption key cannot be empty")
-            
+
         # Check minimum length
         if len(key) < 16:
             raise ValueError("Encryption key must be at least 16 characters long")
-            
+
         # Check for common weak keys
         weak_keys = [
-            "password", "12345678", "qwerty", "admin", "secret",
-            "password123", "admin123", "123456789", "letmein"
+            "password",
+            "12345678",
+            "qwerty",
+            "admin",
+            "secret",
+            "password123",
+            "admin123",
+            "123456789",
+            "letmein",
         ]
-        
+
         if key.lower() in weak_keys:
             raise ValueError("Encryption key is too weak (common password)")
-            
+
         # Check for repetitive patterns
         if len(set(key)) < 4:  # Less than 4 unique characters
             raise ValueError("Encryption key has insufficient character variety")
-            
+
         # Check complexity for non-Fernet keys
-        if not (len(key) == 44 and key.endswith('=')):
+        if not (len(key) == 44 and key.endswith("=")):
             # Require at least 3 of: uppercase, lowercase, digits, special chars
             complexity_score = 0
             if any(c.isupper() for c in key):
@@ -591,12 +603,16 @@ class SecretsManager:
                 complexity_score += 1
             if any(c in "!@#$%^&*()_+-=[]{}|;:,.<>?" for c in key):
                 complexity_score += 1
-                
+
             if complexity_score < 3:
                 # У тестах допускається майстер-ключ без високої складності, якщо довжина >= 16
-                is_test = os.getenv("ENVIRONMENT", "development").lower() == "development"
+                is_test = (
+                    os.getenv("ENVIRONMENT", "development").lower() == "development"
+                )
                 if not is_test:
-                    raise ValueError("Encryption key must contain at least 3 of: uppercase, lowercase, digits, special characters")
+                    raise ValueError(
+                        "Encryption key must contain at least 3 of: uppercase, lowercase, digits, special characters"
+                    )
 
     def _load_secrets(self):
         """Завантаження секретів з різних джерел"""
@@ -608,7 +624,9 @@ class SecretsManager:
                 logger.info(f"Loaded secret from provider: {secret_name}")
 
         # 2. Fallback до environment variables якщо дозволено і провайдер не ENV
-        if self._allow_env_fallback and not isinstance(self._provider, EnvSecretProvider):
+        if self._allow_env_fallback and not isinstance(
+            self._provider, EnvSecretProvider
+        ):
             logger.info("ENV fallback is enabled for development")
             for secret_name in self._required_secrets:
                 if secret_name not in self._secrets_cache:
@@ -618,9 +636,12 @@ class SecretsManager:
                         logger.info(f"Loaded secret from ENV fallback: {secret_name}")
 
         # 3. Спробувати завантажити з config для development
-        if len(self._secrets_cache) < len([k for k, v in self._required_secrets.items() if v["required"]]):
+        if len(self._secrets_cache) < len(
+            [k for k, v in self._required_secrets.items() if v["required"]]
+        ):
             try:
                 from config import settings
+
                 config_secrets = {
                     "ADMIN_USERNAME": settings.admin_username,
                     "ADMIN_PASSWORD": settings.admin_password,
@@ -646,7 +667,7 @@ class SecretsManager:
                 self._secrets_cache[secret_name] = value
                 self._secret_metadata[secret_name] = {
                     "loaded_at": datetime.utcnow(),
-                    "source": "environment"
+                    "source": "environment",
                 }
 
     def _load_from_file(self):
@@ -664,7 +685,7 @@ class SecretsManager:
                             self._secrets_cache[secret_name] = value
                             self._secret_metadata[secret_name] = {
                                 "loaded_at": datetime.utcnow(),
-                                "source": "file"
+                                "source": "file",
                             }
 
             except Exception as e:
@@ -674,10 +695,10 @@ class SecretsManager:
         """Валідація завантажених секретів"""
         errors = []
         warnings = []
-        
+
         # Перевірити чи це development режим
         is_development = os.getenv("ENVIRONMENT", "development") == "development"
-        
+
         # У development режимі - мінімальна валідація
         if is_development:
             logger.info("Development mode: skipping strict secret validation")
@@ -685,7 +706,7 @@ class SecretsManager:
             for secret_name in required_for_dev:
                 if secret_name not in self._secrets_cache:
                     warnings.append(f"{secret_name} not set, using default")
-            
+
             # Тільки попередження в development
             if warnings:
                 for warning in warnings:
@@ -694,7 +715,7 @@ class SecretsManager:
 
         for secret_name, config in self._required_secrets.items():
             value = self._secrets_cache.get(secret_name)
-            
+
             # Пропустити dev_only секрети в development режимі якщо вони порожні
             if is_development and config.get("dev_only") and not value:
                 continue
@@ -715,10 +736,9 @@ class SecretsManager:
                 # Перевірка патерну
                 if "pattern" in config:
                     import re
+
                     if not re.match(config["pattern"], value):
-                        errors.append(
-                            f"{secret_name} does not match required pattern"
-                        )
+                        errors.append(f"{secret_name} does not match required pattern")
 
                 # Перевірка складності пароля
                 if config.get("complexity") and secret_name.endswith("PASSWORD"):
@@ -758,26 +778,28 @@ class SecretsManager:
         """Перевірка складності пароля"""
         import re
         import time
-        
+
         # Add small random delay to prevent timing attacks
         time.sleep(secrets.randbelow(1000) / 1000000)  # 0-1ms random delay
 
         checks = [
-            r'[A-Z]',  # Uppercase
-            r'[a-z]',  # Lowercase
-            r'[0-9]',  # Digits
-            r'[!@#$%^&*(),.?":{}|<>]'  # Special characters
+            r"[A-Z]",  # Uppercase
+            r"[a-z]",  # Lowercase
+            r"[0-9]",  # Digits
+            r'[!@#$%^&*(),.?":{}|<>]',  # Special characters
         ]
 
         # Perform all checks regardless of failures (constant time)
         results = []
         for check in checks:
             results.append(bool(re.search(check, password)))
-        
+
         # Return true only if all checks pass
         return all(results)
 
-    def get_secret(self, name: str, default: Optional[str] = None, use_cache: bool = True) -> Optional[str]:
+    def get_secret(
+        self, name: str, default: Optional[str] = None, use_cache: bool = True
+    ) -> Optional[str]:
         """
         Отримання секрету за назвою
 
@@ -802,7 +824,7 @@ class SecretsManager:
             self._secrets_cache[name] = value
             self._secret_metadata[name] = {
                 "loaded_at": datetime.utcnow(),
-                "source": type(self._provider).__name__
+                "source": type(self._provider).__name__,
             }
             logger.debug("Secret loaded from provider", secret_name=name)
             return value
@@ -840,6 +862,7 @@ class SecretsManager:
             pattern = config.get("pattern")
             if pattern:
                 import re
+
                 if not re.match(pattern, value):
                     raise ValueError(f"{name} does not match required pattern")
 
@@ -847,20 +870,24 @@ class SecretsManager:
         self._secrets_cache[name] = value
         self._secret_metadata[name] = {
             "loaded_at": datetime.utcnow(),
-            "source": "runtime"
+            "source": "runtime",
         }
 
         # Збереження в провайдері якщо потрібно
         if persist:
             success = self._provider.set(name, value)
             if success:
-                logger.info("Secret persisted to provider",
-                           secret_name=name,
-                           provider=type(self._provider).__name__)
+                logger.info(
+                    "Secret persisted to provider",
+                    secret_name=name,
+                    provider=type(self._provider).__name__,
+                )
             else:
-                logger.error("Failed to persist secret",
-                            secret_name=name,
-                            provider=type(self._provider).__name__)
+                logger.error(
+                    "Failed to persist secret",
+                    secret_name=name,
+                    provider=type(self._provider).__name__,
+                )
                 return False
         else:
             logger.info("Secret updated in cache only", secret_name=name)
@@ -889,22 +916,22 @@ class SecretsManager:
             # Create file with secure permissions (owner read/write only)
             import os
             import stat
-            
+
             # Use a temporary file to avoid race conditions
             temp_file = ".secrets.enc.tmp"
-            
+
             # Create file with restricted permissions from the start
             fd = os.open(temp_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             try:
-                with os.fdopen(fd, 'wb') as f:
+                with os.fdopen(fd, "wb") as f:
                     f.write(encrypted_data)
             except:
                 os.close(fd)
                 raise
-                
+
             # Atomically replace the old file
             os.replace(temp_file, ".secrets.enc")
-            
+
             # Double-check permissions (on Windows this may not be enforced)
             try:
                 os.chmod(".secrets.enc", 0o600)  # Owner read/write only
@@ -916,9 +943,13 @@ class SecretsManager:
                 st = os.stat(".secrets.enc")
                 world_readable = bool(st.st_mode & stat.S_IROTH)
                 world_writable = bool(st.st_mode & stat.S_IWOTH)
-                if (world_readable or world_writable) and os.getenv("PYTEST_CURRENT_TEST"):
+                if (world_readable or world_writable) and os.getenv(
+                    "PYTEST_CURRENT_TEST"
+                ):
                     os.unlink(".secrets.enc")
-                    logger.info("Secrets file removed due to insecure permissions in test env")
+                    logger.info(
+                        "Secrets file removed due to insecure permissions in test env"
+                    )
             except Exception:
                 pass
 
@@ -1000,7 +1031,7 @@ class SecretsManager:
             secrets.choice(lowercase),
             secrets.choice(uppercase),
             secrets.choice(digits),
-            secrets.choice(special)
+            secrets.choice(special),
         ]
 
         # Заповнюємо решту випадковими символами
@@ -1011,7 +1042,7 @@ class SecretsManager:
         # Перемішуємо
         secrets.SystemRandom().shuffle(password)
 
-        return ''.join(password)
+        return "".join(password)
 
     def encrypt_data(self, data: Union[str, bytes]) -> bytes:
         """Шифрування даних"""
@@ -1038,7 +1069,7 @@ class SecretsManager:
             "required_secrets_loaded": 0,
             "optional_secrets_loaded": 0,
             "secrets_needing_rotation": [],
-            "validation_errors": []
+            "validation_errors": [],
         }
 
         # Підрахунок завантажених секретів
@@ -1057,11 +1088,13 @@ class SecretsManager:
                 if loaded_at and rotation_days:
                     age_days = (datetime.utcnow() - loaded_at).days
                     if age_days > rotation_days:
-                        status["secrets_needing_rotation"].append({
-                            "name": name,
-                            "age_days": age_days,
-                            "rotation_days": rotation_days
-                        })
+                        status["secrets_needing_rotation"].append(
+                            {
+                                "name": name,
+                                "age_days": age_days,
+                                "rotation_days": rotation_days,
+                            }
+                        )
 
         return status
 
@@ -1085,6 +1118,7 @@ class SecretsManager:
 # Глобальний екземпляр - lazy initialization
 _secrets_manager = None
 
+
 def get_secrets_manager() -> SecretsManager:
     """Get or create the global secrets manager instance"""
     global _secrets_manager
@@ -1103,33 +1137,43 @@ def get_secrets_manager() -> SecretsManager:
             logger.warning(f"Creating secrets manager in non-production test mode: {e}")
             _secrets_manager = SecretsManager(
                 master_key=Fernet.generate_key().decode(),
-                provider=SecretProvider.MEMORY
+                provider=SecretProvider.MEMORY,
             )
             from config import settings
+
             # Minimal safe defaults for non-prod only
             dev_secrets = {
-                "JWT_SECRET_KEY": os.getenv("JWT_SECRET_KEY") or Fernet.generate_key().decode(),
-                "JWT_REFRESH_SECRET": os.getenv("JWT_REFRESH_SECRET") or Fernet.generate_key().decode(),
-                "ADMIN_USERNAME": settings.admin_username or os.getenv("ADMIN_USERNAME"),
+                "JWT_SECRET_KEY": os.getenv("JWT_SECRET_KEY")
+                or Fernet.generate_key().decode(),
+                "JWT_REFRESH_SECRET": os.getenv("JWT_REFRESH_SECRET")
+                or Fernet.generate_key().decode(),
+                "ADMIN_USERNAME": settings.admin_username
+                or os.getenv("ADMIN_USERNAME"),
                 # Credentials must be set via environment variables
-                "ADMIN_PASSWORD": settings.admin_password or os.getenv("ADMIN_PASSWORD"),
-                "ENCRYPTION_KEY": os.getenv("ENCRYPTION_KEY") or Fernet.generate_key().decode()
+                "ADMIN_PASSWORD": settings.admin_password
+                or os.getenv("ADMIN_PASSWORD"),
+                "ENCRYPTION_KEY": os.getenv("ENCRYPTION_KEY")
+                or Fernet.generate_key().decode(),
             }
             for key, value in dev_secrets.items():
                 _secrets_manager.set_secret(key, value, persist=False)
     return _secrets_manager
 
+
 # For backward compatibility - create on first access
 secrets_manager = None  # Will be set by imports that need it
+
 
 # Хелпер функції для швидкого доступу
 def get_secret(name: str, default: Optional[str] = None) -> Optional[str]:
     """Швидкий доступ до секрету"""
     return get_secrets_manager().get_secret(name, default)
 
+
 def validate_all_secrets():
     """Валідація всіх секретів"""
     return get_secrets_manager()._validate_secrets()
+
 
 def get_secrets_status() -> Dict[str, Any]:
     """Отримання статусу секретів"""
