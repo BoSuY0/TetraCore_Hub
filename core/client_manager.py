@@ -6,14 +6,13 @@ TetraCore StreamHub Client Manager
 """
 
 import asyncio
-import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional, Set, Callable, Any
 from collections import defaultdict
 import structlog
 
 from config import Settings
-from models.client import Client, ClientType, ClientInfo, WorkerCapabilities, ConnectionStatus, WorkerStatus
+from models.client import Client, ClientType
 from core.async_optimization import AsyncOptimizer, TaskPriority
 
 
@@ -141,7 +140,7 @@ class ClientManager:
             self.peak_connections = max(self.peak_connections, len(self.clients))
 
             # Логування успішного додавання
-            self.logger.info(f"✅ Client added to manager",
+            self.logger.info("✅ Client added to manager",
                            client_id=client_id,
                            client_type=client.info.client_type.value,
                            client_name=client.info.client_name,

@@ -15,7 +15,7 @@ import structlog
 
 import redis.asyncio as redis
 from redis.asyncio import Redis, RedisCluster, Sentinel
-from redis.exceptions import RedisError, ConnectionError, TimeoutError
+from redis.exceptions import ConnectionError, TimeoutError
 
 from config import Settings
 from core.async_optimization import AsyncOptimizer

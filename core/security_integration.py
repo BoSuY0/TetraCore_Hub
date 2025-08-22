@@ -4,20 +4,19 @@ Security Integration Module for TetraCore Hub
 """
 
 import os
-from typing import Optional, Dict, Any, List
-from contextlib import asynccontextmanager
+from typing import Optional, Dict, Any
 
-from fastapi import FastAPI, Request, Response, Depends
+from fastapi import FastAPI, Request
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 import structlog
 import redis
 
-from core.auth_manager import get_auth_manager, get_current_user
+from core.auth_manager import get_auth_manager
 from core.network_security import network_security, security_middleware
 from core.websocket_security import ws_security_manager
 from core.input_validator import InputValidator
-from core.security_headers import security_headers, security_headers_middleware, security_headers_router
+from core.security_headers import security_headers_middleware, security_headers_router
 from core.https_enforcement import https_enforcer, https_enforcement_middleware, https_router
 from web.auth import auth_router
 from config import get_settings
@@ -127,14 +126,14 @@ class SecurityIntegration:
         @app.middleware("http")
         async def mtls_check(request: Request, call_next):
             try:
-                settings = get_settings()
+                get_settings()
                 enforce = os.getenv("MTLS_ENFORCE", "false").lower() in ("1","true","yes")
                 if not enforce:
                     return await call_next(request)
 
                 # Проксі може прокидати результати перевірки в заголовки
                 verified = request.headers.get("X-Client-Cert-Verified", "FAIL").upper() == "SUCCESS"
-                subject = request.headers.get("X-Client-Cert-Subject")
+                request.headers.get("X-Client-Cert-Subject")
                 if not verified:
                     return JSONResponse(status_code=401, content={"detail": "mTLS verification failed"})
                 # Додатково можна whitelist CN із subject, якщо потрібно
@@ -286,7 +285,7 @@ class SecurityIntegration:
                         if (current_time - last_activity).days > 7:
                             await self.redis_client.delete(key)
                             cleaned += 1
-                    except:
+                    except Exception:
                         # Видаляємо пошкоджені сесії
                         await self.redis_client.delete(key)
                         cleaned += 1

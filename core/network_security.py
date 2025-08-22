@@ -6,10 +6,9 @@ Network Security Module for TetraCore Hub
 import time
 import asyncio
 import ipaddress
-import hashlib
 import json
-from typing import Dict, List, Optional, Set, Tuple, Any
-from datetime import datetime, timedelta
+from typing import Dict, Optional, Set, Any
+from datetime import datetime
 from collections import defaultdict, deque
 from functools import wraps
 import os
@@ -250,7 +249,7 @@ class NetworkSecurityManager:
     async def detect_ddos_pattern(self, request: Request) -> bool:
         """Виявлення патернів DDoS атаки"""
         ip = self.get_client_ip(request)
-        current_time = time.time()
+        time.time()
 
         # Пропускаємо перевірку для whitelisted IP (включає localhost)
         if ip in self.whitelist_ips:

@@ -3,12 +3,9 @@ Security Headers Module for TetraCore Hub
 Розширені security headers та Content Security Policy
 """
 
-import hashlib
 import secrets
 from typing import Dict, List, Optional, Set, Any
-from datetime import datetime, timedelta
-import json
-from urllib.parse import urlparse
+from datetime import datetime
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse

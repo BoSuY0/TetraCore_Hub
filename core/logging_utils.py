@@ -89,7 +89,8 @@ class SampleInfoProcessor:  # pragma: no cover – простий допоміж
     """
 
     def __init__(self):
-        import os, random
+        import os
+        import random
         self.random = random
         try:
             self.rate = float(os.getenv("LOG_INFO_SAMPLE_RATE", "1.0"))

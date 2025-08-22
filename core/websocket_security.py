@@ -9,20 +9,18 @@ import time
 import asyncio
 from typing import Dict, Optional, List, Set, Any
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from functools import wraps
 import hashlib
 import hmac
-from urllib.parse import parse_qs
 from collections import defaultdict, deque
 import os
 
-from fastapi import WebSocket, WebSocketDisconnect, Query, HTTPException
+from fastapi import WebSocket, Query
 from fastapi.websockets import WebSocketState
 import structlog
 import redis
 from pydantic import BaseModel, Field, validator
-import jwt
 
 from core.auth_manager import get_auth_manager, initialize_auth_manager_redis
 
@@ -553,7 +551,7 @@ class WebSocketSecurityManager:
         # Закриваємо WebSocket
         try:
             await conn_info.websocket.close()
-        except:
+        except Exception:
             pass
 
         logger.info("Client disconnected",

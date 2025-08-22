@@ -25,7 +25,7 @@ import re
 import sys
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Iterable, List, Dict, Any, Tuple
+from typing import Iterable, List, Dict, Any
 import urllib.request
 import urllib.error
 
@@ -272,9 +272,9 @@ def main() -> int:
     if not ignore_rules and args.fallback_ignore:
         ignore_rules = load_ignore_rules(root, f"tools/{args.ignore_file}")
     if ignore_rules:
-        before = len(all_findings)
+        len(all_findings)
         all_findings = [f for f in all_findings if not should_ignore(f, ignore_rules)]
-        after = len(all_findings)
+        len(all_findings)
 
     # Presence-only mode: summarize ENV keys presence
     if args.presence_only:

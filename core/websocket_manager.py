@@ -7,8 +7,7 @@ TetraCore StreamHub WebSocket Manager
 
 import asyncio
 import json
-import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional, Set, Callable, Any
 from collections import defaultdict
 import structlog
@@ -56,7 +55,7 @@ class WebSocketConnection:
             self.message_count += 1
             self.last_activity = datetime.utcnow()
 
-        except Exception as e:
+        except Exception:
             self.errors += 1
             self.is_alive = False
             raise
@@ -103,7 +102,7 @@ class WebSocketConnection:
             await self.send_json(ping_data)
             self.last_ping = datetime.utcnow()
 
-        except Exception as e:
+        except Exception:
             self.is_alive = False
             raise
 
@@ -117,7 +116,7 @@ class WebSocketConnection:
             await self.send_json(pong_data)
             self.last_pong = datetime.utcnow()
 
-        except Exception as e:
+        except Exception:
             self.is_alive = False
             raise
 
@@ -278,7 +277,7 @@ class WebSocketManager:
                             error=str(e))
             try:
                 await websocket.close(4000, "Internal server error")
-            except:
+            except Exception:
                 pass
             return None
 

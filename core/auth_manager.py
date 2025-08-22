@@ -7,7 +7,6 @@ import os
 import asyncio
 import inspect
 import secrets
-import json
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, List, Any
@@ -17,7 +16,7 @@ import hmac
 
 import jwt
 from passlib.context import CryptContext
-from fastapi import HTTPException, Security, Depends, Request
+from fastapi import HTTPException, Security, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import structlog
 import redis
@@ -100,14 +99,14 @@ class AuthManager:
         secrets_mgr = get_secrets_manager()
         try:
             self.secret_key = secrets_mgr.get_jwt_key()
-        except ValueError as e:
+        except ValueError:
             # Ключ не знайдено – кидуємо помилку, щоб розробник налаштував .env
             logger.error("❌ JWT_SECRET_KEY не налаштовано у середовищі! Переконайтеся, що змінна оточення встановлена.")
             raise
 
         try:
             self.refresh_secret = secrets_mgr.get_refresh_key()
-        except ValueError as e:
+        except ValueError:
             logger.error("❌ JWT_REFRESH_SECRET не налаштовано у середовищі! Переконайтеся, що змінна оточення встановлена.")
             raise
 
@@ -412,7 +411,7 @@ class AuthManager:
             logger.info("✅ Token validation successful", user_id=payload.get("user_id"))
             return payload
 
-        except jwt.ExpiredSignatureError as e:
+        except jwt.ExpiredSignatureError:
             logger.warning("❌ Token has expired")
             raise HTTPException(status_code=401, detail="Token has expired")
         except jwt.InvalidTokenError as e:
@@ -823,7 +822,7 @@ class AuthManager:
         sessions = []
 
         if self.redis_client:
-            pattern = f"session:*"
+            pattern = "session:*"
             iterator = self.redis_client.scan_iter(match=pattern)
             keys: List[Any] = []
             try:
@@ -855,7 +854,7 @@ class AuthManager:
             request_time = datetime.fromisoformat(timestamp)
             if datetime.now(timezone.utc) - request_time > timedelta(minutes=5):
                 return False
-        except:
+        except Exception:
             return False
 
         # Перевірка підпису

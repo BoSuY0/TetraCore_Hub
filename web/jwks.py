@@ -1,7 +1,6 @@
 """JWKS endpoint and key management for JWT (RS/ES/EdDSA)."""
-from typing import Dict, Any, List
+from typing import Dict, Any
 import base64
-import json
 import os
 from fastapi import APIRouter, HTTPException
 

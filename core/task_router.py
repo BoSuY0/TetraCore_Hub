@@ -7,19 +7,17 @@ TetraCore StreamHub Task Router
 """
 
 import asyncio
-import logging
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Set, Callable, Any
+from datetime import datetime
+from typing import Dict, Optional, Set, Callable, Any
 from collections import defaultdict, deque
 import structlog
 import orjson
-import uuid
 import os
 
 from config import Settings
-from models.task import Task, TaskType, TaskStatus, TaskPriority, TaskQueue
-from models.client import Client, ClientType
-from models.messages import BaseMessage, MessageType, create_message
+from models.task import Task, TaskStatus, TaskPriority, TaskQueue
+from models.client import Client
+from models.messages import MessageType, create_message
 
 
 class RedisErrorHandler:
@@ -571,7 +569,7 @@ class TaskRouter:
                 try:
                     worker.release_task(task.task_id)
                     task.context.reset_assignment()
-                except:
+                except Exception:
                     pass
             return False
 
@@ -610,7 +608,7 @@ class TaskRouter:
             self.executor_tasks[worker_id].discard(task_id)
 
             # Результати тепер відправляються тільки через WebSocket, не зберігаємо в Redis
-            self.logger.info(f"[WS_RESULT] Task result will be sent to client via WebSocket only",
+            self.logger.info("[WS_RESULT] Task result will be sent to client via WebSocket only",
                            task_id=task_id,
                            status=status.value,
                            client_id=task.context.client_id)
@@ -649,7 +647,7 @@ class TaskRouter:
     async def _send_result_to_client(self, task: Task):
         """Відправка результату завдання клієнту"""
         try:
-            self.logger.info(f"[WS_RESULT_SEND] Attempting to send result to client",
+            self.logger.info("[WS_RESULT_SEND] Attempting to send result to client",
                            task_id=task.task_id,
                            client_id=task.context.client_id,
                            has_client_manager=self.client_manager is not None)
@@ -659,18 +657,18 @@ class TaskRouter:
                 return
 
             if not self.client_manager:
-                self.logger.warning(f"[WS_RESULT_SEND] No client_manager available")
+                self.logger.warning("[WS_RESULT_SEND] No client_manager available")
                 return
 
             client = self.client_manager.get_client(task.context.client_id)
-            self.logger.info(f"[WS_RESULT_SEND] Client lookup result",
+            self.logger.info("[WS_RESULT_SEND] Client lookup result",
                            task_id=task.task_id,
                            client_id=task.context.client_id,
                            client_found=client is not None,
                            has_websocket=client.websocket is not None if client else False)
 
             if not client or not client.websocket:
-                self.logger.warning(f"[WS_RESULT_SEND] Client not found or no websocket",
+                self.logger.warning("[WS_RESULT_SEND] Client not found or no websocket",
                                   task_id=task.task_id,
                                   client_id=task.context.client_id)
                 return
@@ -687,7 +685,7 @@ class TaskRouter:
                 completed_at=datetime.utcnow()
             )
 
-            self.logger.info(f"[WS_RESULT_SEND] Sending result message to client",
+            self.logger.info("[WS_RESULT_SEND] Sending result message to client",
                            task_id=task.task_id,
                            client_id=task.context.client_id,
                            message_type=result_message.message_type,
@@ -695,7 +693,7 @@ class TaskRouter:
 
             await client.websocket.send_json(result_message.model_dump(mode='json'))
 
-            self.logger.info(f"[WS_RESULT_SEND] ✅ Result successfully sent to client",
+            self.logger.info("[WS_RESULT_SEND] ✅ Result successfully sent to client",
                            task_id=task.task_id,
                            client_id=task.context.client_id)
 

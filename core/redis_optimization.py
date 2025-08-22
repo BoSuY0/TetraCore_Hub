@@ -7,18 +7,15 @@ import asyncio
 import time
 import json
 from typing import Dict, List, Optional, Any, Set, Tuple, Callable, Union
-from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 from collections import defaultdict, deque
 from enum import Enum
-import hashlib
 import zlib
 
-import redis
 from redis import asyncio as aioredis
 from redis.asyncio.cluster import RedisCluster
 from redis.asyncio.sentinel import Sentinel
-from redis.exceptions import RedisError, ConnectionError, TimeoutError
+from redis.exceptions import ConnectionError, TimeoutError
 import structlog
 
 logger = structlog.get_logger()
@@ -478,7 +475,7 @@ class RedisOptimizer:
                     # Декодуємо повідомлення
                     try:
                         decoded_data = self._decode_value(data)
-                    except:
+                    except Exception:
                         decoded_data = data
 
                     # Викликаємо callbacks
