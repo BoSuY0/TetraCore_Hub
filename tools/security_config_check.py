@@ -15,8 +15,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from config import get_settings
-from core.config_diagnostics import run_security_config_diagnostics
+from config import get_settings  # noqa: E402
+from core.config_diagnostics import run_security_config_diagnostics  # noqa: E402
 
 
 def main() -> int:
@@ -29,5 +29,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
-

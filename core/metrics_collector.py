@@ -7,14 +7,12 @@ TetraCore StreamHub Metrics Collector
 """
 
 import asyncio
-import logging
 import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Set
+from typing import Dict, List, Optional, Any
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 import structlog
-import json
 
 from config import Settings
 
@@ -22,6 +20,7 @@ from config import Settings
 @dataclass
 class Metric:
     """Базовий клас для метрики"""
+
     name: str
     value: float
     timestamp: datetime = field(default_factory=datetime.utcnow)
@@ -37,13 +36,14 @@ class Metric:
             "timestamp": self.timestamp.isoformat(),
             "labels": self.labels,
             "unit": self.unit,
-            "description": self.description
+            "description": self.description,
         }
 
 
 @dataclass
 class Counter:
     """Лічильник метрик"""
+
     name: str
     description: str = ""
     labels: Dict[str, str] = field(default_factory=dict)
@@ -64,13 +64,14 @@ class Counter:
             value=float(self.value),
             labels=self.labels,
             unit="count",
-            description=self.description
+            description=self.description,
         )
 
 
 @dataclass
 class Gauge:
     """Індикатор метрик"""
+
     name: str
     description: str = ""
     labels: Dict[str, str] = field(default_factory=dict)
@@ -94,17 +95,20 @@ class Gauge:
             name=self.name,
             value=self.value,
             labels=self.labels,
-            description=self.description
+            description=self.description,
         )
 
 
 @dataclass
 class Histogram:
     """Гістограма метрик"""
+
     name: str
     description: str = ""
     labels: Dict[str, str] = field(default_factory=dict)
-    buckets: List[float] = field(default_factory=lambda: [0.1, 0.5, 1.0, 2.5, 5.0, 10.0])
+    buckets: List[float] = field(
+        default_factory=lambda: [0.1, 0.5, 1.0, 2.5, 5.0, 10.0]
+    )
     values: List[float] = field(default_factory=list)
     max_size: int = 1000
 
@@ -114,7 +118,7 @@ class Histogram:
 
         # Обмеження розміру
         if len(self.values) > self.max_size:
-            self.values = self.values[-self.max_size:]
+            self.values = self.values[-self.max_size :]
 
     def get_metrics(self) -> List[Metric]:
         """Отримання метрик гістограми"""
@@ -128,31 +132,37 @@ class Histogram:
             count = sum(1 for v in self.values if v <= bucket)
             bucket_labels = {**self.labels, "le": str(bucket)}
 
-            metrics.append(Metric(
-                name=f"{self.name}_bucket",
-                value=float(count),
-                labels=bucket_labels,
-                unit="count",
-                description=f"{self.description} bucket"
-            ))
+            metrics.append(
+                Metric(
+                    name=f"{self.name}_bucket",
+                    value=float(count),
+                    labels=bucket_labels,
+                    unit="count",
+                    description=f"{self.description} bucket",
+                )
+            )
 
         # Загальна кількість
-        metrics.append(Metric(
-            name=f"{self.name}_count",
-            value=float(len(self.values)),
-            labels=self.labels,
-            unit="count",
-            description=f"{self.description} count"
-        ))
+        metrics.append(
+            Metric(
+                name=f"{self.name}_count",
+                value=float(len(self.values)),
+                labels=self.labels,
+                unit="count",
+                description=f"{self.description} count",
+            )
+        )
 
         # Сума
         total = sum(self.values)
-        metrics.append(Metric(
-            name=f"{self.name}_sum",
-            value=total,
-            labels=self.labels,
-            description=f"{self.description} sum"
-        ))
+        metrics.append(
+            Metric(
+                name=f"{self.name}_sum",
+                value=total,
+                labels=self.labels,
+                description=f"{self.description} sum",
+            )
+        )
 
         return metrics
 
@@ -215,7 +225,10 @@ class MetricsCollector:
             # Реєструємо лічильники безпеки/WS
             for name, desc in [
                 ("ws_origin_blocked", "Blocked WS origins in production"),
-                ("query_token_rejected", "WS connections rejected due to query token in production"),
+                (
+                    "query_token_rejected",
+                    "WS connections rejected due to query token in production",
+                ),
                 ("hmac_failed", "Failed HMAC handshakes"),
                 ("nonce_replay", "Detected nonce replays"),
                 ("ip_rate_limited", "Connections rate-limited by IP"),
@@ -258,53 +271,88 @@ class MetricsCollector:
     def _initialize_default_metrics(self):
         """Ініціалізація базових метрик"""
         # Лічильники
-        self.register_counter("streamhub_connections_total", "Total number of connections")
-        self.register_counter("streamhub_tasks_submitted_total", "Total number of submitted tasks")
-        self.register_counter("streamhub_tasks_completed_total", "Total number of completed tasks")
-        self.register_counter("streamhub_tasks_failed_total", "Total number of failed tasks")
-        self.register_counter("streamhub_messages_sent_total", "Total number of messages sent")
-        self.register_counter("streamhub_messages_received_total", "Total number of messages received")
+        self.register_counter(
+            "streamhub_connections_total", "Total number of connections"
+        )
+        self.register_counter(
+            "streamhub_tasks_submitted_total", "Total number of submitted tasks"
+        )
+        self.register_counter(
+            "streamhub_tasks_completed_total", "Total number of completed tasks"
+        )
+        self.register_counter(
+            "streamhub_tasks_failed_total", "Total number of failed tasks"
+        )
+        self.register_counter(
+            "streamhub_messages_sent_total", "Total number of messages sent"
+        )
+        self.register_counter(
+            "streamhub_messages_received_total", "Total number of messages received"
+        )
         self.register_counter("streamhub_errors_total", "Total number of errors")
 
         # Індикатори
-        self.register_gauge("streamhub_active_connections", "Number of active connections")
+        self.register_gauge(
+            "streamhub_active_connections", "Number of active connections"
+        )
         self.register_gauge("streamhub_active_tasks", "Number of active tasks")
         self.register_gauge("streamhub_queue_size", "Size of task queue")
         self.register_gauge("streamhub_cpu_usage", "CPU usage percentage")
         self.register_gauge("streamhub_memory_usage", "Memory usage percentage")
-        self.register_gauge("streamhub_redis_connections", "Number of Redis connections")
+        self.register_gauge(
+            "streamhub_redis_connections", "Number of Redis connections"
+        )
 
         # Гістограми
-        self.register_histogram("streamhub_task_duration_seconds", "Task execution duration")
-        self.register_histogram("streamhub_request_duration_seconds", "Request duration")
-        self.register_histogram("streamhub_websocket_message_size_bytes", "WebSocket message size")
-        self.register_histogram("streamhub_redis_operation_duration_seconds", "Redis operation duration")
+        self.register_histogram(
+            "streamhub_task_duration_seconds", "Task execution duration"
+        )
+        self.register_histogram(
+            "streamhub_request_duration_seconds", "Request duration"
+        )
+        self.register_histogram(
+            "streamhub_websocket_message_size_bytes", "WebSocket message size"
+        )
+        self.register_histogram(
+            "streamhub_redis_operation_duration_seconds", "Redis operation duration"
+        )
 
-    def register_counter(self, name: str, description: str = "", labels: Dict[str, str] = None) -> Counter:
+    def register_counter(
+        self, name: str, description: str = "", labels: Dict[str, str] = None
+    ) -> Counter:
         """Реєстрація лічильника"""
         counter = Counter(name=name, description=description, labels=labels or {})
         self.counters[name] = counter
         return counter
 
-    def register_gauge(self, name: str, description: str = "", labels: Dict[str, str] = None) -> Gauge:
+    def register_gauge(
+        self, name: str, description: str = "", labels: Dict[str, str] = None
+    ) -> Gauge:
         """Реєстрація індикатора"""
         gauge = Gauge(name=name, description=description, labels=labels or {})
         self.gauges[name] = gauge
         return gauge
 
-    def register_histogram(self, name: str, description: str = "", labels: Dict[str, str] = None,
-                          buckets: List[float] = None) -> Histogram:
+    def register_histogram(
+        self,
+        name: str,
+        description: str = "",
+        labels: Dict[str, str] = None,
+        buckets: List[float] = None,
+    ) -> Histogram:
         """Реєстрація гістограми"""
         histogram = Histogram(
             name=name,
             description=description,
             labels=labels or {},
-            buckets=buckets or [0.1, 0.5, 1.0, 2.5, 5.0, 10.0]
+            buckets=buckets or [0.1, 0.5, 1.0, 2.5, 5.0, 10.0],
         )
         self.histograms[name] = histogram
         return histogram
 
-    def increment_counter(self, name: str, amount: int = 1, labels: Dict[str, str] = None):
+    def increment_counter(
+        self, name: str, amount: int = 1, labels: Dict[str, str] = None
+    ):
         """Збільшення лічильника"""
         try:
             if name in self.counters:
@@ -352,19 +400,18 @@ class MetricsCollector:
 
     def _add_to_history(self, name: str, value: float, metric_type: str):
         """Додавання до історії метрик"""
-        self.metric_history.append({
-            "name": name,
-            "value": value,
-            "type": metric_type,
-            "timestamp": datetime.utcnow().isoformat()
-        })
+        self.metric_history.append(
+            {
+                "name": name,
+                "value": value,
+                "type": metric_type,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        )
 
     def _add_to_time_series(self, name: str, value: float):
         """Додавання до часових рядів"""
-        self.time_series[name].append({
-            "value": value,
-            "timestamp": time.time()
-        })
+        self.time_series[name].append({"value": value, "timestamp": time.time()})
 
     async def get_metrics(self, metric_types: List[str] = None) -> Dict[str, Any]:
         """Отримання всіх метрик"""
@@ -401,9 +448,9 @@ class MetricsCollector:
                             "p50": histogram.get_percentile(50),
                             "p90": histogram.get_percentile(90),
                             "p95": histogram.get_percentile(95),
-                            "p99": histogram.get_percentile(99)
+                            "p99": histogram.get_percentile(99),
                         },
-                        "average": histogram.get_average()
+                        "average": histogram.get_average(),
                     }
                 metrics["histograms"] = histograms
 
@@ -413,7 +460,7 @@ class MetricsCollector:
                 "uptime_seconds": (now - self.start_time).total_seconds(),
                 "collection_count": self.collection_count,
                 "export_count": self.export_count,
-                "errors_count": self.errors_count
+                "errors_count": self.errors_count,
             }
 
             # Кешування
@@ -467,15 +514,17 @@ class MetricsCollector:
                 self.set_gauge("streamhub_memory_usage", memory.percent)
             except (OSError, AttributeError) as e:
                 self.logger.warning("Memory metrics unavailable", error=str(e))
-                memory = type('obj', (object,), {'percent': 0.0, 'available': 0, 'used': 0})()
+                memory = type(
+                    "obj", (object,), {"percent": 0.0, "available": 0, "used": 0}
+                )()
 
             # Диск (з обробкою помилок)
             try:
-                disk = psutil.disk_usage('/')
+                disk = psutil.disk_usage("/")
                 disk_percent = disk.percent
             except (OSError, AttributeError) as e:
                 self.logger.warning("Disk metrics unavailable", error=str(e))
-                disk = type('obj', (object,), {'percent': 0.0, 'free': 0, 'used': 0})()
+                disk = type("obj", (object,), {"percent": 0.0, "free": 0, "used": 0})()
                 disk_percent = 0.0
 
             # Мережа (з обробкою помилок Performance counters)
@@ -484,10 +533,18 @@ class MetricsCollector:
             except (OSError, AttributeError) as e:
                 error_msg = str(e)
                 if "PdhAddEnglishCounterW" in error_msg:
-                    self.logger.info("[metrics_collector.py] Performance counters disabled, using default network values", error=error_msg, source="metrics_collector.py")
+                    self.logger.info(
+                        "[metrics_collector.py] Performance counters disabled, using default network values",
+                        error=error_msg,
+                        source="metrics_collector.py",
+                    )
                 else:
-                    self.logger.warning("[metrics_collector.py] Network metrics unavailable", error=error_msg, source="metrics_collector.py")
-                network = type('obj', (object,), {'bytes_sent': 0, 'bytes_recv': 0})()
+                    self.logger.warning(
+                        "[metrics_collector.py] Network metrics unavailable",
+                        error=error_msg,
+                        source="metrics_collector.py",
+                    )
+                network = type("obj", (object,), {"bytes_sent": 0, "bytes_recv": 0})()
 
             # Процес Python (з обробкою помилок)
             try:
@@ -497,7 +554,7 @@ class MetricsCollector:
                 process_threads = process.num_threads()
             except (OSError, AttributeError) as e:
                 self.logger.warning("Process metrics unavailable", error=str(e))
-                process_memory = type('obj', (object,), {'rss': 0, 'vms': 0})()
+                process_memory = type("obj", (object,), {"rss": 0, "vms": 0})()
                 process_cpu = 0.0
                 process_threads = 0
 
@@ -514,13 +571,17 @@ class MetricsCollector:
                 "process_memory_rss": process_memory.rss,
                 "process_memory_vms": process_memory.vms,
                 "process_cpu_percent": process_cpu,
-                "process_threads": process_threads
+                "process_threads": process_threads,
             }
 
         except Exception as e:
             error_msg = str(e)
             if "PdhAddEnglishCounterW" in error_msg:
-                self.logger.info("[metrics_collector.py] Performance counters may be disabled. Using default values for system metrics.", error=error_msg, source="metrics_collector.py")
+                self.logger.info(
+                    "[metrics_collector.py] Performance counters may be disabled. Using default values for system metrics.",
+                    error=error_msg,
+                    source="metrics_collector.py",
+                )
                 # Повертаємо базові метрики замість порожнього словника
                 return {
                     "cpu_percent": 0.0,
@@ -535,7 +596,7 @@ class MetricsCollector:
                     "process_memory_rss": 0,
                     "process_memory_vms": 0,
                     "process_cpu_percent": 0.0,
-                    "process_threads": 0
+                    "process_threads": 0,
                 }
             else:
                 self.logger.error("Error collecting system metrics", error=error_msg)
@@ -557,7 +618,7 @@ class MetricsCollector:
                 "max": max(values),
                 "avg": sum(values) / len(values),
                 "latest": values[-1] if values else 0,
-                "trend": self._calculate_trend(values)
+                "trend": self._calculate_trend(values),
             }
 
         return summary
@@ -568,8 +629,8 @@ class MetricsCollector:
             return "stable"
 
         # Простий тренд на основі першої і останньої третини
-        first_third = values[:len(values)//3] or [values[0]]
-        last_third = values[-len(values)//3:] or [values[-1]]
+        first_third = values[: len(values) // 3] or [values[0]]
+        last_third = values[-len(values) // 3 :] or [values[-1]]
 
         first_avg = sum(first_third) / len(first_third)
         last_avg = sum(last_third) / len(last_third)
@@ -690,7 +751,11 @@ class MetricsCollector:
             except Exception as e:
                 error_msg = str(e)
                 if "PdhAddEnglishCounterW" in error_msg:
-                    self.logger.info("[metrics_collector.py] Performance counters disabled in collection loop", error=error_msg, source="metrics_collector.py")
+                    self.logger.info(
+                        "[metrics_collector.py] Performance counters disabled in collection loop",
+                        error=error_msg,
+                        source="metrics_collector.py",
+                    )
                 else:
                     self.logger.error("Error in collection loop", error=error_msg)
                     self.errors_count += 1
@@ -717,14 +782,22 @@ class MetricsCollector:
             await self._collect_system_metrics()
 
             # Очищення кешу для оновлення
-            self.last_cache_update = datetime.utcnow() - timedelta(seconds=self.cache_ttl + 1)
+            self.last_cache_update = datetime.utcnow() - timedelta(
+                seconds=self.cache_ttl + 1
+            )
 
         except Exception as e:
             error_msg = str(e)
             if "PdhAddEnglishCounterW" in error_msg:
-                self.logger.info("[metrics_collector.py] Performance counters disabled in automatic collection", error=error_msg, source="metrics_collector.py")
+                self.logger.info(
+                    "[metrics_collector.py] Performance counters disabled in automatic collection",
+                    error=error_msg,
+                    source="metrics_collector.py",
+                )
             else:
-                self.logger.error("Error in automatic metrics collection", error=error_msg)
+                self.logger.error(
+                    "Error in automatic metrics collection", error=error_msg
+                )
 
     async def _aggregate_metrics(self):
         """Агрегація метрик"""
@@ -732,16 +805,21 @@ class MetricsCollector:
             # Очищення старих записів з історії
             cutoff_time = datetime.utcnow() - timedelta(hours=24)
 
-            while (self.metric_history and
-                   datetime.fromisoformat(self.metric_history[0]["timestamp"]) < cutoff_time):
+            while (
+                self.metric_history
+                and datetime.fromisoformat(self.metric_history[0]["timestamp"])
+                < cutoff_time
+            ):
                 self.metric_history.popleft()
 
             # Очищення старих часових рядів
             cutoff_timestamp = time.time() - (24 * 3600)  # 24 години
 
             for name in self.time_series:
-                while (self.time_series[name] and
-                       self.time_series[name][0]["timestamp"] < cutoff_timestamp):
+                while (
+                    self.time_series[name]
+                    and self.time_series[name][0]["timestamp"] < cutoff_timestamp
+                ):
                     self.time_series[name].popleft()
 
         except Exception as e:
@@ -762,9 +840,11 @@ class MetricsCollector:
             "metrics_count": {
                 "counters": len(self.counters),
                 "gauges": len(self.gauges),
-                "histograms": len(self.histograms)
+                "histograms": len(self.histograms),
             },
             "history_size": len(self.metric_history),
             "time_series_count": len(self.time_series),
-            "cache_age_seconds": (datetime.utcnow() - self.last_cache_update).total_seconds()
+            "cache_age_seconds": (
+                datetime.utcnow() - self.last_cache_update
+            ).total_seconds(),
         }

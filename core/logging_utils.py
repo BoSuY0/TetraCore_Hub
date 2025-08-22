@@ -40,7 +40,7 @@ class RateLimiterProcessor:  # pragma: no cover – простий допомі�
                 raise structlog.DropEvent
             self._last[key] = now
         # Пропускаємо event_dict далі в конвеєр
-        return event_dict 
+        return event_dict
 
 
 class RedactSecretsProcessor:  # pragma: no cover – простий допоміжний клас
@@ -89,7 +89,9 @@ class SampleInfoProcessor:  # pragma: no cover – простий допоміж
     """
 
     def __init__(self):
-        import os, random
+        import os
+        import random
+
         self.random = random
         try:
             self.rate = float(os.getenv("LOG_INFO_SAMPLE_RATE", "1.0"))

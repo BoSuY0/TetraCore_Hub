@@ -6,15 +6,14 @@ WebSocket Connection Pool Manager for TetraCore Hub
 import asyncio
 import time
 import uuid
-from typing import Dict, List, Optional, Set, Any, Callable, Tuple
-from datetime import datetime, timedelta
+from typing import Dict, Optional, Set, Any, Callable
+from datetime import datetime
 from dataclasses import dataclass, field
 from collections import deque
 from enum import Enum
-import weakref
 from contextlib import asynccontextmanager
 
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket
 import structlog
 
 logger = structlog.get_logger()
@@ -35,6 +34,7 @@ RECONNECT_DELAY = 1.0  # Початкова затримка для reconnect
 
 class ConnectionState(Enum):
     """Стани WebSocket з'єднання"""
+
     PENDING = "pending"
     ACTIVE = "active"
     IDLE = "idle"
@@ -45,6 +45,7 @@ class ConnectionState(Enum):
 
 class ConnectionPriority(Enum):
     """Пріоритети з'єднань"""
+
     LOW = 0
     NORMAL = 1
     HIGH = 2
@@ -54,6 +55,7 @@ class ConnectionPriority(Enum):
 @dataclass
 class PooledConnection:
     """WebSocket з'єднання в пулі"""
+
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     websocket: WebSocket = None
     client_id: Optional[str] = None
@@ -81,7 +83,10 @@ class PooledConnection:
     @property
     def is_idle(self) -> bool:
         """Чи є з'єднання неактивним"""
-        return self.state == ConnectionState.IDLE and self.idle_time > CONNECTION_IDLE_TIMEOUT
+        return (
+            self.state == ConnectionState.IDLE
+            and self.idle_time > CONNECTION_IDLE_TIMEOUT
+        )
 
     @property
     def is_expired(self) -> bool:
@@ -97,6 +102,7 @@ class PooledConnection:
 @dataclass
 class ConnectionRequest:
     """Запит на з'єднання"""
+
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     client_id: str = None
     client_type: str = None
@@ -121,7 +127,7 @@ class ConnectionPool:
         max_connections_per_client: int = DEFAULT_MAX_CONNECTIONS_PER_CLIENT,
         queue_size: int = DEFAULT_QUEUE_SIZE,
         enable_health_checks: bool = True,
-        enable_auto_scaling: bool = True
+        enable_auto_scaling: bool = True,
     ):
         # Конфігурація
         self.pool_size = min(max(pool_size, MIN_POOL_SIZE), MAX_POOL_SIZE)
@@ -150,7 +156,7 @@ class ConnectionPool:
             "rejected_requests": 0,
             "recycled_connections": 0,
             "failed_health_checks": 0,
-            "total_messages": 0
+            "total_messages": 0,
         }
 
         # Блокування для thread-safety
@@ -166,9 +172,11 @@ class ConnectionPool:
         self.on_connection_released: Optional[Callable] = None
         self.on_connection_error: Optional[Callable] = None
 
-        logger.info("Connection pool initialized",
-                   pool_size=self.pool_size,
-                   max_per_client=self.max_connections_per_client)
+        logger.info(
+            "Connection pool initialized",
+            pool_size=self.pool_size,
+            max_per_client=self.max_connections_per_client,
+        )
 
     async def start(self):
         """Запуск background tasks"""
@@ -192,7 +200,9 @@ class ConnectionPool:
 
         # Закриття всіх з'єднань
         async with self._lock:
-            all_connections = list(self.active_connections.values()) + list(self.idle_connections)
+            all_connections = list(self.active_connections.values()) + list(
+                self.idle_connections
+            )
 
             for conn in all_connections:
                 await self._close_connection(conn)
@@ -210,16 +220,18 @@ class ConnectionPool:
         client_type: str = "unknown",
         priority: ConnectionPriority = ConnectionPriority.NORMAL,
         timeout: float = 30.0,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[PooledConnection]:
         """Отримання з'єднання з пулу або створення нового"""
         async with self._lock:
             # Перевірка ліміту для клієнта
             client_conn_count = len(self.client_connections.get(client_id, set()))
             if client_conn_count >= self.max_connections_per_client:
-                logger.warning("Client connection limit reached",
-                             client_id=client_id,
-                             limit=self.max_connections_per_client)
+                logger.warning(
+                    "Client connection limit reached",
+                    client_id=client_id,
+                    limit=self.max_connections_per_client,
+                )
 
                 # Додаємо в чергу якщо є місце
                 if len(self.pending_requests) < self.queue_size:
@@ -228,7 +240,7 @@ class ConnectionPool:
                         client_type=client_type,
                         priority=priority,
                         timeout=timeout,
-                        metadata=metadata or {}
+                        metadata=metadata or {},
                     )
                     self._enqueue_request(request)
 
@@ -250,14 +262,17 @@ class ConnectionPool:
                 logger.debug("Recycled idle connection", conn_id=conn.id)
             else:
                 # Створюємо нове з'єднання
-                if len(self.active_connections) + len(self.idle_connections) >= self.pool_size:
+                if (
+                    len(self.active_connections) + len(self.idle_connections)
+                    >= self.pool_size
+                ):
                     # Pool повний, додаємо в чергу
                     request = ConnectionRequest(
                         client_id=client_id,
                         client_type=client_type,
                         priority=priority,
                         timeout=timeout,
-                        metadata=metadata or {}
+                        metadata=metadata or {},
                     )
                     self._enqueue_request(request)
                     return await self._wait_for_connection(request)
@@ -269,7 +284,7 @@ class ConnectionPool:
                     client_type=client_type,
                     state=ConnectionState.ACTIVE,
                     priority=priority,
-                    metadata=metadata or {}
+                    metadata=metadata or {},
                 )
                 self.metrics["total_connections"] += 1
 
@@ -286,10 +301,12 @@ class ConnectionPool:
             if self.on_connection_acquired:
                 await self.on_connection_acquired(conn)
 
-            logger.info("Connection acquired",
-                       conn_id=conn.id,
-                       client_id=client_id,
-                       active=len(self.active_connections))
+            logger.info(
+                "Connection acquired",
+                conn_id=conn.id,
+                client_id=client_id,
+                active=len(self.active_connections),
+            )
 
             return conn
 
@@ -298,7 +315,9 @@ class ConnectionPool:
         async with self._lock:
             conn = self.active_connections.get(conn_id)
             if not conn:
-                logger.warning("Attempted to release unknown connection", conn_id=conn_id)
+                logger.warning(
+                    "Attempted to release unknown connection", conn_id=conn_id
+                )
                 return
 
             # Видаляємо з активних
@@ -328,10 +347,12 @@ class ConnectionPool:
             # Обробляємо чергу запитів
             await self._process_queue()
 
-            logger.info("Connection released",
-                       conn_id=conn_id,
-                       closed=close,
-                       idle=len(self.idle_connections))
+            logger.info(
+                "Connection released",
+                conn_id=conn_id,
+                closed=close,
+                idle=len(self.idle_connections),
+            )
 
     async def send_message(self, conn_id: str, message: Dict[str, Any]) -> bool:
         """Відправка повідомлення через pooled connection"""
@@ -359,7 +380,7 @@ class ConnectionPool:
         self,
         message: Dict[str, Any],
         client_type: Optional[str] = None,
-        exclude: Optional[Set[str]] = None
+        exclude: Optional[Set[str]] = None,
     ) -> int:
         """Broadcast повідомлення до всіх активних з'єднань"""
         sent_count = 0
@@ -377,7 +398,9 @@ class ConnectionPool:
 
         return sent_count
 
-    def _get_idle_connection(self, preferred_type: Optional[str] = None) -> Optional[PooledConnection]:
+    def _get_idle_connection(
+        self, preferred_type: Optional[str] = None
+    ) -> Optional[PooledConnection]:
         """Отримання idle з'єднання з пулу"""
         if not self.idle_connections:
             return None
@@ -409,12 +432,16 @@ class ConnectionPool:
         self.pending_requests.append(request)
         self.metrics["queued_requests"] = len(self.pending_requests)
 
-        logger.debug("Request queued",
-                    request_id=request.id,
-                    priority=request.priority.name,
-                    queue_size=len(self.pending_requests))
+        logger.debug(
+            "Request queued",
+            request_id=request.id,
+            priority=request.priority.name,
+            queue_size=len(self.pending_requests),
+        )
 
-    async def _wait_for_connection(self, request: ConnectionRequest) -> Optional[PooledConnection]:
+    async def _wait_for_connection(
+        self, request: ConnectionRequest
+    ) -> Optional[PooledConnection]:
         """Очікування на з'єднання з черги"""
         start_time = time.time()
 
@@ -434,9 +461,11 @@ class ConnectionPool:
         async with self._lock:
             self._remove_request(request)
 
-        logger.warning("Connection request timed out",
-                      request_id=request.id,
-                      waited=time.time() - start_time)
+        logger.warning(
+            "Connection request timed out",
+            request_id=request.id,
+            waited=time.time() - start_time,
+        )
         return None
 
     def _remove_request(self, request: ConnectionRequest):
@@ -455,7 +484,9 @@ class ConnectionPool:
         for priority in sorted(ConnectionPriority, key=lambda p: p.value, reverse=True):
             queue = self.priority_queue[priority]
 
-            while queue and (len(self.active_connections) < self.pool_size or self.idle_connections):
+            while queue and (
+                len(self.active_connections) < self.pool_size or self.idle_connections
+            ):
                 request = queue.popleft()
 
                 # Перевірка таймауту
@@ -483,9 +514,11 @@ class ConnectionPool:
                     # Видаляємо з черги
                     self._remove_request(request)
 
-                    logger.info("Queued request fulfilled",
-                              request_id=request.id,
-                              conn_id=conn.id)
+                    logger.info(
+                        "Queued request fulfilled",
+                        request_id=request.id,
+                        conn_id=conn.id,
+                    )
 
                     if request.callback:
                         await request.callback(conn)
@@ -535,9 +568,7 @@ class ConnectionPool:
                 conn.last_health_check = datetime.utcnow()
 
             except Exception as e:
-                logger.warning("Health check failed",
-                             conn_id=conn.id,
-                             error=str(e))
+                logger.warning("Health check failed", conn_id=conn.id, error=str(e))
 
                 conn.error_count += 1
                 self.metrics["failed_health_checks"] += 1
@@ -577,9 +608,11 @@ class ConnectionPool:
             self.metrics["idle_connections"] = len(self.idle_connections)
 
             if idle_to_remove or expired_requests:
-                logger.info("Cleanup completed",
-                          idle_removed=len(idle_to_remove),
-                          requests_removed=len(expired_requests))
+                logger.info(
+                    "Cleanup completed",
+                    idle_removed=len(idle_to_remove),
+                    requests_removed=len(expired_requests),
+                )
 
     async def _auto_scale_loop(self):
         """Background task для автоматичного масштабування пулу"""
@@ -596,24 +629,28 @@ class ConnectionPool:
         """Автоматичне масштабування розміру пулу"""
         async with self._lock:
             active_ratio = len(self.active_connections) / self.pool_size
-            queue_ratio = len(self.pending_requests) / self.queue_size if self.queue_size > 0 else 0
+            queue_ratio = (
+                len(self.pending_requests) / self.queue_size
+                if self.queue_size > 0
+                else 0
+            )
 
             # Збільшуємо pool якщо високе навантаження
             if active_ratio > 0.8 or queue_ratio > 0.5:
                 new_size = min(int(self.pool_size * 1.5), MAX_POOL_SIZE)
                 if new_size > self.pool_size:
-                    logger.info("Scaling up pool",
-                              old_size=self.pool_size,
-                              new_size=new_size)
+                    logger.info(
+                        "Scaling up pool", old_size=self.pool_size, new_size=new_size
+                    )
                     self.pool_size = new_size
 
             # Зменшуємо pool якщо низьке навантаження
             elif active_ratio < 0.2 and queue_ratio == 0:
                 new_size = max(int(self.pool_size * 0.75), MIN_POOL_SIZE)
                 if new_size < self.pool_size:
-                    logger.info("Scaling down pool",
-                              old_size=self.pool_size,
-                              new_size=new_size)
+                    logger.info(
+                        "Scaling down pool", old_size=self.pool_size, new_size=new_size
+                    )
                     self.pool_size = new_size
 
     def get_stats(self) -> Dict[str, Any]:
@@ -627,17 +664,16 @@ class ConnectionPool:
             "metrics": self.metrics.copy(),
             "health": {
                 "utilization": len(self.active_connections) / self.pool_size * 100,
-                "queue_pressure": len(self.pending_requests) / self.queue_size * 100 if self.queue_size > 0 else 0
-            }
+                "queue_pressure": (
+                    len(self.pending_requests) / self.queue_size * 100
+                    if self.queue_size > 0
+                    else 0
+                ),
+            },
         }
 
     @asynccontextmanager
-    async def connection_context(
-        self,
-        websocket: WebSocket,
-        client_id: str,
-        **kwargs
-    ):
+    async def connection_context(self, websocket: WebSocket, client_id: str, **kwargs):
         """Context manager для автоматичного управління з'єднанням"""
         conn = None
         try:
@@ -660,7 +696,7 @@ async def get_connection(
     websocket: WebSocket,
     client_id: str,
     client_type: str = "unknown",
-    priority: ConnectionPriority = ConnectionPriority.NORMAL
+    priority: ConnectionPriority = ConnectionPriority.NORMAL,
 ) -> Optional[PooledConnection]:
     """Швидке отримання з'єднання з глобального пулу"""
     return await connection_pool.acquire(websocket, client_id, client_type, priority)

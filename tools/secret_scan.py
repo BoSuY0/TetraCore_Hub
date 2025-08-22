@@ -25,19 +25,45 @@ import re
 import sys
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Iterable, List, Dict, Any, Tuple
+from typing import Iterable, List, Dict, Any
 import urllib.request
 import urllib.error
 
 
 DEFAULT_EXCLUDES = {
-    ".git", "node_modules", ".venv", "venv", "__pycache__", ".mypy_cache",
-    ".pytest_cache", "dist", "build", ".idea", ".vscode", "coverage",
+    ".git",
+    "node_modules",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    "dist",
+    "build",
+    ".idea",
+    ".vscode",
+    "coverage",
 }
 
 TEXT_EXTENSIONS = {
-    ".py", ".ts", ".tsx", ".js", ".jsx", ".json", ".yml", ".yaml", ".toml",
-    ".ini", ".env", ".md", ".txt", ".cfg", ".conf", ".sql", ".sh", ".ps1",
+    ".py",
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".json",
+    ".yml",
+    ".yaml",
+    ".toml",
+    ".ini",
+    ".env",
+    ".md",
+    ".txt",
+    ".cfg",
+    ".conf",
+    ".sql",
+    ".sh",
+    ".ps1",
 }
 
 # Regex patterns for secret-like tokens
@@ -150,34 +176,66 @@ def scan_file(path: Path, entropy_threshold: float, min_length: int) -> List[Fin
         m = DOTENV_LINE.match(stripped)
         if m:
             key, value = m.group(1), m.group(2)
-            if ENV_SECRET_NAME.search(key) or any(p.search(value) for p in SECRET_PATTERNS.values()):
+            if ENV_SECRET_NAME.search(key) or any(
+                p.search(value) for p in SECRET_PATTERNS.values()
+            ):
                 # Lower severity if this is just a reference to os.getenv/os.environ.get
-                sev = "low" if ("os.getenv" in value or "os.environ.get" in value) else "high"
-                findings.append(Finding(str(path), idx, "dotenv", key, stripped[:240], "dotenv_key", sev))
+                sev = (
+                    "low"
+                    if ("os.getenv" in value or "os.environ.get" in value)
+                    else "high"
+                )
+                findings.append(
+                    Finding(
+                        str(path), idx, "dotenv", key, stripped[:240], "dotenv_key", sev
+                    )
+                )
 
         # os.getenv refs
         for ref in ENV_REF.findall(line):
             # Env references are not secrets themselves; keep severity low
             sev = "low"
-            findings.append(Finding(str(path), idx, "env_ref", ref, stripped[:240], "env_ref", sev))
+            findings.append(
+                Finding(str(path), idx, "env_ref", ref, stripped[:240], "env_ref", sev)
+            )
 
         # Known token patterns
         for name, pat in SECRET_PATTERNS.items():
             for m2 in pat.finditer(line):
-                findings.append(Finding(str(path), idx, "token", m2.group(0), stripped[:240], name, "high"))
+                findings.append(
+                    Finding(
+                        str(path),
+                        idx,
+                        "token",
+                        m2.group(0),
+                        stripped[:240],
+                        name,
+                        "high",
+                    )
+                )
 
         # High-entropy quoted tokens
         for qt in QUOTED_TOKEN.findall(line):
             if len(qt) >= min_length:
                 ent = shannon_entropy(qt)
                 if ent >= entropy_threshold:
-                    findings.append(Finding(str(path), idx, "entropy", qt[:64] + ("…" if len(qt) > 64 else ""), stripped[:240], f"entropy>={entropy_threshold}", "medium"))
+                    findings.append(
+                        Finding(
+                            str(path),
+                            idx,
+                            "entropy",
+                            qt[:64] + ("…" if len(qt) > 64 else ""),
+                            stripped[:240],
+                            f"entropy>={entropy_threshold}",
+                            "medium",
+                        )
+                    )
 
     return findings
 
 
 def load_ignore_rules(root: Path, ignore_file: str) -> List[IgnoreRule]:
-    p = (root / ignore_file)
+    p = root / ignore_file
     rules: List[IgnoreRule] = []
     if not p.exists():
         return rules
@@ -192,9 +250,13 @@ def load_ignore_rules(root: Path, ignore_file: str) -> List[IgnoreRule]:
                 expr = expr.strip()
                 if not expr:
                     continue
-                rules.append(IgnoreRule(field=field, pattern=re.compile(expr, re.IGNORECASE)))
+                rules.append(
+                    IgnoreRule(field=field, pattern=re.compile(expr, re.IGNORECASE))
+                )
             else:
-                rules.append(IgnoreRule(field="any", pattern=re.compile(line, re.IGNORECASE)))
+                rules.append(
+                    IgnoreRule(field="any", pattern=re.compile(line, re.IGNORECASE))
+                )
     except Exception:
         pass
     return rules
@@ -226,25 +288,88 @@ def should_ignore(f: Finding, rules: List[IgnoreRule]) -> bool:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Secret/ENV scanner")
     ap.add_argument("--root", default=".", help="Root directory to scan")
-    ap.add_argument("--exclude", action="append", default=[], help="Additional directories to exclude (repeat)")
-    ap.add_argument("--max-size-mb", type=int, default=2, help="Skip files larger than this size (MB)")
-    ap.add_argument("--entropy-threshold", type=float, default=4.3, help="Shannon entropy threshold for suspicious strings")
-    ap.add_argument("--min-length", type=int, default=20, help="Minimum length for entropy candidates")
-    ap.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
-    ap.add_argument("--ignore-file", default=".secret-scan-ignore", help="Ignore rules file (regex-based)")
-    ap.add_argument("--fallback-ignore", action="store_true", help="Also search for ignore file under tools/.secret-scan-ignore if not found at root")
+    ap.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        help="Additional directories to exclude (repeat)",
+    )
+    ap.add_argument(
+        "--max-size-mb",
+        type=int,
+        default=2,
+        help="Skip files larger than this size (MB)",
+    )
+    ap.add_argument(
+        "--entropy-threshold",
+        type=float,
+        default=4.3,
+        help="Shannon entropy threshold for suspicious strings",
+    )
+    ap.add_argument(
+        "--min-length",
+        type=int,
+        default=20,
+        help="Minimum length for entropy candidates",
+    )
+    ap.add_argument(
+        "--format", choices=["text", "json"], default="text", help="Output format"
+    )
+    ap.add_argument(
+        "--ignore-file",
+        default=".secret-scan-ignore",
+        help="Ignore rules file (regex-based)",
+    )
+    ap.add_argument(
+        "--fallback-ignore",
+        action="store_true",
+        help="Also search for ignore file under tools/.secret-scan-ignore if not found at root",
+    )
     ap.add_argument("--report", help="Write JSON report to file")
-    ap.add_argument("--fail-on-find", action="store_true", help="Exit with code 2 if any high/medium findings found")
+    ap.add_argument(
+        "--fail-on-find",
+        action="store_true",
+        help="Exit with code 2 if any high/medium findings found",
+    )
     # Convenience presets
-    ap.add_argument("--heroku", action="store_true", help="Convenience preset for CI/Heroku (root=., fail-on-find, fallback-ignore)")
-    ap.add_argument("--all", "-A", "-all", action="store_true", help="Scan the whole repo with sensible defaults (root=., fallback-ignore)")
-    ap.add_argument("--json", dest="use_json", action="store_true", help="Shortcut for --format json")
+    ap.add_argument(
+        "--heroku",
+        action="store_true",
+        help="Convenience preset for CI/Heroku (root=., fail-on-find, fallback-ignore)",
+    )
+    ap.add_argument(
+        "--all",
+        "-A",
+        "-all",
+        action="store_true",
+        help="Scan the whole repo with sensible defaults (root=., fallback-ignore)",
+    )
+    ap.add_argument(
+        "--json",
+        dest="use_json",
+        action="store_true",
+        help="Shortcut for --format json",
+    )
     # Presence-only mode
-    ap.add_argument("--presence-only", action="store_true", help="Do not show findings; instead report presence of ENV keys (local/remote)")
-    ap.add_argument("--missing-only", action="store_true", help="In presence-only mode, show only keys missing locally or on Heroku")
-    ap.add_argument("--load-dotenv", action="store_true", help="Consider values from root .env as local presence (without printing them)")
+    ap.add_argument(
+        "--presence-only",
+        action="store_true",
+        help="Do not show findings; instead report presence of ENV keys (local/remote)",
+    )
+    ap.add_argument(
+        "--missing-only",
+        action="store_true",
+        help="In presence-only mode, show only keys missing locally or on Heroku",
+    )
+    ap.add_argument(
+        "--load-dotenv",
+        action="store_true",
+        help="Consider values from root .env as local presence (without printing them)",
+    )
     ap.add_argument("--heroku-app", help="Heroku app name to check config vars")
-    ap.add_argument("--heroku-api-key", help="Heroku API token (fallback to HEROKU_API_KEY env)")
+    ap.add_argument(
+        "--heroku-api-key", help="Heroku API token (fallback to HEROKU_API_KEY env)"
+    )
     args = ap.parse_args()
 
     # Apply convenience presets/shortcuts
@@ -272,16 +397,20 @@ def main() -> int:
     if not ignore_rules and args.fallback_ignore:
         ignore_rules = load_ignore_rules(root, f"tools/{args.ignore_file}")
     if ignore_rules:
-        before = len(all_findings)
+        len(all_findings)
         all_findings = [f for f in all_findings if not should_ignore(f, ignore_rules)]
-        after = len(all_findings)
+        len(all_findings)
 
     # Presence-only mode: summarize ENV keys presence
     if args.presence_only:
         # collect keys from findings
         keys: Dict[str, Dict[str, bool]] = {}
         for f in all_findings:
-            if f.kind in {"dotenv", "env_ref"} and f.match and re.fullmatch(r"[A-Z][A-Z0-9_]{1,}", f.match):
+            if (
+                f.kind in {"dotenv", "env_ref"}
+                and f.match
+                and re.fullmatch(r"[A-Z][A-Z0-9_]{1,}", f.match)
+            ):
                 keys.setdefault(f.match, {})
 
         # option: load .env for presence
@@ -290,7 +419,9 @@ def main() -> int:
             dotenv_path = root / ".env"
             if dotenv_path.exists():
                 try:
-                    for raw in dotenv_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                    for raw in dotenv_path.read_text(
+                        encoding="utf-8", errors="ignore"
+                    ).splitlines():
                         m = DOTENV_LINE.match(raw.strip())
                         if m:
                             envfile_map[m.group(1)] = m.group(2)
@@ -325,7 +456,9 @@ def main() -> int:
             except Exception:
                 heroku_vars = {}
         for k in keys.keys():
-            keys[k]["heroku"] = bool(heroku_vars.get(k)) if heroku_vars else False if app else None  # None if not checked
+            keys[k]["heroku"] = (
+                bool(heroku_vars.get(k)) if heroku_vars else False if app else None
+            )  # None if not checked
 
         # Prepare output
         items = sorted(keys.items(), key=lambda kv: kv[0])
@@ -340,7 +473,11 @@ def main() -> int:
 
         if args.format == "json":
             report = {k: v for k, v in items}
-            print(json.dumps({"keys": report, "heroku_app": app}, ensure_ascii=False, indent=2))
+            print(
+                json.dumps(
+                    {"keys": report, "heroku_app": app}, ensure_ascii=False, indent=2
+                )
+            )
         else:
             print(f"Presence report (root={root}{', heroku='+app if app else ''}):")
             for k, pres in items:
@@ -381,7 +518,9 @@ def main() -> int:
             dotenv_path = root / ".env"
             if dotenv_path.exists():
                 try:
-                    for raw in dotenv_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                    for raw in dotenv_path.read_text(
+                        encoding="utf-8", errors="ignore"
+                    ).splitlines():
                         m = DOTENV_LINE.match(raw.strip())
                         if m:
                             envfile_map[m.group(1)] = m.group(2)
@@ -415,27 +554,41 @@ def main() -> int:
                 short_path = Path(f.path).name
                 # Redacted output: never print raw values/context
                 annotate = ""
-                if f.kind in {"dotenv", "env_ref"} and re.fullmatch(r"[A-Z][A-Z0-9_]{1,}", f.match or ""):
+                if f.kind in {"dotenv", "env_ref"} and re.fullmatch(
+                    r"[A-Z][A-Z0-9_]{1,}", f.match or ""
+                ):
                     var = f.match
-                    local_present = bool(os.environ.get(var)) or bool(envfile_map.get(var))
-                    heroku_present = (bool(heroku_vars.get(var)) if heroku_vars else None) if app else None
+                    local_present = bool(os.environ.get(var)) or bool(
+                        envfile_map.get(var)
+                    )
+                    heroku_present = (
+                        (bool(heroku_vars.get(var)) if heroku_vars else None)
+                        if app
+                        else None
+                    )
                     loc_sym = "+" if local_present else "-"
-                    her_sym = ("+" if heroku_present else "-") if isinstance(heroku_present, bool) else "?"
+                    her_sym = (
+                        ("+" if heroku_present else "-")
+                        if isinstance(heroku_present, bool)
+                        else "?"
+                    )
                     annotate = f" [local:{loc_sym} heroku:{her_sym}]"
                     display_tail = var
                 elif f.kind == "token":
                     display_tail = "(secret)"
                 else:
                     display_tail = f.rule
-                print(f"[{f.severity.upper()}] {f.kind}:{f.rule} {short_path}:{f.line}{annotate} :: {display_tail}")
+                print(
+                    f"[{f.severity.upper()}] {f.kind}:{f.rule} {short_path}:{f.line}{annotate} :: {display_tail}"
+                )
 
     if args.fail_on_find:
-        exit_code = 2 if any(f.severity in {"high", "medium"} for f in all_findings) else 0
+        exit_code = (
+            2 if any(f.severity in {"high", "medium"} for f in all_findings) else 0
+        )
         return exit_code
     return 0
 
 
 if __name__ == "__main__":
     sys.exit(main())
-
-

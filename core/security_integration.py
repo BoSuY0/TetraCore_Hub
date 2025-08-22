@@ -4,21 +4,26 @@ Security Integration Module for TetraCore Hub
 """
 
 import os
-from typing import Optional, Dict, Any, List
-from contextlib import asynccontextmanager
+import json
+from typing import Optional, Dict, Any
+from datetime import datetime, timezone
 
-from fastapi import FastAPI, Request, Response, Depends
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 import structlog
 import redis
 
-from core.auth_manager import get_auth_manager, get_current_user
+from core.auth_manager import get_auth_manager
 from core.network_security import network_security, security_middleware
 from core.websocket_security import ws_security_manager
 from core.input_validator import InputValidator
-from core.security_headers import security_headers, security_headers_middleware, security_headers_router
-from core.https_enforcement import https_enforcer, https_enforcement_middleware, https_router
+from core.security_headers import security_headers_middleware, security_headers_router
+from core.https_enforcement import (
+    https_enforcer,
+    https_enforcement_middleware,
+    https_router,
+)
 from web.auth import auth_router
 from config import get_settings
 
@@ -43,7 +48,11 @@ class SecurityIntegration:
 
         # 1. HTTPS enforcement: вмикаємо у production або за прапором FORCE_HTTPS
         environment = os.getenv("ENVIRONMENT", "development").lower()
-        if environment == "production" or os.getenv("FORCE_HTTPS", "").lower() in ("1", "true", "yes"):
+        if environment == "production" or os.getenv("FORCE_HTTPS", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        ):
             app.middleware("http")(https_enforcement_middleware)
 
         # 2. Базові security headers через middleware
@@ -68,21 +77,26 @@ class SecurityIntegration:
 
         # 4. Security headers middleware (CSP, permissions policy, etc)
         app.middleware("http")(security_headers_middleware)
-        
+
         # 4.1 Вимикаємо /docs у production або вимагаємо admin токен
         env = os.getenv("ENVIRONMENT", "development").lower()
         if env == "production":
+
             @app.middleware("http")
             async def protect_docs(request: Request, call_next):
                 if request.url.path in ("/docs", "/redoc"):
-                    return JSONResponse(status_code=404, content={"detail": "Not found"})
+                    return JSONResponse(
+                        status_code=404, content={"detail": "Not found"}
+                    )
                 return await call_next(request)
 
             # Додатковий захист Swagger JSON
             @app.middleware("http")
             async def protect_openapi(request: Request, call_next):
                 if request.url.path in ("/openapi.json",):
-                    return JSONResponse(status_code=404, content={"detail": "Not found"})
+                    return JSONResponse(
+                        status_code=404, content={"detail": "Not found"}
+                    )
                 return await call_next(request)
 
         # 5. Trusted host middleware - виправлено для Heroku
@@ -94,6 +108,7 @@ class SecurityIntegration:
         # 6.1 Proxy headers — довіряємо лише, якщо явно вказані довірені IP
         try:
             from starlette.middleware.proxy_headers import ProxyHeadersMiddleware
+
             trusted_ips = os.getenv("TRUSTED_PROXY_IPS", "").strip()
             env = os.getenv("ENVIRONMENT", "development").lower()
             if trusted_ips:
@@ -101,9 +116,13 @@ class SecurityIntegration:
                     app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=None)
                     logger.info("ProxyHeadersMiddleware enabled (non-production)")
                 else:
-                    logger.info("ProxyHeadersMiddleware not enabled in production; relying on explicit get_client_ip gating")
+                    logger.info(
+                        "ProxyHeadersMiddleware not enabled in production; relying on explicit get_client_ip gating"
+                    )
             elif env == "production":
-                logger.warning("TRUSTED_PROXY_IPS is empty in production; X-Forwarded-* headers will not be trusted")
+                logger.warning(
+                    "TRUSTED_PROXY_IPS is empty in production; X-Forwarded-* headers will not be trusted"
+                )
         except Exception:
             pass
 
@@ -112,31 +131,37 @@ class SecurityIntegration:
         async def rate_limit_handler(request: Request, exc):
             return JSONResponse(
                 status_code=429,
-                content={"detail": "Too many requests. Please try again later."}
+                content={"detail": "Too many requests. Please try again later."},
             )
 
         @app.exception_handler(403)
         async def forbidden_handler(request: Request, exc):
-            return JSONResponse(
-                status_code=403,
-                content={"detail": "Access forbidden"}
-            )
+            return JSONResponse(status_code=403, content={"detail": "Access forbidden"})
 
         # 7.1 mTLS – опціонально перевіряємо клієнтський сертифікат зі заголовка, який проставляє проксі (наприклад, Nginx)
         # У продакшні за наявності MTLS_ENFORCE=true вимагати успішну валідацію
         @app.middleware("http")
         async def mtls_check(request: Request, call_next):
             try:
-                settings = get_settings()
-                enforce = os.getenv("MTLS_ENFORCE", "false").lower() in ("1","true","yes")
+                get_settings()
+                enforce = os.getenv("MTLS_ENFORCE", "false").lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                )
                 if not enforce:
                     return await call_next(request)
 
                 # Проксі може прокидати результати перевірки в заголовки
-                verified = request.headers.get("X-Client-Cert-Verified", "FAIL").upper() == "SUCCESS"
-                subject = request.headers.get("X-Client-Cert-Subject")
+                verified = (
+                    request.headers.get("X-Client-Cert-Verified", "FAIL").upper()
+                    == "SUCCESS"
+                )
+                request.headers.get("X-Client-Cert-Subject")
                 if not verified:
-                    return JSONResponse(status_code=401, content={"detail": "mTLS verification failed"})
+                    return JSONResponse(
+                        status_code=401, content={"detail": "mTLS verification failed"}
+                    )
                 # Додатково можна whitelist CN із subject, якщо потрібно
                 return await call_next(request)
             except Exception:
@@ -149,10 +174,17 @@ class SecurityIntegration:
         # 9. Додавання security management endpoints
         # Включаємо в development для тестування
         environment = os.getenv("ENVIRONMENT", "development")
-        enable_security = os.getenv("ENABLE_SECURITY_ENDPOINTS", "true" if environment == "development" else "false").lower() == "true"
-        
+        enable_security = (
+            os.getenv(
+                "ENABLE_SECURITY_ENDPOINTS",
+                "true" if environment == "development" else "false",
+            ).lower()
+            == "true"
+        )
+
         if enable_security:
             from core.network_security import security_router
+
             app.include_router(security_router)
             app.include_router(security_headers_router)
             app.include_router(https_router)
@@ -166,15 +198,24 @@ class SecurityIntegration:
                 # Дозволяємо тільки з адмінським токеном
                 try:
                     from core.auth_manager import get_auth_manager
+
                     auth = request.headers.get("Authorization", "")
                     if not auth.startswith("Bearer "):
-                        return JSONResponse(status_code=401, content={"detail": "Authentication required"})
+                        return JSONResponse(
+                            status_code=401,
+                            content={"detail": "Authentication required"},
+                        )
                     token = auth.split(" ", 1)[1]
                     payload = await get_auth_manager().decode_token(token)
                     if payload.get("role") != "admin":
-                        return JSONResponse(status_code=403, content={"detail": "Access forbidden"})
+                        return JSONResponse(
+                            status_code=403, content={"detail": "Access forbidden"}
+                        )
                 except Exception:
-                    return JSONResponse(status_code=401, content={"detail": "Invalid authentication credentials"})
+                    return JSONResponse(
+                        status_code=401,
+                        content={"detail": "Invalid authentication credentials"},
+                    )
             return await call_next(request)
 
         self.initialized = True
@@ -182,54 +223,64 @@ class SecurityIntegration:
     def _setup_trusted_host_middleware(self, app: FastAPI):
         """Налаштування TrustedHostMiddleware з підтримкою Heroku"""
         environment = os.getenv("ENVIRONMENT", "development")
-        
+
         # Базові дозволені хости
         allowed_hosts = []
-        
+
         # Для development
         if environment == "development":
-            allowed_hosts.extend([
-                "localhost",
-                "127.0.0.1",
-                "0.0.0.0",
-                "localhost:3000",
-                "localhost:8000",
-                "127.0.0.1:3000", 
-                "127.0.0.1:8000"
-            ])
-        
+            allowed_hosts.extend(
+                [
+                    "localhost",
+                    "127.0.0.1",
+                    "0.0.0.0",
+                    "localhost:3000",
+                    "localhost:8000",
+                    "127.0.0.1:3000",
+                    "127.0.0.1:8000",
+                ]
+            )
+
         # Для Heroku production
         if os.getenv("DYNO") or environment == "production":
             # Додаємо домени Heroku
-            allowed_hosts.extend([
-                "hub.tetra-core.website",
-                "tetracore-hub-29fb6c8b7947.herokuapp.com",
-                "*.herokuapp.com",  # Для різних додатків Heroku
-                "*.tetra-core.website"  # Для subdomains
-            ])
-        
+            allowed_hosts.extend(
+                [
+                    "hub.tetra-core.website",
+                    "tetracore-hub-29fb6c8b7947.herokuapp.com",
+                    "*.herokuapp.com",  # Для різних додатків Heroku
+                    "*.tetra-core.website",  # Для subdomains
+                ]
+            )
+
         # Дозволені хости з змінних оточення
         env_hosts = os.getenv("ALLOWED_HOSTS", "")
         if env_hosts:
-            allowed_hosts.extend([host.strip() for host in env_hosts.split(",") if host.strip()])
+            allowed_hosts.extend(
+                [host.strip() for host in env_hosts.split(",") if host.strip()]
+            )
 
         # Валідація wildcard у production
-        if environment == "production" and any(h in ("*", "*.example.com", "*.localhost") for h in allowed_hosts):
-            logger.warning("Wildcard detected in ALLOWED_HOSTS for production; this is insecure", allowed_hosts=allowed_hosts)
-        
+        if environment == "production" and any(
+            h in ("*", "*.example.com", "*.localhost") for h in allowed_hosts
+        ):
+            logger.warning(
+                "Wildcard detected in ALLOWED_HOSTS for production; this is insecure",
+                allowed_hosts=allowed_hosts,
+            )
+
         # Логування налаштувань - видалено
-        
+
         # Додавання middleware тільки якщо є обмеження хостів
         # У тестовому середовищі (pytest/TestClient) не додаємо TrustedHostMiddleware,
         # щоб уникнути "Invalid host header" при запитах без Host
-        if os.getenv("PYTEST_CURRENT_TEST") or os.getenv("DISABLE_TRUSTED_HOST_MW", "").lower() in ("1","true","yes"):
+        if os.getenv("PYTEST_CURRENT_TEST") or os.getenv(
+            "DISABLE_TRUSTED_HOST_MW", ""
+        ).lower() in ("1", "true", "yes"):
             return
 
         if allowed_hosts and "*" not in allowed_hosts:
-            app.add_middleware(
-                TrustedHostMiddleware,
-                allowed_hosts=allowed_hosts
-            )
+            app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
     def get_websocket_authenticator(self):
         """Повертає функцію для автентифікації WebSocket"""
@@ -239,7 +290,9 @@ class SecurityIntegration:
         """Повертає функцію для валідації WebSocket повідомлень"""
         return ws_security_manager.validate_message
 
-    async def validate_api_request(self, request: Request, data: Dict[str, Any]) -> Dict[str, Any]:
+    async def validate_api_request(
+        self, request: Request, data: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Валідація даних API запиту"""
         # Перевірка на небезпечні патерни
         for key, value in data.items():
@@ -280,13 +333,15 @@ class SecurityIntegration:
                 if session_data:
                     try:
                         data = json.loads(session_data)
-                        last_activity = datetime.fromisoformat(data.get("last_activity", ""))
+                        last_activity = datetime.fromisoformat(
+                            data.get("last_activity", "")
+                        )
 
                         # Видаляємо сесії старші 7 днів
                         if (current_time - last_activity).days > 7:
                             await self.redis_client.delete(key)
                             cleaned += 1
-                    except:
+                    except Exception:
                         # Видаляємо пошкоджені сесії
                         await self.redis_client.delete(key)
                         cleaned += 1
@@ -308,20 +363,32 @@ class SecurityIntegration:
                 "websocket_security": "active",
                 "input_validator": "active",
                 "security_headers": "active",
-                "https_enforcement": "active" if https_enforcer.enabled else "disabled"
+                "https_enforcement": "active" if https_enforcer.enabled else "disabled",
             },
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
         # Додаткова статистика якщо доступна
         if self.redis_client:
             try:
                 # Кількість активних сесій
-                sessions = len([key async for key in self.redis_client.scan_iter(match="session:*")])
+                sessions = len(
+                    [
+                        key
+                        async for key in self.redis_client.scan_iter(match="session:*")
+                    ]
+                )
                 status["active_sessions"] = sessions
 
                 # Кількість заблокованих IP
-                blocked_ips = len([key async for key in self.redis_client.scan_iter(match="blocked_ip:*")])
+                blocked_ips = len(
+                    [
+                        key
+                        async for key in self.redis_client.scan_iter(
+                            match="blocked_ip:*"
+                        )
+                    ]
+                )
                 status["blocked_ips"] = blocked_ips
 
             except Exception as e:
@@ -337,7 +404,7 @@ security_integration = SecurityIntegration()
 # Middleware для перевірки автентифікації на всіх endpoints
 async def require_auth_middleware(request: Request, call_next):
     """Middleware що вимагає автентифікацію для всіх endpoints крім публічних"""
-    
+
     # Публічні endpoints що не потребують автентифікації (звужено)
     public_paths = [
         "/api/auth/login",
@@ -362,7 +429,7 @@ async def require_auth_middleware(request: Request, call_next):
         "/dashboard/",
         "/dashboard/clients",
         "/dashboard/api/status",  # Статус дашборду має бути публічним
-        "/api/auth/validate"
+        "/api/auth/validate",
     ]
 
     # Пропускаємо OPTIONS запити для CORS preflight
@@ -376,7 +443,7 @@ async def require_auth_middleware(request: Request, call_next):
     # Перевірка чи шлях публічний
     if request.url.path in public_paths:
         return await call_next(request)
-    
+
     # Перевірка для auth ендпоінтів (всі auth ендпоінти публічні)
     if request.url.path.startswith("/api/auth/"):
         return await call_next(request)
@@ -391,23 +458,27 @@ async def require_auth_middleware(request: Request, call_next):
 
     # Перевірка автентифікації для захищених ендпоінтів
     needs_auth = False
-    
+
     # Dashboard API ендпоінти потребують автентифікації (навіть якщо раніше були публічні)
     if request.url.path.startswith("/dashboard/api/"):
         needs_auth = True
-    
-    # Security ендпоінти потребують автентифікації 
+
+    # Security ендпоінти потребують автентифікації
     if request.url.path.startswith("/api/security/"):
         needs_auth = True
-        
+
     # Admin ендпоінти потребують автентифікації
     if request.url.path.startswith("/api/admin/"):
         needs_auth = True
 
     # Клієнти/таски — тепер потребують токен
-    if request.url.path in ("/api/clients", "/api/tasks") or request.url.path.startswith("/api/clients/") or request.url.path.startswith("/api/tasks/"):
+    if (
+        request.url.path in ("/api/clients", "/api/tasks")
+        or request.url.path.startswith("/api/clients/")
+        or request.url.path.startswith("/api/tasks/")
+    ):
         needs_auth = True
-    
+
     # Якщо цей ендпоінт не потребує автентифікації, пропускаємо
     if not needs_auth:
         return await call_next(request)
@@ -418,8 +489,7 @@ async def require_auth_middleware(request: Request, call_next):
         authorization = request.headers.get("Authorization")
         if not authorization or not authorization.startswith("Bearer "):
             return JSONResponse(
-                status_code=401,
-                content={"detail": "Authentication required"}
+                status_code=401, content={"detail": "Authentication required"}
             )
 
         token = authorization.split(" ")[1]
@@ -431,8 +501,7 @@ async def require_auth_middleware(request: Request, call_next):
     except Exception as e:
         logger.warning("Authentication failed", path=request.url.path, error=str(e))
         return JSONResponse(
-            status_code=401,
-            content={"detail": "Invalid authentication credentials"}
+            status_code=401, content={"detail": "Invalid authentication credentials"}
         )
 
     return await call_next(request)
@@ -440,9 +509,7 @@ async def require_auth_middleware(request: Request, call_next):
 
 # Функція для швидкої інтеграції в існуючий додаток
 def integrate_security(
-    app: FastAPI,
-    redis_client: Optional[redis.Redis] = None,
-    require_auth: bool = True
+    app: FastAPI, redis_client: Optional[redis.Redis] = None, require_auth: bool = True
 ) -> SecurityIntegration:
     """
     Швидка інтеграція всіх security компонентів в FastAPI додаток
@@ -483,8 +550,3 @@ async def get_authenticated_user(request: Request) -> Dict[str, Any]:
 # @app.get("/api/protected")
 # async def protected_endpoint(user: Dict = Depends(get_authenticated_user)):
 #     return {"message": f"Hello {user['username']}"}
-
-
-import json
-from datetime import datetime, timezone
-from fastapi import HTTPException

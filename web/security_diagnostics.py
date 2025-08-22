@@ -9,5 +9,3 @@ router = APIRouter(prefix="/api/security", tags=["security"])
 async def security_config_diagnostics():
     settings = get_settings()
     return run_security_config_diagnostics(settings)
-
-

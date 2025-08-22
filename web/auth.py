@@ -5,8 +5,8 @@ Authentication endpoints for TetraCore Hub
 import os
 import json
 import uuid
-from datetime import datetime, timedelta
-from typing import Dict, Optional, List
+from datetime import datetime
+from typing import Dict, List
 
 from fastapi import APIRouter, HTTPException, Depends, Request, Security
 from fastapi.responses import JSONResponse
@@ -16,28 +16,38 @@ import structlog
 
 # Імпорт нового менеджера автентифікації
 from core.auth_manager import (
-    get_auth_manager, get_current_user, UserCredentials,
-    TokenPair, require_permission, require_role, SERVER_BOOT_ID,
-    REFRESH_TOKEN_EXPIRE_DAYS
+    get_auth_manager,
+    get_current_user,
+    require_permission,
+    require_role,
+    SERVER_BOOT_ID,
+    REFRESH_TOKEN_EXPIRE_DAYS,
 )
 from core.secrets_manager import get_secrets_manager
+from core.network_security import rate_limit
+from config import get_settings, get_user_role, get_user_permissions
+
 
 # Модель для валідації сесії
 class SessionValidation(BaseModel):
     sessionId: str
 
+
 # Модель для виходу
 class LogoutRequest(BaseModel):
     sessionId: str
+
 
 # Модель для входу з логіном та паролем
 class LoginRequest(BaseModel):
     username: str
     password: str
 
+
 # Модель для refresh токена
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
+
 
 # Модель користувача
 class User(BaseModel):
@@ -49,13 +59,8 @@ class User(BaseModel):
     loginTime: datetime
     lastActivity: datetime
 
-logger = structlog.get_logger()
 
-# Імпорт конфігурації авторизації
-from config import (
-    get_settings,
-    get_user_role, get_user_permissions
-)
+logger = structlog.get_logger()
 
 # Security схема для Bearer токенів
 security = HTTPBearer()
@@ -74,9 +79,12 @@ def get_user_role_and_permissions(user_id: str) -> tuple[str, List[str]]:
     permissions = get_user_permissions(user_id)
     return role, permissions
 
+
 def get_client_ip(request: Request) -> str:
     """Отримання IP адреси клієнта з урахуванням довірених проксі"""
-    trusted_proxies = [ip.strip() for ip in os.getenv("TRUSTED_PROXY_IPS", "").split(",") if ip.strip()]
+    trusted_proxies = [
+        ip.strip() for ip in os.getenv("TRUSTED_PROXY_IPS", "").split(",") if ip.strip()
+    ]
     client_host = request.client.host if request.client else None
 
     # Перевіряємо заголовки тільки якщо запит прийшов від довіреного проксі
@@ -92,8 +100,10 @@ def get_client_ip(request: Request) -> str:
     # Fallback на безпосередній IP клієнта
     return client_host or "127.0.0.1"
 
+
 # Router для auth ендпоінтів
 auth_router = APIRouter(prefix="/api/auth", tags=["authentication"])
+
 
 @auth_router.post("/login")
 async def login(request: Request, credentials: LoginRequest):
@@ -104,21 +114,28 @@ async def login(request: Request, credentials: LoginRequest):
     # Перевірка rate limiting
     auth_mgr = get_auth_manager()
     if not auth_mgr.check_login_attempts(credentials.username, client_ip):
-        logger.warning("Too many login attempts", username=credentials.username, ip=client_ip)
+        logger.warning(
+            "Too many login attempts", username=credentials.username, ip=client_ip
+        )
         raise HTTPException(
-            status_code=429,
-            detail="Too many login attempts. Please try again later."
+            status_code=429, detail="Too many login attempts. Please try again later."
         )
     # Перевірка lockout
-    if get_settings().environment == get_settings().environment.PRODUCTION and auth_mgr.is_locked(credentials.username, client_ip):
-        raise HTTPException(status_code=429, detail="Account temporarily locked due to failed attempts")
-
+    if (
+        get_settings().environment == get_settings().environment.PRODUCTION
+        and auth_mgr.is_locked(credentials.username, client_ip)
+    ):
+        raise HTTPException(
+            status_code=429, detail="Account temporarily locked due to failed attempts"
+        )
 
     # Логування для діагностики
-    logger.info("Login attempt", 
-               username=credentials.username, 
-               ip=client_ip,
-               server_boot_id=SERVER_BOOT_ID[:8] + "...")
+    logger.info(
+        "Login attempt",
+        username=credentials.username,
+        ip=client_ip,
+        server_boot_id=SERVER_BOOT_ID[:8] + "...",
+    )
 
     # Отримання credentials через secrets manager
     secrets_mgr = get_secrets_manager()
@@ -126,34 +143,44 @@ async def login(request: Request, credentials: LoginRequest):
     admin_password = secrets_mgr.get_secret("ADMIN_PASSWORD")
 
     # Мінімальне логування без чутливих даних
-    logger.info("Checking credentials",
-               has_admin_username=bool(admin_username),
-               has_admin_password=bool(admin_password),
-               input_username_present=bool(credentials.username))
+    logger.info(
+        "Checking credentials",
+        has_admin_username=bool(admin_username),
+        has_admin_password=bool(admin_password),
+        input_username_present=bool(credentials.username),
+    )
 
     if not admin_username or not admin_password:
         logger.error("Admin credentials not configured")
-        raise HTTPException(status_code=500, detail="Сервер не налаштований для авторизації")
+        raise HTTPException(
+            status_code=500, detail="Сервер не налаштований для авторизації"
+        )
 
     # Перевірка пароля: підтримка bcrypt-хешу або plain у development
     login_successful = False
     if credentials.username.lower() == admin_username.lower():
         auth_mgr = get_auth_manager()
         # Визначаємо чи ADMIN_PASSWORD є bcrypt-хешем
-        is_bcrypt_hash = isinstance(admin_password, str) and admin_password.startswith("$2")
+        is_bcrypt_hash = isinstance(admin_password, str) and admin_password.startswith(
+            "$2"
+        )
         environment = os.getenv("ENVIRONMENT", "development").lower()
 
         if is_bcrypt_hash:
             # Безпечна перевірка через bcrypt
-            login_successful = auth_mgr.verify_password(credentials.password, admin_password)
+            login_successful = auth_mgr.verify_password(
+                credentials.password, admin_password
+            )
         else:
             # У продакшені вимагаємо хешований пароль
             if environment == "production":
-                logger.warning("Plain ADMIN_PASSWORD detected in production - login blocked")
+                logger.warning(
+                    "Plain ADMIN_PASSWORD detected in production - login blocked"
+                )
                 login_successful = False
             else:
                 # Dev режим: дозволяємо просте порівняння без логування секретів
-                login_successful = (credentials.password == admin_password)
+                login_successful = credentials.password == admin_password
 
     # Записуємо спробу входу
     auth_mgr.record_login_attempt(credentials.username, client_ip, login_successful)
@@ -167,7 +194,10 @@ async def login(request: Request, credentials: LoginRequest):
         fingerprint = None
         try:
             import hashlib
-            fingerprint = hashlib.sha256(f"{client_ip}|{user_agent}".encode("utf-8")).hexdigest()
+
+            fingerprint = hashlib.sha256(
+                f"{client_ip}|{user_agent}".encode("utf-8")
+            ).hexdigest()
         except Exception:
             fingerprint = None
 
@@ -176,28 +206,36 @@ async def login(request: Request, credentials: LoginRequest):
             "username": credentials.username,
             "role": role,
             "permissions": permissions,
-            "fingerprint": fingerprint
+            "fingerprint": fingerprint,
         }
 
         # Створюємо токени
         token_pair = await auth_mgr.create_token_pair(user_data)
 
-        logger.info("Login successful", 
-                   username=credentials.username, 
-                   ip=client_ip,
-                   server_boot_id=SERVER_BOOT_ID[:8] + "...")
+        logger.info(
+            "Login successful",
+            username=credentials.username,
+            ip=client_ip,
+            server_boot_id=SERVER_BOOT_ID[:8] + "...",
+        )
 
         # Виставляємо httpOnly cookie з refresh токеном і CSRF cookie для double-submit
         secure_cookie = os.getenv("ENVIRONMENT", "development").lower() == "production"
         csrf_token = uuid.uuid4().hex
 
-        response = JSONResponse({
-            "success": True,
-            "message": "Авторизація успішна",
-            "user": user_data,
-            # Повертаємо тільки access токен у тілі відповіді
-            "tokens": {"access_token": token_pair.access_token, "token_type": "bearer", "expires_in": token_pair.expires_in}
-        })
+        response = JSONResponse(
+            {
+                "success": True,
+                "message": "Авторизація успішна",
+                "user": user_data,
+                # Повертаємо тільки access токен у тілі відповіді
+                "tokens": {
+                    "access_token": token_pair.access_token,
+                    "token_type": "bearer",
+                    "expires_in": token_pair.expires_in,
+                },
+            }
+        )
 
         # Refresh токен у httpOnly cookie
         response.set_cookie(
@@ -207,7 +245,7 @@ async def login(request: Request, credentials: LoginRequest):
             secure=secure_cookie,
             samesite="lax",
             max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
-            path="/api/auth"
+            path="/api/auth",
         )
 
         # CSRF токен у доступній cookie (не httpOnly)
@@ -218,56 +256,62 @@ async def login(request: Request, credentials: LoginRequest):
             secure=secure_cookie,
             samesite="lax",
             max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
-            path="/api/auth"
+            path="/api/auth",
         )
 
         return response
     else:
-        logger.warning("Login failed - invalid credentials", username=credentials.username, ip=client_ip)
+        logger.warning(
+            "Login failed - invalid credentials",
+            username=credentials.username,
+            ip=client_ip,
+        )
         # Застосувати lockout якщо перевищено ліміт
         auth_mgr.apply_lockout_if_needed(credentials.username, client_ip)
         raise HTTPException(status_code=401, detail="Невірний логін або пароль")
 
 
-
 @auth_router.post("/validate")
-async def validate_token(credentials: HTTPAuthorizationCredentials = Security(security)):
+async def validate_token(
+    credentials: HTTPAuthorizationCredentials = Security(security),
+):
     """Валідація JWT токена"""
 
-    logger.info("🔍 Token validation started",
-                has_credentials=bool(credentials))
+    logger.info("🔍 Token validation started", has_credentials=bool(credentials))
 
     try:
-        token = credentials.credentials
         logger.debug("📋 Credentials received")
 
         user_data = await get_current_user(credentials)
 
         logger.info("✅ Token validated successfully")
 
-        return {
-            "valid": True,
-            "user": user_data
-        }
+        return {"valid": True, "user": user_data}
 
     except HTTPException as he:
         # Не логуємо на error рівні для очікуваних помилок автентифікації
         if he.status_code == 401:
-            logger.debug("🔒 Authentication failed (expected for invalid tokens)",
-                        status_code=he.status_code,
-                        detail=he.detail)
+            logger.debug(
+                "🔒 Authentication failed (expected for invalid tokens)",
+                status_code=he.status_code,
+                detail=he.detail,
+            )
         else:
-            logger.error("❌ HTTP Exception during token validation",
-                         status_code=he.status_code,
-                         detail=he.detail)
+            logger.error(
+                "❌ HTTP Exception during token validation",
+                status_code=he.status_code,
+                detail=he.detail,
+            )
         raise
     except Exception as e:
-        logger.error("❌ Unexpected error during token validation",
-                     error=str(e),
-                     error_type=type(e).__name__)
-        raise HTTPException(status_code=500, detail=f"Token validation failed: {str(e)}")
-
-from core.network_security import rate_limit
+        logger.error(
+            "❌ Unexpected error during token validation",
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        raise HTTPException(
+            status_code=500, detail=f"Token validation failed: {str(e)}"
+        )
 
 
 @auth_router.post("/refresh")
@@ -290,10 +334,16 @@ async def refresh_token(request: Request):
 
         # Ротація refresh токена може відбутися всередині; оновимо cookie якщо token_pair.refresh_token змінився
         secure_cookie = os.getenv("ENVIRONMENT", "development").lower() == "production"
-        response = JSONResponse({
-            "success": True,
-            "tokens": {"access_token": token_pair.access_token, "token_type": "bearer", "expires_in": token_pair.expires_in}
-        })
+        response = JSONResponse(
+            {
+                "success": True,
+                "tokens": {
+                    "access_token": token_pair.access_token,
+                    "token_type": "bearer",
+                    "expires_in": token_pair.expires_in,
+                },
+            }
+        )
         # Якщо refresh токен повернувся (можлива ротація) — оновити cookie
         if token_pair.refresh_token:
             response.set_cookie(
@@ -303,23 +353,24 @@ async def refresh_token(request: Request):
                 secure=secure_cookie,
                 samesite="lax",
                 max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
-                path="/api/auth"
+                path="/api/auth",
             )
         return response
 
     except HTTPException as he:
-        logger.info("❌ Token refresh failed", 
-                   status_code=he.status_code, 
-                   detail=he.detail)
+        logger.info(
+            "❌ Token refresh failed", status_code=he.status_code, detail=he.detail
+        )
         raise
     except Exception as e:
         logger.error("❌ Token refresh error", error=str(e))
         raise HTTPException(status_code=401, detail="Could not refresh token")
 
+
 @auth_router.post("/logout")
 async def logout(
     user: Dict = Depends(get_current_user),
-    credentials: HTTPAuthorizationCredentials = Security(security)
+    credentials: HTTPAuthorizationCredentials = Security(security),
 ):
     """Вихід з системи"""
 
@@ -335,7 +386,7 @@ async def logout(
         # Додатково очищаємо всі можливі сесії користувача
         if auth_mgr.redis_client:
             # Шукаємо всі сесії користувача
-            pattern = f"session:*"
+            pattern = "session:*"
             async for key in auth_mgr.redis_client.scan_iter(match=pattern):
                 try:
                     session_data = await auth_mgr.redis_client.get(key)
@@ -343,16 +394,18 @@ async def logout(
                         session = json.loads(session_data)
                         if session.get("user_id") == user["user_id"]:
                             await auth_mgr.redis_client.delete(key)
-                            logger.info("Deleted user session", key=key, user_id=user["user_id"])
+                            logger.info(
+                                "Deleted user session", key=key, user_id=user["user_id"]
+                            )
                 except Exception as e:
                     logger.error("Error deleting session", key=key, error=str(e))
 
         # Маскуємо session_id у логах
         sid = user.get("session_id", "")
         sid_masked = (sid[:8] + "...") if isinstance(sid, str) and len(sid) > 8 else sid
-        logger.info("User logged out",
-                    user_id=user.get("user_id"),
-                    session_id=sid_masked)
+        logger.info(
+            "User logged out", user_id=user.get("user_id"), session_id=sid_masked
+        )
 
         # Очищуємо refresh та csrf cookie
         response = JSONResponse({"success": True, "message": "Logged out successfully"})
@@ -364,6 +417,7 @@ async def logout(
         logger.error("Logout error", error=str(e))
         return {"success": True, "message": "Logged out"}  # Завжди успішно
 
+
 @auth_router.get("/sessions")
 @require_permission("auth.manage")
 async def get_active_sessions(user: Dict = Depends(get_current_user)):
@@ -374,24 +428,22 @@ async def get_active_sessions(user: Dict = Depends(get_current_user)):
 
         sessions_info = []
         for session in sessions:
-            sessions_info.append({
-                "sessionId": session["session_id"][:8] + "...",  # Обрізаємо для безпеки
-                "username": session["username"],
-                "role": session["role"],
-                "createdAt": session.get("created_at", "N/A"),
-                "lastActivity": session.get("last_activity", "N/A")
-            })
+            sessions_info.append(
+                {
+                    "sessionId": session["session_id"][:8]
+                    + "...",  # Обрізаємо для безпеки
+                    "username": session["username"],
+                    "role": session["role"],
+                    "createdAt": session.get("created_at", "N/A"),
+                    "lastActivity": session.get("last_activity", "N/A"),
+                }
+            )
 
-        return {
-            "total": len(sessions),
-            "sessions": sessions_info
-        }
+        return {"total": len(sessions), "sessions": sessions_info}
     except Exception as e:
         logger.error("Error getting sessions", error=str(e))
-        return {
-            "total": 0,
-            "sessions": []
-        }
+        return {"total": 0, "sessions": []}
+
 
 @auth_router.get("/me")
 async def get_current_user_info(user: Dict = Depends(get_current_user)):
@@ -402,23 +454,24 @@ async def get_current_user_info(user: Dict = Depends(get_current_user)):
             "id": user["user_id"],
             "username": user["username"],
             "role": user["role"],
-            "permissions": user["permissions"]
+            "permissions": user["permissions"],
         }
     }
+
 
 @auth_router.get("/permissions")
 async def get_permissions(user: Dict = Depends(get_current_user)):
     """Отримання списку дозволів поточного користувача"""
 
-    return {
-        "permissions": user["permissions"]
-    }
+    return {"permissions": user["permissions"]}
+
 
 @auth_router.get("/debug")
 @require_role("admin")
 async def debug_auth(user: Dict = Depends(get_current_user)):
     """Debug endpoint для перевірки авторизації (тільки в development)"""
     import os
+
     if os.getenv("ENVIRONMENT", "development") != "development":
         raise HTTPException(status_code=404, detail="Not found")
 
@@ -431,12 +484,11 @@ async def debug_auth(user: Dict = Depends(get_current_user)):
         "secrets_manager": {
             "admin_username_present": bool(admin_username),
             "admin_password_configured": bool(admin_password),
-            "admin_password_length": len(admin_password) if admin_password else 0
+            "admin_password_length": len(admin_password) if admin_password else 0,
         },
-        "environment": {
-            "environment": os.getenv("ENVIRONMENT", "development")
-        }
+        "environment": {"environment": os.getenv("ENVIRONMENT", "development")},
     }
+
 
 # Health check endpoint
 @auth_router.get("/health")
@@ -446,5 +498,5 @@ async def auth_health():
     return {
         "status": "ok",
         "service": "authentication",
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.utcnow().isoformat(),
     }

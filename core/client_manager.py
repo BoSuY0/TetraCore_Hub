@@ -6,14 +6,13 @@ TetraCore StreamHub Client Manager
 """
 
 import asyncio
-import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional, Set, Callable, Any
 from collections import defaultdict
 import structlog
 
 from config import Settings
-from models.client import Client, ClientType, ClientInfo, WorkerCapabilities, ConnectionStatus, WorkerStatus
+from models.client import Client, ClientType
 from core.async_optimization import AsyncOptimizer, TaskPriority
 
 
@@ -58,7 +57,10 @@ class ClientManager:
 
             # Запуск задачі очищення (пропускаємо у тест-середовищі)
             import os
-            if bool(os.getenv("PYTEST_CURRENT_TEST")) or os.getenv("DISABLE_BACKGROUND_TASKS", "").lower() in ("1","true","yes"):
+
+            if bool(os.getenv("PYTEST_CURRENT_TEST")) or os.getenv(
+                "DISABLE_BACKGROUND_TASKS", ""
+            ).lower() in ("1", "true", "yes"):
                 self.cleanup_task = None
                 self.logger.debug("ClientManager cleanup loop disabled (test env)")
             else:
@@ -101,19 +103,31 @@ class ClientManager:
             client_id = client.info.client_id
             client_type = client.info.client_type
 
-            self.logger.info("[CLIENT_MANAGER] Registering new client",
-                           client_id=client_id,
-                           client_type=client_type.value,
-                           client_name=client.info.client_name,
-                           capabilities=client.info.capabilities.supported_task_types if client.info.capabilities else None,
-                           max_concurrent_tasks=client.info.capabilities.max_concurrent_tasks if client.info.capabilities else None,
-                           current_count=len(self.clients))
+            self.logger.info(
+                "[CLIENT_MANAGER] Registering new client",
+                client_id=client_id,
+                client_type=client_type.value,
+                client_name=client.info.client_name,
+                capabilities=(
+                    client.info.capabilities.supported_task_types
+                    if client.info.capabilities
+                    else None
+                ),
+                max_concurrent_tasks=(
+                    client.info.capabilities.max_concurrent_tasks
+                    if client.info.capabilities
+                    else None
+                ),
+                current_count=len(self.clients),
+            )
 
             # Перевірка ліміту підключень
             if len(self.clients) >= self.settings.max_connections:
-                self.logger.warning("Maximum connections reached",
-                                  client_id=client_id,
-                                  max_connections=self.settings.max_connections)
+                self.logger.warning(
+                    "Maximum connections reached",
+                    client_id=client_id,
+                    max_connections=self.settings.max_connections,
+                )
                 return False
 
             # Перевірка чи клієнт вже існує
@@ -133,37 +147,45 @@ class ClientManager:
             # Статистика
             self.total_connections += 1
 
-            self.logger.info("Client added successfully",
-                           client_id=client_id,
-                           client_type=client.info.client_type,
-                           total_clients=len(self.clients),
-                           clients_by_type={k.value: len(v) for k, v in self.clients_by_type.items()})
+            self.logger.info(
+                "Client added successfully",
+                client_id=client_id,
+                client_type=client.info.client_type,
+                total_clients=len(self.clients),
+                clients_by_type={
+                    k.value: len(v) for k, v in self.clients_by_type.items()
+                },
+            )
             self.peak_connections = max(self.peak_connections, len(self.clients))
 
             # Логування успішного додавання
-            self.logger.info(f"✅ Client added to manager",
-                           client_id=client_id,
-                           client_type=client.info.client_type.value,
-                           client_name=client.info.client_name,
-                           total_clients=len(self.clients),
-                           clients_of_this_type=len(self.clients_by_type[client.info.client_type]))
+            self.logger.info(
+                "✅ Client added to manager",
+                client_id=client_id,
+                client_type=client.info.client_type.value,
+                client_name=client.info.client_name,
+                total_clients=len(self.clients),
+                clients_of_this_type=len(self.clients_by_type[client.info.client_type]),
+            )
 
             # Event handler
             if self.on_client_connected:
                 await self.on_client_connected(client)
 
             # Зменшуємо рівень логування для зменшення шуму в продакшн
-            self.logger.debug("Client added successfully",
-                             client_id=client_id,
-                             client_type=client.info.client_type.value,
-                             total_clients=len(self.clients))
+            self.logger.debug(
+                "Client added successfully",
+                client_id=client_id,
+                client_type=client.info.client_type.value,
+                total_clients=len(self.clients),
+            )
 
             return True
 
         except Exception as e:
-            self.logger.error("Failed to add client",
-                            client_id=client.info.client_id,
-                            error=str(e))
+            self.logger.error(
+                "Failed to add client", client_id=client.info.client_id, error=str(e)
+            )
             return False
 
     async def remove_client(self, client_id: str) -> bool:
@@ -195,17 +217,19 @@ class ClientManager:
                 await self.on_client_disconnected(client)
 
             # Зменшуємо рівень логування для зменшення шуму в продакшн
-            self.logger.debug("Client removed successfully",
-                             client_id=client_id,
-                             client_type=client.info.client_type.value,
-                             total_clients=len(self.clients))
+            self.logger.debug(
+                "Client removed successfully",
+                client_id=client_id,
+                client_type=client.info.client_type.value,
+                total_clients=len(self.clients),
+            )
 
             return True
 
         except Exception as e:
-            self.logger.error("Failed to remove client",
-                            client_id=client_id,
-                            error=str(e))
+            self.logger.error(
+                "Failed to remove client", client_id=client_id, error=str(e)
+            )
             return False
 
     def get_client(self, client_id: str) -> Optional[Client]:
@@ -230,116 +254,150 @@ class ClientManager:
 
         return result
 
-    def get_available_workers(self, task_type: str = None, executor_type: str = None) -> List[Client]:
+    def get_available_workers(
+        self, task_type: str = None, executor_type: str = None
+    ) -> List[Client]:
         """Отримання доступних воркерів"""
         workers = []
 
         executor_desc = {
-            'bot': 'bots',
-            'worker': 'workers',
-            'worker_api': 'API workers',
-            None: 'executors (all types)'
+            "bot": "bots",
+            "worker": "workers",
+            "worker_api": "API workers",
+            None: "executors (all types)",
         }
 
-        self.logger.info(f"[CLIENT_MANAGER] Looking for available {executor_desc.get(executor_type, 'executors')}",
-                        task_type=task_type,
-                        executor_type=executor_type,
-                        total_clients=len(self.clients))
+        self.logger.info(
+            f"[CLIENT_MANAGER] Looking for available {executor_desc.get(executor_type, 'executors')}",
+            task_type=task_type,
+            executor_type=executor_type,
+            total_clients=len(self.clients),
+        )
 
         # Визначаємо типи клієнтів на основі executor_type
-        if executor_type == 'bot':
+        if executor_type == "bot":
             client_types = [ClientType.BOT]
-        elif executor_type == 'worker':
+        elif executor_type == "worker":
             client_types = [ClientType.WORKER]
-        elif executor_type == 'worker_api':
+        elif executor_type == "worker_api":
             client_types = [ClientType.WORKER_API]
-        elif executor_type == 'stream_hub':
+        elif executor_type == "stream_hub":
             client_types = [ClientType.STREAM_HUB]
         else:
             # За замовчуванням включаємо всі типи виконавців (крім MONITOR та ADMIN)
-            client_types = [ClientType.WORKER, ClientType.WORKER_API, ClientType.BOT, ClientType.STREAM_HUB]
+            client_types = [
+                ClientType.WORKER,
+                ClientType.WORKER_API,
+                ClientType.BOT,
+                ClientType.STREAM_HUB,
+            ]
 
-        self.logger.debug("[CLIENT_MANAGER] Client types to search",
-                         client_types=[ct.value for ct in client_types])
+        self.logger.debug(
+            "[CLIENT_MANAGER] Client types to search",
+            client_types=[ct.value for ct in client_types],
+        )
 
         # Збираємо всі ID клієнтів потрібних типів
         worker_ids = set()
         for client_type in client_types:
             type_clients = self.clients_by_type.get(client_type, set())
-            self.logger.debug(f"[CLIENT_MANAGER] Clients of type {client_type.value}",
-                            count=len(type_clients),
-                            ids=list(type_clients))
+            self.logger.debug(
+                f"[CLIENT_MANAGER] Clients of type {client_type.value}",
+                count=len(type_clients),
+                ids=list(type_clients),
+            )
             worker_ids.update(type_clients)
 
         # Якщо вказано тип завдання, додатково фільтруємо по можливостях
         if task_type:
             capability_ids = self.clients_by_capability.get(task_type, set())
-            self.logger.debug("[CLIENT_MANAGER] Filtering by capability",
-                            task_type=task_type,
-                            capability_clients=len(capability_ids))
+            self.logger.debug(
+                "[CLIENT_MANAGER] Filtering by capability",
+                task_type=task_type,
+                capability_clients=len(capability_ids),
+            )
             worker_ids = worker_ids.intersection(capability_ids)
 
-        self.logger.debug("[CLIENT_MANAGER] Checking client availability",
-                    potential_clients=len(worker_ids))
+        self.logger.debug(
+            "[CLIENT_MANAGER] Checking client availability",
+            potential_clients=len(worker_ids),
+        )
 
         for worker_id in worker_ids:
             if worker_id in self.clients:
                 worker = self.clients[worker_id]
                 is_available = worker.info.is_available()
-                self.logger.debug(f"[CLIENT_MANAGER] Checking {worker.info.client_type.value}",
-                                client_id=worker_id,
-                                client_type=worker.info.client_type.value,
-                                is_connected=worker.info.is_connected(),
-                                is_available=is_available,
-                                current_tasks=worker.info.stats.active_tasks,
-                                max_tasks=worker.info.capabilities.max_concurrent_tasks if worker.info.capabilities else 1)
+                self.logger.debug(
+                    f"[CLIENT_MANAGER] Checking {worker.info.client_type.value}",
+                    client_id=worker_id,
+                    client_type=worker.info.client_type.value,
+                    is_connected=worker.info.is_connected(),
+                    is_available=is_available,
+                    current_tasks=worker.info.stats.active_tasks,
+                    max_tasks=(
+                        worker.info.capabilities.max_concurrent_tasks
+                        if worker.info.capabilities
+                        else 1
+                    ),
+                )
                 if is_available:
                     workers.append(worker)
 
         # Сортування по навантаженню (менше навантажених спочатку)
         workers.sort(key=lambda w: w.info.get_load_percentage())
 
-        executor_type_desc = 'executors'
-        if executor_type == 'bot':
-            executor_type_desc = 'bots'
-        elif executor_type == 'worker':
-            executor_type_desc = 'workers'
-        elif executor_type == 'worker_api':
-            executor_type_desc = 'API workers'
+        executor_type_desc = "executors"
+        if executor_type == "bot":
+            executor_type_desc = "bots"
+        elif executor_type == "worker":
+            executor_type_desc = "workers"
+        elif executor_type == "worker_api":
+            executor_type_desc = "API workers"
 
-        self.logger.info(f"[CLIENT_MANAGER] Available {executor_type_desc} found",
-                        count=len(workers),
-                        client_ids=[w.info.client_id for w in workers])
+        self.logger.info(
+            f"[CLIENT_MANAGER] Available {executor_type_desc} found",
+            count=len(workers),
+            client_ids=[w.info.client_id for w in workers],
+        )
 
         return workers
 
-    def get_best_worker(self, task_type: str = None,
-                       worker_requirements: List[str] = None,
-                       executor_type: str = None) -> Optional[Client]:
+    def get_best_worker(
+        self,
+        task_type: str = None,
+        worker_requirements: List[str] = None,
+        executor_type: str = None,
+    ) -> Optional[Client]:
         """Отримання найкращого воркера для завдання"""
-        self.logger.info("[CLIENT_MANAGER] get_best_worker called",
-                        task_type=task_type,
-                        executor_type=executor_type,
-                        worker_requirements=worker_requirements)
+        self.logger.info(
+            "[CLIENT_MANAGER] get_best_worker called",
+            task_type=task_type,
+            executor_type=executor_type,
+            worker_requirements=worker_requirements,
+        )
 
         available_workers = self.get_available_workers(task_type, executor_type)
 
         if not available_workers:
             executor_desc = {
-                'bot': 'bots',
-                'worker': 'workers',
-                'worker_api': 'API workers',
-                None: 'executors'
+                "bot": "bots",
+                "worker": "workers",
+                "worker_api": "API workers",
+                None: "executors",
             }
-            self.logger.debug(f"[CLIENT_MANAGER] No available {executor_desc.get(executor_type, 'executors')} found",
-                              task_type=task_type,
-                              executor_type=executor_type)
+            self.logger.debug(
+                f"[CLIENT_MANAGER] No available {executor_desc.get(executor_type, 'executors')} found",
+                task_type=task_type,
+                executor_type=executor_type,
+            )
             # Fallback: якщо є хоч один клієнт відповідного типу, повертаємо його
             # навіть якщо capability не збігається
             any_workers = self.get_available_workers(None, executor_type)
             if any_workers:
-                self.logger.info("[CLIENT_MANAGER] Falling back to any available worker",
-                                 selected=any_workers[0].info.client_id)
+                self.logger.info(
+                    "[CLIENT_MANAGER] Falling back to any available worker",
+                    selected=any_workers[0].info.client_id,
+                )
                 return any_workers[0]
             return None
 
@@ -348,55 +406,76 @@ class ClientManager:
             filtered_workers = []
             for worker in available_workers:
                 if worker.info.capabilities:
-                    worker_capabilities = set(worker.info.capabilities.supported_task_types)
+                    worker_capabilities = set(
+                        worker.info.capabilities.supported_task_types
+                    )
                     if all(req in worker_capabilities for req in worker_requirements):
                         filtered_workers.append(worker)
-            
+
             # Якщо після фільтрації нічого не залишилося, спробуємо fallback
             if not filtered_workers:
-                self.logger.warning("[CLIENT_MANAGER] No workers match strict requirements, trying fallback",
-                                  task_type=task_type,
-                                  executor_type=executor_type,
-                                  worker_requirements=worker_requirements)
-                
+                self.logger.warning(
+                    "[CLIENT_MANAGER] No workers match strict requirements, trying fallback",
+                    task_type=task_type,
+                    executor_type=executor_type,
+                    worker_requirements=worker_requirements,
+                )
+
                 # Fallback 1: Воркери без строгих вимог (тільки за executor_type)
-                fallback_workers = self.get_available_workers(task_type=None, executor_type=executor_type)
+                fallback_workers = self.get_available_workers(
+                    task_type=None, executor_type=executor_type
+                )
                 if fallback_workers:
-                    self.logger.info("[CLIENT_MANAGER] Using fallback worker (relaxed requirements)",
-                                   worker_count=len(fallback_workers),
-                                   executor_type=executor_type)
+                    self.logger.info(
+                        "[CLIENT_MANAGER] Using fallback worker (relaxed requirements)",
+                        worker_count=len(fallback_workers),
+                        executor_type=executor_type,
+                    )
                     # Вибираємо найменш навантаженого
                     fallback_workers.sort(key=lambda w: w.info.get_load_percentage())
                     return fallback_workers[0]
-                
+
                 # Fallback 2: Будь-який доступний воркер відповідного типу
                 import random
-                all_type_workers = self.get_available_workers(task_type=None, executor_type=executor_type)
+
+                all_type_workers = self.get_available_workers(
+                    task_type=None, executor_type=executor_type
+                )
                 if all_type_workers:
                     random_worker = random.choice(all_type_workers)
-                    self.logger.info("[CLIENT_MANAGER] Using random available worker as last resort",
-                                   worker_id=random_worker.info.client_id,
-                                   executor_type=executor_type)
+                    self.logger.info(
+                        "[CLIENT_MANAGER] Using random available worker as last resort",
+                        worker_id=random_worker.info.client_id,
+                        executor_type=executor_type,
+                    )
                     return random_worker
-                
+
                 return None
-            
+
             available_workers = filtered_workers
 
         if not available_workers:
-            self.logger.warning("[CLIENT_MANAGER] No workers after filtering",
-                              task_type=task_type,
-                              executor_type=executor_type,
-                              worker_requirements=worker_requirements)
+            self.logger.warning(
+                "[CLIENT_MANAGER] No workers after filtering",
+                task_type=task_type,
+                executor_type=executor_type,
+                worker_requirements=worker_requirements,
+            )
             return None
 
         # Вибір найкращого воркера (з найменшим навантаженням)
         best_worker = available_workers[0]
-        self.logger.info("[CLIENT_MANAGER] Best worker selected",
-                        worker_id=best_worker.info.client_id,
-                        client_type=best_worker.info.client_type.value,
-                        load_percentage=best_worker.info.get_load_percentage(),
-                        capabilities=best_worker.info.capabilities.supported_task_types if best_worker.info.capabilities else None)
+        self.logger.info(
+            "[CLIENT_MANAGER] Best worker selected",
+            worker_id=best_worker.info.client_id,
+            client_type=best_worker.info.client_type.value,
+            load_percentage=best_worker.info.get_load_percentage(),
+            capabilities=(
+                best_worker.info.capabilities.supported_task_types
+                if best_worker.info.capabilities
+                else None
+            ),
+        )
         return best_worker
 
     def get_client_count(self) -> int:
@@ -409,8 +488,9 @@ class ClientManager:
 
     def get_connected_clients(self) -> List[Client]:
         """Отримання підключених клієнтів"""
-        return [client for client in self.clients.values()
-                if client.info.is_connected()]
+        return [
+            client for client in self.clients.values() if client.info.is_connected()
+        ]
 
     def get_unhealthy_clients(self, timeout: int = 60) -> List[Client]:
         """Отримання нездорових клієнтів"""
@@ -436,17 +516,24 @@ class ClientManager:
             return True
 
         except Exception as e:
-            self.logger.error("Failed to update client stats",
-                            client_id=client_id,
-                            error=str(e))
+            self.logger.error(
+                "Failed to update client stats", client_id=client_id, error=str(e)
+            )
             return False
 
-    async def broadcast_to_clients(self, message: Dict[str, Any],
-                                 client_types: List[ClientType] = None,
-                                 exclude_clients: List[str] = None):
+    async def broadcast_to_clients(
+        self,
+        message: Dict[str, Any],
+        client_types: List[ClientType] = None,
+        exclude_clients: List[str] = None,
+    ):
         """Розсилка повідомлення клієнтам"""
         try:
-            target_clients = self.get_clients_by_type(client_types) if client_types else self.get_all_clients()
+            target_clients = (
+                self.get_clients_by_type(client_types)
+                if client_types
+                else self.get_all_clients()
+            )
             exclude_set = set(exclude_clients or [])
 
             sent_count = 0
@@ -461,15 +548,19 @@ class ClientManager:
                         await client.websocket.send_json(message)
                         sent_count += 1
                     except Exception as e:
-                        self.logger.error("Failed to send message to client",
-                                        client_id=client.info.client_id,
-                                        error=str(e))
+                        self.logger.error(
+                            "Failed to send message to client",
+                            client_id=client.info.client_id,
+                            error=str(e),
+                        )
                         failed_count += 1
 
-            self.logger.info("Broadcast completed",
-                           sent=sent_count,
-                           failed=failed_count,
-                           target_types=[t.value for t in (client_types or [])])
+            self.logger.info(
+                "Broadcast completed",
+                sent=sent_count,
+                failed=failed_count,
+                target_types=[t.value for t in (client_types or [])],
+            )
 
         except Exception as e:
             self.logger.error("Failed to broadcast message", error=str(e))
@@ -500,7 +591,7 @@ class ClientManager:
             "capabilities": {
                 capability: len(client_ids)
                 for capability, client_ids in self.clients_by_capability.items()
-            }
+            },
         }
 
     def is_healthy(self) -> bool:
@@ -515,7 +606,7 @@ class ClientManager:
                 task_id = await self.async_optimizer.create_background_task(
                     name="cleanup_unhealthy_clients",
                     func=self._cleanup_unhealthy_clients,
-                    priority=TaskPriority.LOW
+                    priority=TaskPriority.LOW,
                 )
 
                 # Очікуємо результат
@@ -525,7 +616,9 @@ class ClientManager:
                     self.logger.warning("Cleanup task timeout")
                 except ValueError as e:
                     # Таск міг бути видалений або не створений
-                    self.logger.debug("Cleanup task not found", task_id=task_id, error=str(e))
+                    self.logger.debug(
+                        "Cleanup task not found", task_id=task_id, error=str(e)
+                    )
 
                 await asyncio.sleep(30)  # Очищення кожні 30 секунд
 
@@ -538,36 +631,58 @@ class ClientManager:
     async def _cleanup_unhealthy_clients(self):
         """Очищення нездорових клієнтів"""
         try:
-            unhealthy_clients = self.get_unhealthy_clients(self.settings.websocket_timeout)
+            unhealthy_clients = self.get_unhealthy_clients(
+                self.settings.websocket_timeout
+            )
 
             for client in unhealthy_clients:
                 # ПОКРАЩЕННЯ: Розраховуємо час неактивності для діагностики
                 inactive_time = None
                 if client.info.stats.last_activity:
-                    inactive_time = (datetime.utcnow() - client.info.stats.last_activity).total_seconds()
+                    inactive_time = (
+                        datetime.utcnow() - client.info.stats.last_activity
+                    ).total_seconds()
                 elif client.info.last_pong:
-                    inactive_time = (datetime.utcnow() - client.info.last_pong).total_seconds()
+                    inactive_time = (
+                        datetime.utcnow() - client.info.last_pong
+                    ).total_seconds()
 
-                self.logger.info("Removing unhealthy client",
-                               client_id=client.info.client_id,
-                               client_type=client.info.client_type.value,
-                               last_activity=client.info.stats.last_activity.isoformat() if client.info.stats.last_activity else None,
-                               last_pong=client.info.last_pong.isoformat() if client.info.last_pong else None,
-                               inactive_time_seconds=inactive_time,
-                               timeout_threshold=self.settings.websocket_timeout)
+                self.logger.info(
+                    "Removing unhealthy client",
+                    client_id=client.info.client_id,
+                    client_type=client.info.client_type.value,
+                    last_activity=(
+                        client.info.stats.last_activity.isoformat()
+                        if client.info.stats.last_activity
+                        else None
+                    ),
+                    last_pong=(
+                        client.info.last_pong.isoformat()
+                        if client.info.last_pong
+                        else None
+                    ),
+                    inactive_time_seconds=inactive_time,
+                    timeout_threshold=self.settings.websocket_timeout,
+                )
 
                 # ПОКРАЩЕННЯ: Активне закриття WebSocket перед видаленням клієнта
                 if client.websocket:
                     try:
                         # Надсилаємо код 1001 (Going Away) з причиною неактивності
-                        await client.websocket.close(code=1001, reason="Client inactive")
-                        self.logger.debug("WebSocket closed for inactive client",
-                                        client_id=client.info.client_id)
+                        await client.websocket.close(
+                            code=1001, reason="Client inactive"
+                        )
+                        self.logger.debug(
+                            "WebSocket closed for inactive client",
+                            client_id=client.info.client_id,
+                        )
                     except Exception as websocket_error:
                         # Логуємо помилки закриття WebSocket, але не припиняємо cleanup
-                        self.logger.debug("Failed to close WebSocket for inactive client",
-                                        client_id=client.info.client_id,
-                                        error=str(websocket_error))
+                        self.logger.debug(
+                            "Failed to close WebSocket for inactive client",
+                            client_id=client.info.client_id,
+                            error=str(websocket_error),
+                        )
 
                 # Видаляємо клієнта з менеджера
                 await self.remove_client(client.info.client_id)
