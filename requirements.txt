@@ -42,7 +42,7 @@ psutil==5.9.7
 typing-extensions>=4.12.2
 
 # Production
-gunicorn==21.2.0
+gunicorn==23.0.0
 
 # Development and testing
 pytest==7.4.4
