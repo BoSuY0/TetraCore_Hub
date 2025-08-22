@@ -880,16 +880,24 @@ class SecretsManager:
         Returns:
             Значення секрету або default
         """
-        # У тестах із Env-провайдером завжди перечитуємо з оточення (ігноруємо кеш)
+        # У тестах із Env-провайдером: не ігноруємо кеш, якщо значення вже є (тестові дефолти)
+        force_refresh = os.getenv("SECRETS_FORCE_ENV_REFRESH", "false").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
         if isinstance(self._provider, EnvSecretProvider) and (
-            os.getenv("PYTEST_CURRENT_TEST")
-            or os.getenv("SECRETS_FORCE_ENV_REFRESH", "false").lower()
-            in ("1", "true", "yes")
+            os.getenv("PYTEST_CURRENT_TEST") or force_refresh
         ):
-            use_cache = False
-            logger.debug(
-                "Bypassing cache for Env provider during tests", secret_name=name
-            )
+            if force_refresh or name not in self._secrets_cache:
+                use_cache = False
+                logger.debug(
+                    "Bypassing cache for Env provider during tests", secret_name=name
+                )
+            else:
+                logger.debug(
+                    "Using cached secret during tests for Env provider", secret_name=name
+                )
 
         # Перевірити кеш якщо дозволено
         if use_cache and name in self._secrets_cache:
