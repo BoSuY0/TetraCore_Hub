@@ -26,8 +26,24 @@ try:
 
     HAS_AWS = True
 except ImportError:
-    boto3 = None  # type: ignore[assignment]
+    # Створюємо мінімальний стаб модуля у sys.modules, щоб дозволити мокінг
+    # 'boto3.client' у тестах без встановленого пакета boto3
     HAS_AWS = False
+    try:
+        import types  # type: ignore[import-not-found]
+        import sys  # type: ignore[import-not-found]
+
+        boto3_stub = types.ModuleType("boto3")
+
+        def _not_installed(*args, **kwargs):
+            raise ImportError("boto3 is not installed")
+
+        # Забезпечуємо наявність атрибута client для подальшого мокінгу
+        boto3_stub.client = _not_installed  # type: ignore[attr-defined]
+        sys.modules["boto3"] = boto3_stub
+        boto3 = boto3_stub  # type: ignore[assignment]
+    except Exception:
+        boto3 = None  # type: ignore[assignment]
 
 try:
     import hvac  # type: ignore[import-untyped]
