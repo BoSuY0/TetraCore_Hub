@@ -874,38 +874,45 @@ class SecretsManager:
 
         Args:
             name: Назва секрету
-            default: Значення за замовчуванням
-            use_cache: Чи використовувати кеш
+            default: Значення за замовчуванням, якщо секрет не знайдено
+            use_cache: Чи використовувати кеш при читанні
 
         Returns:
             Значення секрету або default
         """
-        # У тестах із Env-провайдером: не ігноруємо кеш, якщо значення вже є (тестові дефолти)
-        force_refresh = os.getenv("SECRETS_FORCE_ENV_REFRESH", "false").lower() in (
-            "1",
-            "true",
-            "yes",
-        )
-        if isinstance(self._provider, EnvSecretProvider) and (
-            os.getenv("PYTEST_CURRENT_TEST") or force_refresh
-        ):
-            if force_refresh or name not in self._secrets_cache:
-                use_cache = False
-                logger.debug(
-                    "Bypassing cache for Env provider during tests", secret_name=name
-                )
+        # Якщо значення вже у кеші, визначимо чи можна його використати
+        cached_present = name in self._secrets_cache
+        if use_cache and cached_present:
+            is_env_provider = isinstance(self._provider, EnvSecretProvider)
+            in_pytest = bool(os.getenv("PYTEST_CURRENT_TEST"))
+            force_refresh = os.getenv("SECRETS_FORCE_ENV_REFRESH", "").lower() in (
+                "1",
+                "true",
+                "yes",
+            )
+
+            if is_env_provider and (in_pytest or force_refresh):
+                cached_value = self._secrets_cache.get(name)
+                current_env_value = os.getenv(name)
+                # Форс-оновлення або зміна значення в ENV між тестами
+                if force_refresh or (
+                    current_env_value is not None and current_env_value != cached_value
+                ):
+                    logger.debug(
+                        "Refreshing secret from Env provider during tests",
+                        secret_name=name,
+                        changed=(current_env_value != cached_value)
+                        if cached_value is not None
+                        else True,
+                        force=force_refresh,
+                    )
+                    use_cache = False  # Прочитати свіже значення нижче
+                else:
+                    return cached_value
             else:
-                logger.debug(
-                    "Using cached secret during tests for Env provider",
-                    secret_name=name,
-                )
+                return self._secrets_cache[name]
 
-        # Перевірити кеш якщо дозволено
-        if use_cache and name in self._secrets_cache:
-            logger.debug("Secret accessed from cache", secret_name=name)
-            return self._secrets_cache[name]
-
-        # Отримати з провайдера
+        # Якщо немає у кеші або кеш потрібно оновити — читаємо з провайдера
         value = self._provider.get(name)
 
         if value:
