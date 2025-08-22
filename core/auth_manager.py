@@ -54,15 +54,14 @@ SESSION_CLEANUP_INTERVAL = 3600  # 1 година
 
 # Політика валідації сесій при збоях Redis/невідомих типах
 # За замовчуванням у продакшені — сувора (fail-closed), в інших середовищах — пом'якшена (fail-open)
-STRICT_SESSION_VALIDATION = (
-    os.getenv(
-        "STRICT_SESSION_VALIDATION",
+STRICT_SESSION_VALIDATION = os.getenv(
+    "STRICT_SESSION_VALIDATION",
+    (
         "true"
         if os.getenv("ENVIRONMENT", "development").lower() == "production"
-        else "false",
-    ).lower()
-    in ("1", "true", "yes")
-)
+        else "false"
+    ),
+).lower() in ("1", "true", "yes")
 
 # Генерація унікального ID для поточного запуску сервера
 # Це дозволяє інвалідувати всі токени після рестарту
@@ -528,7 +527,8 @@ class AuthManager:
                 except Exception as redis_error:
                     if STRICT_SESSION_VALIDATION:
                         logger.warning(
-                            "❌ Redis error during session validation", error=str(redis_error)
+                            "❌ Redis error during session validation",
+                            error=str(redis_error),
                         )
                         raise HTTPException(
                             status_code=401, detail="Session validation failed"
@@ -681,7 +681,8 @@ class AuthManager:
                     )
                 else:
                     logger.debug(
-                        "Non-fatal session validation issue during refresh", error=str(e)
+                        "Non-fatal session validation issue during refresh",
+                        error=str(e),
                     )
 
         # Створюємо новий access токен з тими ж даними (ручне оновлення)
@@ -942,9 +943,7 @@ class AuthManager:
         if self.redis_client:
             try:
                 res = self.redis_client.exists(key)
-                exists_val = (
-                    await res if inspect.isawaitable(res) else res
-                )
+                exists_val = await res if inspect.isawaitable(res) else res
                 return bool(exists_val)
             except Exception:
                 pass

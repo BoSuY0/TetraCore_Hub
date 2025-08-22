@@ -258,7 +258,9 @@ class TaskRouter:
             # У суворому режимі (коли Redis вимкнений у налаштуваннях) — піднімаємо виняток
             # В іншому випадку дозволяємо ставити в чергу/overflow без негайного призначення
             try:
-                strict_no_client_manager = not getattr(self.settings, "redis_enabled", True)
+                strict_no_client_manager = not getattr(
+                    self.settings, "redis_enabled", True
+                )
             except Exception:
                 strict_no_client_manager = False
             if strict_no_client_manager:
@@ -319,7 +321,10 @@ class TaskRouter:
                     try:
                         stats = queue.get_stats()
                     except Exception:
-                        stats = {"total_tasks": len(queue.tasks), "max_size": queue.max_size}
+                        stats = {
+                            "total_tasks": len(queue.tasks),
+                            "max_size": queue.max_size,
+                        }
                     self.logger.warning(
                         "Queue is full and overflow disabled by settings",
                         priority=task.priority.value,

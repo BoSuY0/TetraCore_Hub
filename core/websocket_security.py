@@ -222,7 +222,9 @@ class WebSocketSecurityManager:
                 pass
 
     # --------------------- Header helpers ---------------------
-    def _get_header_ci(self, headers: Any, name: str, default: Optional[str] = None) -> Optional[str]:
+    def _get_header_ci(
+        self, headers: Any, name: str, default: Optional[str] = None
+    ) -> Optional[str]:
         """Повертає значення заголовка без врахування регістру ключа.
 
         Працює з будь-яким Mapping-подібним об'єктом (включно з MappingProxyType
@@ -321,8 +323,13 @@ class WebSocketSecurityManager:
         if not token:
             if environment.lower() in ("development", "testing"):
                 logger.info("WebSocket guest access granted (dev/test mode)")
-                guest_id = self._get_header_ci(headers, "X-Client-Id") or f"guest-{int(time.time())}"
-                guest_type = (self._get_header_ci(headers, "X-Client-Type") or "guest").lower()
+                guest_id = (
+                    self._get_header_ci(headers, "X-Client-Id")
+                    or f"guest-{int(time.time())}"
+                )
+                guest_type = (
+                    self._get_header_ci(headers, "X-Client-Type") or "guest"
+                ).lower()
                 return {
                     "user_id": guest_id,
                     "username": "guest",
@@ -368,7 +375,9 @@ class WebSocketSecurityManager:
                 self._get_header_ci(headers, "X-Client-Id")
                 or f"service-{int(time.time())}"
             )
-            client_type = (self._get_header_ci(headers, "X-Client-Type") or "service").lower()
+            client_type = (
+                self._get_header_ci(headers, "X-Client-Type") or "service"
+            ).lower()
             logger.info(
                 "WebSocket authentication successful with static token",
                 client_id=client_id,
