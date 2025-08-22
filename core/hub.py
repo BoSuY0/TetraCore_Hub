@@ -145,13 +145,13 @@ class StreamHub:
             # Налаштування подієвих обробників
             self._setup_event_handlers()
 
-        # Автоматична ротація токенів (якщо увімкнено)
-        try:
-            if getattr(self.settings, 'enable_token_rotation', False):
-                interval = int(getattr(self.settings, 'token_rotation_interval_minutes', 1440))
-                asyncio.create_task(self._token_rotation_loop(interval))
-        except Exception:
-            pass
+            # Автоматична ротація токенів (якщо увімкнено)
+            try:
+                if getattr(self.settings, 'enable_token_rotation', False):
+                    interval = int(getattr(self.settings, 'token_rotation_interval_minutes', 1440))
+                    asyncio.create_task(self._token_rotation_loop(interval))
+            except Exception:
+                pass
 
             # Самореєстрація як клієнт
             await self._register_self_as_client()
@@ -884,15 +884,15 @@ class StreamHub:
                         "correlation_id": validated_message.correlation_id,
                     }
 
-            # Спеціальна обробка для TASK_SUBMIT - витягуємо поля з data (уніфікований формат)
-            if validated_message.type == MessageType.TASK_SUBMIT.value:
-                # Всі поля таску знаходяться в validated_message.data
-                message_data.update(validated_message.data)
+                    # Спеціальна обробка для TASK_SUBMIT - витягуємо поля з data (уніфікований формат)
+                    if validated_message.type == MessageType.TASK_SUBMIT.value:
+                        # Всі поля таску знаходяться в validated_message.data
+                        message_data.update(validated_message.data)
                         self.logger.info("[DEBUG] TASK_SUBMIT through security manager",
-                                       client_id=client.info.client_id,
-                                       data_keys=list(validated_message.data.keys()),
-                                       has_task_type="task_type" in validated_message.data,
-                                       has_task_data="task_data" in validated_message.data)
+                                         client_id=client.info.client_id,
+                                         data_keys=list(validated_message.data.keys()),
+                                         has_task_type="task_type" in validated_message.data,
+                                         has_task_data="task_data" in validated_message.data)
                     else:
                         # Для інших типів повідомлень
                         message_data.update(validated_message.data)
