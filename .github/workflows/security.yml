@@ -39,7 +39,7 @@ jobs:
           pip-audit -r requirements.txt || true
 
       - name: Gitleaks (secrets scan)
-        uses: zricethezav/gitleaks-action@v2.3.6
+        uses: zricethezav/gitleaks-action@v2.3.9
         with:
           config-path: ''
         continue-on-error: true
