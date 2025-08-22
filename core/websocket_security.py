@@ -199,6 +199,21 @@ class WebSocketSecurityManager:
         self._used_nonces: Dict[str, float] = {}
         self._nonce_ttl_seconds: int = int(os.getenv("WS_NONCE_TTL_SECONDS", "120"))
 
+    async def cleanup(self):
+        """Cleanup resources and cancel background tasks"""
+        if self._cleanup_task and not self._cleanup_task.done():
+            self._cleanup_task.cancel()
+            try:
+                await self._cleanup_task
+            except asyncio.CancelledError:
+                pass
+            self._cleanup_task = None
+
+    def __del__(self):
+        """Ensure cleanup task is cancelled on deletion"""
+        if self._cleanup_task and not self._cleanup_task.done():
+            self._cleanup_task.cancel()
+
     async def authenticate_websocket(
         self, websocket: WebSocket, token: Optional[str]
     ) -> Optional[Dict]:

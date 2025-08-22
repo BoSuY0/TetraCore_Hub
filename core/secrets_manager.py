@@ -652,6 +652,22 @@ class SecretsManager:
                         logger.info(f"Loaded secret from config: {secret_name}")
             except Exception as e:
                 logger.debug(f"Could not load from config: {e}")
+        
+        # 3.5. Додати дефолтні значення для testing середовища
+        env = os.getenv("ENVIRONMENT", "development").lower()
+        if env == "testing":
+            import secrets
+            test_defaults = {
+                "JWT_SECRET_KEY": secrets.token_urlsafe(32),
+                "JWT_REFRESH_SECRET": secrets.token_urlsafe(32),
+                "ENCRYPTION_KEY": secrets.token_urlsafe(32),
+                "ADMIN_USERNAME": "test_admin",
+                "ADMIN_PASSWORD": "Test@Password123!",
+            }
+            for secret_name, value in test_defaults.items():
+                if secret_name not in self._secrets_cache:
+                    self._secrets_cache[secret_name] = value
+                    logger.info(f"Using test default for: {secret_name}")
 
         # 4. Завантаження з файлу секретів (якщо існує)
         self._load_from_file()
@@ -696,12 +712,13 @@ class SecretsManager:
         errors = []
         warnings = []
 
-        # Перевірити чи це development режим
-        is_development = os.getenv("ENVIRONMENT", "development") == "development"
+        # Перевірити чи це development або testing режим
+        env = os.getenv("ENVIRONMENT", "development").lower()
+        is_development = env in ["development", "testing"]
 
-        # У development режимі - мінімальна валідація
+        # У development/testing режимі - мінімальна валідація
         if is_development:
-            logger.info("Development mode: skipping strict secret validation")
+            logger.info(f"{env.capitalize()} mode: skipping strict secret validation")
             required_for_dev = ["ADMIN_USERNAME", "ADMIN_PASSWORD"]
             for secret_name in required_for_dev:
                 if secret_name not in self._secrets_cache:
