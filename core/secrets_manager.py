@@ -607,7 +607,7 @@ class SecretsManager:
             if complexity_score < 3:
                 # У тестах допускається майстер-ключ без високої складності, якщо довжина >= 16
                 is_test = (
-                    os.getenv("ENVIRONMENT", "development").lower() == "development"
+                    os.getenv("ENVIRONMENT", "development").lower() in ["development", "testing"]
                 )
                 if not is_test:
                     raise ValueError(
