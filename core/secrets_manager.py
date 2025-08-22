@@ -241,7 +241,7 @@ class AWSSecretProvider(SecretProviderInterface):
             for page in paginator.paginate():
                 for secret in page["SecretList"]:
                     if secret["Name"].startswith(self.prefix):
-                        key = secret["Name"][len(self.prefix):]
+                        key = secret["Name"][len(self.prefix) :]
                         if not prefix or key.startswith(prefix):
                             keys.append(key)
 
@@ -367,7 +367,7 @@ class RedisSecretProvider(SecretProviderInterface):
             for key in self.client.scan_iter(match=pattern):
                 key_str = key.decode("utf-8")
                 if key_str.startswith(self.prefix):
-                    keys.append(key_str[len(self.prefix):])
+                    keys.append(key_str[len(self.prefix) :])
 
             return keys
         except Exception as e:
@@ -896,7 +896,8 @@ class SecretsManager:
                 )
             else:
                 logger.debug(
-                    "Using cached secret during tests for Env provider", secret_name=name
+                    "Using cached secret during tests for Env provider",
+                    secret_name=name,
                 )
 
         # Перевірити кеш якщо дозволено
