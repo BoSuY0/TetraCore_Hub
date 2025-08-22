@@ -4,9 +4,11 @@ Security Integration Module for TetraCore Hub
 """
 
 import os
+import json
 from typing import Optional, Dict, Any
+from datetime import datetime, timezone
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 import structlog
@@ -482,8 +484,3 @@ async def get_authenticated_user(request: Request) -> Dict[str, Any]:
 # @app.get("/api/protected")
 # async def protected_endpoint(user: Dict = Depends(get_authenticated_user)):
 #     return {"message": f"Hello {user['username']}"}
-
-
-import json
-from datetime import datetime, timezone
-from fastapi import HTTPException

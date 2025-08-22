@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).parent.absolute()))
 import structlog
 import uvicorn
 from fastapi import FastAPI
+from core.logging_utils import RateLimiterProcessor, SampleInfoProcessor
 
 # Константи безпеки
 MAX_PATH_LENGTH = 4096
@@ -38,9 +39,6 @@ SAFE_ENV_VARS = [
     'TEMP', 'TMP', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'PROGRAMFILES',
     'PROGRAMFILES(X86)', 'SYSTEMROOT', 'WINDIR', 'COMSPEC'
 ]
-
-# Додаткові утиліти логування
-from core.logging_utils import RateLimiterProcessor, SampleInfoProcessor
 
 class SecurityError(Exception):
     """Помилка безпеки при валідації"""

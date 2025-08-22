@@ -20,6 +20,11 @@ from core.auth_manager import (
     REFRESH_TOKEN_EXPIRE_DAYS
 )
 from core.secrets_manager import get_secrets_manager
+from core.network_security import rate_limit
+from config import (
+    get_settings,
+    get_user_role, get_user_permissions
+)
 
 # Модель для валідації сесії
 class SessionValidation(BaseModel):
@@ -49,12 +54,6 @@ class User(BaseModel):
     lastActivity: datetime
 
 logger = structlog.get_logger()
-
-# Імпорт конфігурації авторизації
-from config import (
-    get_settings,
-    get_user_role, get_user_permissions
-)
 
 # Security схема для Bearer токенів
 security = HTTPBearer()
@@ -264,8 +263,6 @@ async def validate_token(credentials: HTTPAuthorizationCredentials = Security(se
                      error=str(e),
                      error_type=type(e).__name__)
         raise HTTPException(status_code=500, detail=f"Token validation failed: {str(e)}")
-
-from core.network_security import rate_limit
 
 
 @auth_router.post("/refresh")
