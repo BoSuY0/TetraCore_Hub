@@ -3,8 +3,8 @@
 
 # Core Framework
 # Використовуємо точні версії, які перевірено працюють з Python 3.13
-fastapi==0.115.12
-starlette==0.47.2  # Explicitly set to fix CVE
+fastapi==0.116.1
+starlette==0.47.2  # Compatible with FastAPI 0.116.1, fixes CVE
 pydantic==2.11.5
 pydantic-core==2.33.2
 uvicorn[standard]==0.24.0
