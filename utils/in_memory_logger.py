@@ -54,6 +54,7 @@ _root_logger.addHandler(_LOG_HANDLER)
 # Export a lightweight accessor so that other modules can fetch logs without
 # having to know about the underlying handler instance.
 
+
 def get_recent_logs(limit: int = 100) -> List[Dict[str, Any]]:  # noqa: D401
     """Helper to obtain the most recent *limit* log entries."""
     return _LOG_HANDLER.get_logs(limit)

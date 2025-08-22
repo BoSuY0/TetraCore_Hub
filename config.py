@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 
 class Environment(str, Enum):
     """Типи середовищ розгортання"""
+
     DEVELOPMENT = "development"
     PRODUCTION = "production"
     TESTING = "testing"
@@ -22,6 +23,7 @@ class Environment(str, Enum):
 
 class LogLevel(str, Enum):
     """Рівні логування"""
+
     DEBUG = "DEBUG"
     INFO = "INFO"
     WARNING = "WARNING"
@@ -37,6 +39,7 @@ def is_heroku_environment() -> bool:
 # Завантаження змінних з .env файлу
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
 except ImportError:
     pass  # dotenv не обов'язкова залежність
@@ -80,7 +83,9 @@ class Settings:
     redis_url: str = ""  # Має бути встановлено через REDIS_URL
     redis_tls_enabled: bool = True  # За замовчуванням TLS для продакшн
     redis_ssl_cert_reqs: str = "required"
-    redis_max_connections: int = 50  # Збільшено з 10 до 50 для вирішення "Too many connections"
+    redis_max_connections: int = (
+        50  # Збільшено з 10 до 50 для вирішення "Too many connections"
+    )
     redis_retry_on_timeout: bool = True
     redis_health_check_interval: int = 120  # Збільшено до 2 хвилин для Upstash
 
@@ -145,47 +150,61 @@ class Settings:
             self.role_permissions = {
                 "admin": [
                     # Основні права дашборду
-                    "dashboard.view", "dashboard.manage",
-                    
+                    "dashboard.view",
+                    "dashboard.manage",
                     # Права на клієнтів
-                    "clients.view", "clients.manage", "clients.create", "clients.delete",
-                    
+                    "clients.view",
+                    "clients.manage",
+                    "clients.create",
+                    "clients.delete",
                     # Права на завдання
-                    "tasks.view", "tasks.manage", "tasks.create", "tasks.delete", "tasks.execute",
-                    
+                    "tasks.view",
+                    "tasks.manage",
+                    "tasks.create",
+                    "tasks.delete",
+                    "tasks.execute",
                     # Права на налаштування
-                    "settings.view", "settings.manage", "settings.update",
-                    
+                    "settings.view",
+                    "settings.manage",
+                    "settings.update",
                     # Права на логи
-                    "logs.view", "logs.manage", "logs.export",
-                    
+                    "logs.view",
+                    "logs.manage",
+                    "logs.export",
                     # Права на авторизацію
-                    "auth.manage", "auth.view", "auth.sessions",
-                    
+                    "auth.manage",
+                    "auth.view",
+                    "auth.sessions",
                     # Права на метрики та моніторинг
-                    "metrics.view", "metrics.manage", "metrics.export",
-                    "monitoring.view", "monitoring.manage",
-                    
+                    "metrics.view",
+                    "metrics.manage",
+                    "metrics.export",
+                    "monitoring.view",
+                    "monitoring.manage",
                     # Права на систему
-                    "system.view", "system.manage", "system.restart", "system.config",
-                    
+                    "system.view",
+                    "system.manage",
+                    "system.restart",
+                    "system.config",
                     # Права на Redis
-                    "redis.view", "redis.manage",
-                    
+                    "redis.view",
+                    "redis.manage",
                     # Права на WebSocket
-                    "websocket.view", "websocket.manage",
-                    
+                    "websocket.view",
+                    "websocket.manage",
                     # Права на API
-                    "api.view", "api.manage", "api.debug",
-                    
+                    "api.view",
+                    "api.manage",
+                    "api.debug",
                     # Права на безпеку
-                    "security.view", "security.manage",
-                    
+                    "security.view",
+                    "security.manage",
                     # Права на звіти
-                    "reports.view", "reports.create", "reports.export",
-                    
+                    "reports.view",
+                    "reports.create",
+                    "reports.export",
                     # Повний доступ
-                    "*"  # Універсальне право для адміна
+                    "*",  # Універсальне право для адміна
                 ]
             }
 
@@ -213,8 +232,12 @@ class Settings:
         # Ігноруємо REDIS_ENABLED: Redis завжди увімкнений
         self.redis_enabled = True
         self.redis_url = os.getenv("REDIS_URL", self.redis_url)
-        self.redis_tls_enabled = os.getenv("REDIS_TLS_ENABLED", str(self.redis_tls_enabled)).lower() in ("true", "1", "yes")
-        self.redis_ssl_cert_reqs = os.getenv("REDIS_SSL_CERT_REQS", self.redis_ssl_cert_reqs)
+        self.redis_tls_enabled = os.getenv(
+            "REDIS_TLS_ENABLED", str(self.redis_tls_enabled)
+        ).lower() in ("true", "1", "yes")
+        self.redis_ssl_cert_reqs = os.getenv(
+            "REDIS_SSL_CERT_REQS", self.redis_ssl_cert_reqs
+        )
 
         # Завантаження Sentinel URLs
         sentinel_urls = os.getenv("REDIS_SENTINEL_URLS")
@@ -224,7 +247,9 @@ class Settings:
         # Завантаження Cluster nodes
         cluster_nodes = os.getenv("REDIS_CLUSTER_NODES")
         if cluster_nodes:
-            self.redis_cluster_nodes = [node.strip() for node in cluster_nodes.split(",")]
+            self.redis_cluster_nodes = [
+                node.strip() for node in cluster_nodes.split(",")
+            ]
 
         self.port = int(os.getenv("PORT", self.port))
         self.host = os.getenv("HOST", self.host)
@@ -233,12 +258,21 @@ class Settings:
         # Dual-token ротація
         self.auth_token_active = os.getenv("AUTH_TOKEN_ACTIVE", self.auth_token_active)
         self.auth_token_next = os.getenv("AUTH_TOKEN_NEXT", self.auth_token_next)
-        self.enable_token_rotation = os.getenv("ENABLE_TOKEN_ROTATION", str(self.enable_token_rotation)).lower() in ("true","1","yes")
+        self.enable_token_rotation = os.getenv(
+            "ENABLE_TOKEN_ROTATION", str(self.enable_token_rotation)
+        ).lower() in ("true", "1", "yes")
         try:
-            self.token_rotation_interval_minutes = int(os.getenv("TOKEN_ROTATION_INTERVAL_MINUTES", str(self.token_rotation_interval_minutes)))
+            self.token_rotation_interval_minutes = int(
+                os.getenv(
+                    "TOKEN_ROTATION_INTERVAL_MINUTES",
+                    str(self.token_rotation_interval_minutes),
+                )
+            )
         except Exception:
             pass
-        self.require_authentication = os.getenv("REQUIRE_AUTHENTICATION", str(self.require_authentication)).lower() in ("true", "1", "yes")
+        self.require_authentication = os.getenv(
+            "REQUIRE_AUTHENTICATION", str(self.require_authentication)
+        ).lower() in ("true", "1", "yes")
 
         log_level_name = os.getenv("LOG_LEVEL", self.log_level.value)
         try:
@@ -269,19 +303,23 @@ class Settings:
 
         # Production domains
         if is_heroku_environment() or self.environment == Environment.PRODUCTION:
-            origins.extend([
-                "https://hub.tetra-core.website",
-                "https://tetra-core-hub-29fb6c8b7947.herokuapp.com"
-            ])
+            origins.extend(
+                [
+                    "https://hub.tetra-core.website",
+                    "https://tetra-core-hub-29fb6c8b7947.herokuapp.com",
+                ]
+            )
 
         # Локальні URL для розробки
         if self.environment == Environment.DEVELOPMENT:
-            origins.extend([
-                "http://localhost:3000",
-                "http://127.0.0.1:3000",
-                "http://localhost:8000",
-                "http://127.0.0.1:8000"
-            ])
+            origins.extend(
+                [
+                    "http://localhost:3000",
+                    "http://127.0.0.1:3000",
+                    "http://localhost:8000",
+                    "http://127.0.0.1:8000",
+                ]
+            )
 
         # Додаткові origins з змінних середовища
         extra_origins = os.getenv("ALLOWED_ORIGINS")
@@ -344,7 +382,7 @@ class Settings:
             "cleanup_interval_minutes": self.cleanup_interval_minutes,
             "require_username": self.require_username,
             "require_photo": self.require_photo,
-            "role_permissions": self.role_permissions
+            "role_permissions": self.role_permissions,
         }
 
     # URL getters
@@ -429,22 +467,19 @@ class Settings:
                 "home": os.getenv("HOME"),
                 "environment": self.environment.value,
                 "debug": self.debug,
-                "log_level": self.log_level.value
+                "log_level": self.log_level.value,
             },
             "urls": {
                 "backend": self.get_backend_url(),
                 "frontend": self.get_frontend_url(),
                 "dashboard": self.get_dashboard_url(),
-                "websocket": self.get_websocket_url()
+                "websocket": self.get_websocket_url(),
             },
-            "redis": {
-            "enabled": True,
-                "url_safe": self._safe_redis_url()
-            },
+            "redis": {"enabled": True, "url_safe": self._safe_redis_url()},
             "auth": {
                 "require_authentication": self.require_authentication,
-                "admin_configured": bool(self.admin_username and self.admin_password)
-            }
+                "admin_configured": bool(self.admin_username and self.admin_password),
+            },
         }
 
         try:
@@ -490,7 +525,7 @@ DEVELOPMENT_OVERRIDES = {
     "debug": True,
     "log_level": LogLevel.DEBUG,
     "redis_enabled": True,
-    "enable_metrics": True
+    "enable_metrics": True,
 }
 
 PRODUCTION_OVERRIDES = {

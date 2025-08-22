@@ -1,4 +1,5 @@
 """JWKS endpoint and key management for JWT (RS/ES/EdDSA)."""
+
 from typing import Dict, Any
 import base64
 import os
@@ -45,12 +46,13 @@ async def jwks() -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail="JWKS not configured")
 
     jwk = _parse_pem_public_key(pub_pem)
-    jwk.update({
-        "alg": alg,
-        "use": "sig",
-    })
+    jwk.update(
+        {
+            "alg": alg,
+            "use": "sig",
+        }
+    )
     if kid:
         jwk["kid"] = kid
 
     return {"keys": [jwk]}
-

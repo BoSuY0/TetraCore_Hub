@@ -18,7 +18,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
 # Type definitions
-T = TypeVar('T')
+T = TypeVar("T")
 AsyncFunc = Callable[..., Coroutine[Any, Any, T]]
 
 # Глобальний thread pool для блокуючих операцій
@@ -28,6 +28,7 @@ logger = structlog.get_logger(__name__)
 
 
 # === JSON операції ===
+
 
 async def async_json_dumps(obj: Any, **kwargs) -> str:
     """
@@ -41,12 +42,11 @@ async def async_json_dumps(obj: Any, **kwargs) -> str:
         JSON рядок
     """
     loop = asyncio.get_event_loop()
-    kwargs.setdefault('ensure_ascii', False)
-    kwargs.setdefault('default', str)
+    kwargs.setdefault("ensure_ascii", False)
+    kwargs.setdefault("default", str)
 
     return await loop.run_in_executor(
-        _thread_pool,
-        functools.partial(json.dumps, obj, **kwargs)
+        _thread_pool, functools.partial(json.dumps, obj, **kwargs)
     )
 
 
@@ -66,7 +66,10 @@ async def async_json_loads(s: Union[str, bytes]) -> Any:
 
 # === Файлові операції ===
 
-async def async_read_file(path: Union[str, Path], mode: str = 'r', encoding: str = 'utf-8') -> str:
+
+async def async_read_file(
+    path: Union[str, Path], mode: str = "r", encoding: str = "utf-8"
+) -> str:
     """
     Асинхронне читання файлу.
 
@@ -82,7 +85,9 @@ async def async_read_file(path: Union[str, Path], mode: str = 'r', encoding: str
         return await f.read()
 
 
-async def async_write_file(path: Union[str, Path], content: str, mode: str = 'w', encoding: str = 'utf-8'):
+async def async_write_file(
+    path: Union[str, Path], content: str, mode: str = "w", encoding: str = "utf-8"
+):
     """
     Асинхронний запис у файл.
 
@@ -125,6 +130,7 @@ async def async_write_json(path: Union[str, Path], obj: Any, **kwargs):
 
 # === Загальні блокуючі операції ===
 
+
 async def run_blocking(func: Callable[..., T], *args, **kwargs) -> T:
     """
     Виконання блокуючої функції в окремому потоці.
@@ -140,14 +146,14 @@ async def run_blocking(func: Callable[..., T], *args, **kwargs) -> T:
     loop = asyncio.get_event_loop()
     if args or kwargs:
         return await loop.run_in_executor(
-            _thread_pool,
-            functools.partial(func, *args, **kwargs)
+            _thread_pool, functools.partial(func, *args, **kwargs)
         )
     else:
         return await loop.run_in_executor(_thread_pool, func)
 
 
 # === Datetime операції ===
+
 
 async def async_datetime_now() -> datetime:
     """Асинхронне отримання поточного часу"""
@@ -161,11 +167,12 @@ async def async_time_time() -> float:
 
 # === Batch операції ===
 
+
 async def batch_process_async(
     items: List[Any],
     processor: AsyncFunc,
     batch_size: int = 100,
-    max_concurrent: int = 10
+    max_concurrent: int = 10,
 ) -> List[Any]:
     """
     Обробка елементів батчами з обмеженням конкурентності.
@@ -188,10 +195,9 @@ async def batch_process_async(
 
     # Обробка батчами
     for i in range(0, len(items), batch_size):
-        batch = items[i:i + batch_size]
+        batch = items[i : i + batch_size]
         batch_results = await asyncio.gather(
-            *[limited_processor(item) for item in batch],
-            return_exceptions=False
+            *[limited_processor(item) for item in batch], return_exceptions=False
         )
         results.extend(batch_results)
 
@@ -205,7 +211,7 @@ async def batch_process_async(
 async def gather_with_progress(
     *coroutines: Coroutine,
     callback: Optional[Callable[[int, int], None]] = None,
-    return_exceptions: bool = True
+    return_exceptions: bool = True,
 ) -> List[Any]:
     """
     Виконання кількох корутин з відстеженням прогресу.
@@ -240,7 +246,7 @@ async def gather_with_progress(
     # Виконання з індексами для збереження порядку
     indexed_results = await asyncio.gather(
         *[wrapped_coro(i, coro) for i, coro in enumerate(coroutines)],
-        return_exceptions=return_exceptions
+        return_exceptions=return_exceptions,
     )
 
     # Сортування за індексами
@@ -251,26 +257,28 @@ async def gather_with_progress(
 
 # === Декоратори ===
 
+
 def async_timed(func: AsyncFunc) -> AsyncFunc:
     """
     Декоратор для вимірювання часу виконання асинхронної функції.
     """
+
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
         start_time = time.time()
         try:
             result = await func(*args, **kwargs)
             elapsed = time.time() - start_time
-            logger.debug(f"{func.__name__} completed",
-                        duration=elapsed,
-                        args_count=len(args),
-                        kwargs_keys=list(kwargs.keys()))
+            logger.debug(
+                f"{func.__name__} completed",
+                duration=elapsed,
+                args_count=len(args),
+                kwargs_keys=list(kwargs.keys()),
+            )
             return result
         except Exception as e:
             elapsed = time.time() - start_time
-            logger.error(f"{func.__name__} failed",
-                        duration=elapsed,
-                        error=str(e))
+            logger.error(f"{func.__name__} failed", duration=elapsed, error=str(e))
             raise
 
     return wrapper
@@ -294,6 +302,7 @@ def async_lru_cache(maxsize: int = 128):
     """
     LRU кеш для асинхронних функцій.
     """
+
     def decorator(func: AsyncFunc) -> AsyncFunc:
         cache = {}
         cache_order = []
@@ -335,6 +344,7 @@ def async_lru_cache(maxsize: int = 128):
 
 # === Контекстні менеджери ===
 
+
 class AsyncTimer:
     """Контекстний менеджер для вимірювання часу асинхронних операцій"""
 
@@ -354,9 +364,7 @@ class AsyncTimer:
         if exc_type is None:
             logger.info(f"{self.name} completed", duration=elapsed)
         else:
-            logger.error(f"{self.name} failed",
-                        duration=elapsed,
-                        error=str(exc_val))
+            logger.error(f"{self.name} failed", duration=elapsed, error=str(exc_val))
 
     @property
     def elapsed(self) -> float:
@@ -371,7 +379,9 @@ class AsyncTimer:
 class AsyncBatcher:
     """Контекстний менеджер для батчування операцій"""
 
-    def __init__(self, flush_func: AsyncFunc, batch_size: int = 100, flush_interval: float = 1.0):
+    def __init__(
+        self, flush_func: AsyncFunc, batch_size: int = 100, flush_interval: float = 1.0
+    ):
         self.flush_func = flush_func
         self.batch_size = batch_size
         self.flush_interval = flush_interval
@@ -421,18 +431,20 @@ class AsyncBatcher:
 
 # === Утиліти для конвертації ===
 
+
 def make_async(sync_class: type) -> type:
     """
     Перетворює синхронний клас на асинхронний.
     Замінює всі методи на асинхронні версії.
     """
+
     class AsyncWrapper(sync_class):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
 
             # Обгортання всіх методів
             for name in dir(self):
-                if name.startswith('_'):
+                if name.startswith("_"):
                     continue
 
                 attr = getattr(self, name)
@@ -444,6 +456,7 @@ def make_async(sync_class: type) -> type:
 
 
 # === Cleanup при завершенні ===
+
 
 def cleanup_thread_pool():
     """Очищення thread pool при завершенні"""

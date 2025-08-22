@@ -43,36 +43,27 @@ class SecurityHeadersManager:
         headers = {
             # Захист від XSS
             "X-XSS-Protection": "1; mode=block",
-
             # Захист від clickjacking
             "X-Frame-Options": "DENY",
-
             # Заборона MIME type sniffing
             "X-Content-Type-Options": "nosniff",
-
             # Referrer Policy
             "Referrer-Policy": "strict-origin-when-cross-origin",
-
             # Permissions Policy (раніше Feature Policy)
             "Permissions-Policy": self._build_permissions_policy(),
-
             # Захист від DNS prefetch
             "X-DNS-Prefetch-Control": "off",
-
             # Вимкнення IE compatibility mode
             "X-UA-Compatible": "IE=edge",
-
             # Захист від download атак
             "X-Download-Options": "noopen",
-
             # Очікування Certificate Transparency
-            "Expect-CT": 'max-age=86400, enforce',
-
+            "Expect-CT": "max-age=86400, enforce",
             # Cross-Origin políticas
             "Cross-Origin-Embedder-Policy": "require-corp",
             "Cross-Origin-Opener-Policy": "same-origin",
             "Cross-Origin-Resource-Policy": "same-origin",
-            "X-Permitted-Cross-Domain-Policies": "none"
+            "X-Permitted-Cross-Domain-Policies": "none",
         }
 
         # HSTS тільки для production
@@ -99,7 +90,7 @@ class SecurityHeadersManager:
             "form-action": ["'self'"],
             "frame-ancestors": ["'none'"],
             "block-all-mixed-content": [],
-            "upgrade-insecure-requests": []
+            "upgrade-insecure-requests": [],
         }
 
     def _get_allowed_sources(self) -> Dict[str, List[str]]:
@@ -110,28 +101,24 @@ class SecurityHeadersManager:
                     "http://localhost:*",
                     "ws://localhost:*",
                     "http://127.0.0.1:*",
-                    "ws://127.0.0.1:*"
+                    "ws://127.0.0.1:*",
                 ],
                 "script-src": [
                     "http://localhost:*",
-                    "'unsafe-eval'"  # Для React DevTools
-                ]
+                    "'unsafe-eval'",  # Для React DevTools
+                ],
             },
             "production": {
                 "connect-src": [
                     "https://hub.tetra-core.website",
                     "wss://hub.tetra-core.website",
                     "https://tetra-core-hub-29fb6c8b7947.herokuapp.com",
-                    "wss://tetra-core-hub-29fb6c8b7947.herokuapp.com"
+                    "wss://tetra-core-hub-29fb6c8b7947.herokuapp.com",
                 ],
                 "script-src": [],
-                "style-src": [
-                    "https://fonts.googleapis.com"
-                ],
-                "font-src": [
-                    "https://fonts.gstatic.com"
-                ]
-            }
+                "style-src": ["https://fonts.googleapis.com"],
+                "font-src": ["https://fonts.gstatic.com"],
+            },
         }
 
         return sources.get(self.environment, sources["production"])
@@ -165,7 +152,7 @@ class SecurityHeadersManager:
             "sync-xhr": "()",
             "usb": "()",
             "web-share": "()",
-            "xr-spatial-tracking": "()"
+            "xr-spatial-tracking": "()",
         }
 
         return ", ".join(f"{key}={value}" for key, value in policies.items())
@@ -215,13 +202,13 @@ class SecurityHeadersManager:
                 csp_parts.append(directive)
 
         csp_header = CSP_DIRECTIVE_SEPARATOR.join(csp_parts)
-        
+
         # Перевірка довжини заголовка (HTTP headers мають обмеження ~8KB)
         if len(csp_header) > 8000:
             logger.warning("CSP header too long, truncating", length=len(csp_header))
             # Спрощуємо CSP для запобігання header overflow
             return self._build_simplified_csp_header(nonce)
-        
+
         return csp_header
 
     def _build_simplified_csp_header(self, nonce: Optional[str] = None) -> str:
@@ -239,7 +226,7 @@ class SecurityHeadersManager:
             "frame-src": ["'none'"],
             "base-uri": ["'self'"],
             "form-action": ["'self'"],
-            "frame-ancestors": ["'none'"]
+            "frame-ancestors": ["'none'"],
         }
 
         # Додавання nonce якщо потрібно
@@ -248,15 +235,13 @@ class SecurityHeadersManager:
 
         # Додавання connect-src для середовища
         if self.environment == "development":
-            simplified_directives["connect-src"].extend([
-                "ws://localhost:8000",
-                "http://localhost:8000"
-            ])
+            simplified_directives["connect-src"].extend(
+                ["ws://localhost:8000", "http://localhost:8000"]
+            )
         else:
-            simplified_directives["connect-src"].extend([
-                "https://hub.tetra-core.website",
-                "wss://hub.tetra-core.website"
-            ])
+            simplified_directives["connect-src"].extend(
+                ["https://hub.tetra-core.website", "wss://hub.tetra-core.website"]
+            )
 
         # Побудова header
         csp_parts = []
@@ -268,7 +253,9 @@ class SecurityHeadersManager:
 
         return CSP_DIRECTIVE_SEPARATOR.join(csp_parts)
 
-    def apply_headers(self, response: Response, request: Request, nonce: Optional[str] = None):
+    def apply_headers(
+        self, response: Response, request: Request, nonce: Optional[str] = None
+    ):
         """Застосування всіх security headers до відповіді"""
         # Базові headers
         for header, value in self.base_headers.items():
@@ -282,7 +269,7 @@ class SecurityHeadersManager:
             response.headers["Content-Security-Policy"] = csp
 
         # Заборона індексації конфіденційних сторінок
-        if request.url.path.startswith(('/dashboard', '/api')):
+        if request.url.path.startswith(("/dashboard", "/api")):
             response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive, nosnippet"
 
         # Додаткові headers для API endpoints
@@ -292,7 +279,9 @@ class SecurityHeadersManager:
 
         # Cache control для чутливих endpoints
         if request.url.path.startswith(("/api/auth/", "/api/admin/")):
-            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+            response.headers["Cache-Control"] = (
+                "no-store, no-cache, must-revalidate, private"
+            )
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"
 
@@ -329,20 +318,24 @@ class SecurityHeadersManager:
 
             # Логування violation
             csp_report = report_data.get("csp-report", {})
-            logger.warning("CSP Violation",
-                          document_uri=csp_report.get("document-uri"),
-                          violated_directive=csp_report.get("violated-directive"),
-                          blocked_uri=csp_report.get("blocked-uri"),
-                          source_file=csp_report.get("source-file"),
-                          line_number=csp_report.get("line-number"))
+            logger.warning(
+                "CSP Violation",
+                document_uri=csp_report.get("document-uri"),
+                violated_directive=csp_report.get("violated-directive"),
+                blocked_uri=csp_report.get("blocked-uri"),
+                source_file=csp_report.get("source-file"),
+                line_number=csp_report.get("line-number"),
+            )
 
             # Збереження для аналізу
-            self.csp_violations.append({
-                "timestamp": datetime.utcnow().isoformat(),
-                "report": csp_report,
-                "user_agent": request.headers.get("User-Agent"),
-                "ip": request.client.host if request.client else "unknown"
-            })
+            self.csp_violations.append(
+                {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "report": csp_report,
+                    "user_agent": request.headers.get("User-Agent"),
+                    "ip": request.client.host if request.client else "unknown",
+                }
+            )
 
             # Обмеження розміру кешу
             if len(self.csp_violations) > 1000:
@@ -366,7 +359,7 @@ class SecurityHeadersManager:
             "headers": {
                 name: value[:50] + "..." if len(value) > 50 else value
                 for name, value in self.base_headers.items()
-            }
+            },
         }
 
     def check_header_compatibility(self, user_agent: str) -> Dict[str, bool]:
@@ -379,7 +372,7 @@ class SecurityHeadersManager:
             "x_frame_options": True,
             "x_content_type_options": True,
             "permissions_policy": "chrome" in ua_lower or "firefox" in ua_lower,
-            "cross_origin_policies": "chrome" in ua_lower or "firefox" in ua_lower
+            "cross_origin_policies": "chrome" in ua_lower or "firefox" in ua_lower,
         }
 
         # Старі версії IE
@@ -399,7 +392,11 @@ security_headers = SecurityHeadersManager(environment=environment)
 async def security_headers_middleware(request: Request, call_next):
     """Middleware для додавання security headers до всіх відповідей"""
     # Генерація nonce для цього запиту
-    nonce = security_headers.generate_nonce() if request.url.path.endswith(".html") else None
+    nonce = (
+        security_headers.generate_nonce()
+        if request.url.path.endswith(".html")
+        else None
+    )
 
     # Додавання nonce до request state для використання в templates
     request.state.csp_nonce = nonce
@@ -433,7 +430,4 @@ async def get_headers_info():
 async def get_csp_violations(limit: int = 100):
     """Отримання останніх CSP violations"""
     violations = security_headers.csp_violations[-limit:]
-    return {
-        "total": len(security_headers.csp_violations),
-        "violations": violations
-    }
+    return {"total": len(security_headers.csp_violations), "violations": violations}
