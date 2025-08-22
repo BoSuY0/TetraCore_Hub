@@ -22,7 +22,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install bandit safety pip-audit gitleaks cyclonedx-bom
+          pip install bandit safety pip-audit cyclonedx-bom
 
       - name: Bandit (SAST)
         run: |
