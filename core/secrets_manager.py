@@ -652,11 +652,12 @@ class SecretsManager:
                         logger.info(f"Loaded secret from config: {secret_name}")
             except Exception as e:
                 logger.debug(f"Could not load from config: {e}")
-        
+
         # 3.5. Додати дефолтні значення для testing середовища
         env = os.getenv("ENVIRONMENT", "development").lower()
         if env == "testing":
             import secrets
+
             test_defaults = {
                 "JWT_SECRET_KEY": secrets.token_urlsafe(32),
                 "JWT_REFRESH_SECRET": secrets.token_urlsafe(32),
