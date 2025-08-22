@@ -54,7 +54,7 @@ flake8==7.0.0
 
 # JSON handling
 orjson>=3.10.0
-msgpack==1.1.0
+msgpack==1.1.1
 
 # Date/time utilities
 python-dateutil==2.8.2
