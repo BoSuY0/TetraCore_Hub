@@ -100,6 +100,14 @@ def _mask_text_patterns(text: str) -> str:
     # Mask credentials in URLs: scheme://user:pass@host -> scheme://***@host
     s = re.sub(r"://[^/\s]*@", "://***@", s)
 
+    # Mask Redis Cloud endpoint hostnames (avoid leaking instance IDs)
+    # Example: redis-14708.c78.eu-west-1-2.ec2.redns.redis-cloud.com:14708 -> <redis-host>:14708
+    s = re.sub(
+        r"(?i)\b(redis-[a-z0-9-]+\.[\w.-]*redis-cloud\.com)(:\d+)?\b",
+        r"<redis-host>\2",
+        s,
+    )
+
     # Mask email addresses
     s = re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "***@***", s)
     return s

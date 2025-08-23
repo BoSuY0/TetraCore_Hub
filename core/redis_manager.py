@@ -114,8 +114,11 @@ class RedisManager:
             self.logger.info("Redis Manager initialized successfully")
 
         except Exception as e:
-            self.logger.error("Failed to initialize Redis Manager", error=str(e))
-            self.last_error = str(e)
+            from core.logging.utils import _mask_text_patterns
+
+            masked = _mask_text_patterns(str(e))
+            self.logger.error("Failed to initialize Redis Manager", error=masked)
+            self.last_error = masked
             raise
 
     async def shutdown(self):

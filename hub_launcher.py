@@ -1275,7 +1275,13 @@ class StreamHubLauncher:
             await server.serve()
 
         except Exception as e:
-            self.logger.error(f"Помилка запуску backend: {e}")
+            try:
+                from core.logging.utils import _mask_text_patterns
+
+                masked = _mask_text_patterns(str(e))
+            except Exception:
+                masked = str(e)
+            self.logger.error(f"Помилка запуску backend: {masked}")
             raise
         finally:
             # Завжди викликаємо shutdown
