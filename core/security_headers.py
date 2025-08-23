@@ -22,7 +22,7 @@ CSP_DIRECTIVE_SEPARATOR = "; "
 
 class SecurityHeadersManager:
     """Менеджер для управління security headers"""
-
+    
     def __init__(self, environment: str = "production"):
         self.environment = environment
         self.nonce_cache: Set[str] = set()
@@ -124,34 +124,23 @@ class SecurityHeadersManager:
         return sources.get(self.environment, sources["production"])
 
     def _build_permissions_policy(self) -> str:
-        """Побудова Permissions Policy"""
+        """Побудова Permissions Policy (лише підтримувані директиви)"""
         policies = {
-            "accelerometer": "()",
-            "ambient-light-sensor": "()",
-            "autoplay": "(self)",
-            "battery": "()",
+            # Камера/мікрофон/геолокація — заборонені за замовчуванням
             "camera": "()",
-            "cross-origin-isolated": "()",
-            "display-capture": "()",
-            "document-domain": "()",
-            "encrypted-media": "()",
-            "execution-while-not-rendered": "()",
-            "execution-while-out-of-viewport": "()",
-            "fullscreen": "(self)",
-            "geolocation": "()",
-            "gyroscope": "()",
-            "keyboard-map": "()",
-            "magnetometer": "()",
             "microphone": "()",
-            "midi": "()",
-            "navigation-override": "()",
-            "payment": "()",
+            "geolocation": "()",
+            # Відтворення/медіа
+            "autoplay": "(self)",
+            "encrypted-media": "()",
             "picture-in-picture": "()",
+            "display-capture": "()",
+            # UX/поведінка
+            "fullscreen": "(self)",
             "publickey-credentials-get": "()",
             "screen-wake-lock": "()",
-            "sync-xhr": "()",
-            "usb": "()",
             "web-share": "()",
+            # WebXR (підтримується у Chromium)
             "xr-spatial-tracking": "()",
         }
 
@@ -171,14 +160,14 @@ class SecurityHeadersManager:
     def build_csp_header(self, nonce: Optional[str] = None) -> str:
         """Побудова CSP header"""
         directives = self.csp_directives.copy()
-
+        
         # Додавання nonce для скриптів якщо потрібно
         if nonce:
             script_src = directives.get("script-src", []).copy()
             script_src.append(f"'nonce-{nonce}'")
             directives["script-src"] = script_src
 
-        # Додавання дозволених джерел для середовища з дедуплікацією
+        # Додавання дозволених джерел для середовищ з дедуплікацією
         env_sources = self.allowed_sources
         for directive, sources in env_sources.items():
             if directive in directives:

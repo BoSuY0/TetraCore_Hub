@@ -419,6 +419,29 @@ class StreamHubLauncher:
                         ],
                     },
                     media_type="application/manifest+json",
+                    headers={"Cache-Control": "no-store"},
+                )
+
+            @app.get("/manifest.webmanifest")
+            async def manifest_webmanifest():
+                return JSONResponse(
+                    {
+                        "name": "TetraCore StreamHub Dashboard",
+                        "short_name": "StreamHub",
+                        "start_url": "/",
+                        "display": "standalone",
+                        "background_color": "#ffffff",
+                        "theme_color": "#3b82f6",
+                        "icons": [
+                            {
+                                "src": "/favicon.ico",
+                                "sizes": "16x16",
+                                "type": "image/x-icon",
+                            }
+                        ],
+                    },
+                    media_type="application/manifest+json",
+                    headers={"Cache-Control": "no-store"},
                 )
 
             # SPA підтримка - сервування index.html на корені та fallback для роутингу

@@ -21,6 +21,12 @@ export const LoginPage: React.FC = () => {
     await login(username, password);
   };
 
+  // Submit форми
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    await handleLogin();
+  };
+
   // Очищення помилки при зміні спроб входу
   useEffect(() => {
     clearError();
@@ -47,7 +53,7 @@ export const LoginPage: React.FC = () => {
         </div>
 
         {/* Форма для входу з логіном та паролем */}
-        <div className="mb-6">
+        <form className="mb-6" onSubmit={handleSubmit}>
           <div className="mb-4">
             <label htmlFor="username" className="block text-gray-300 mb-2">Логін</label>
             <input
@@ -57,6 +63,8 @@ export const LoginPage: React.FC = () => {
               onChange={(e) => setUsername(e.target.value)}
               className="w-full bg-gray-700 text-white rounded-lg py-3 px-4 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-transform duration-200 ease-out focus:scale-105"
               placeholder="Введіть логін"
+              autoComplete="username"
+              required
             />
           </div>
           <div className="mb-6">
@@ -68,10 +76,12 @@ export const LoginPage: React.FC = () => {
               onChange={(e) => setPassword(e.target.value)}
               className="w-full bg-gray-700 text-white rounded-lg py-3 px-4 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-transform duration-200 ease-out focus:scale-105"
               placeholder="Введіть пароль"
+              autoComplete="current-password"
+              required
             />
           </div>
           <button
-            onClick={handleLogin}
+            type="submit"
             disabled={auth.isLoading}
             className={`w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-6 rounded-lg transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${!username || !password ? 'animate-pulse' : ''}`}
           >
@@ -84,7 +94,7 @@ export const LoginPage: React.FC = () => {
             )}
           </button>
           {renderError()}
-        </div>
+        </form>
       </div>
     </div>
   );
