@@ -132,7 +132,7 @@ async def login(request: Request, credentials: LoginRequest):
     # Логування для діагностики
     logger.info(
         "Login attempt",
-        username=credentials.username,
+        username_present=bool(credentials.username),
         ip=client_ip,
         server_boot_id=SERVER_BOOT_ID[:8] + "...",
     )
@@ -233,7 +233,7 @@ async def login(request: Request, credentials: LoginRequest):
 
         logger.info(
             "Login successful",
-            username=credentials.username,
+            username_present=True,
             ip=client_ip,
             server_boot_id=SERVER_BOOT_ID[:8] + "...",
         )
@@ -282,7 +282,7 @@ async def login(request: Request, credentials: LoginRequest):
     else:
         logger.warning(
             "Login failed - invalid credentials",
-            username=credentials.username,
+            username_present=bool(credentials.username),
             ip=client_ip,
         )
         # Застосувати lockout якщо перевищено ліміт

@@ -446,29 +446,29 @@ def main():
         if args.list:
             # Показати список секретів
             secrets = provider.list_secrets()
-            print("Доступні секрети:")
+            logger.info("Доступні секрети:")
             for secret in sorted(secrets):
-                print(f"  - {secret}")
+                logger.info("  - %s", secret)
 
         elif args.rotate_all:
             # Ротувати всі критичні секрети
             if args.dry_run:
-                print("DRY RUN: Будуть ротовані наступні секрети:")
+                logger.info("DRY RUN: Будуть ротовані наступні секрети:")
                 for key in CRITICAL_SECRETS:
-                    print(f"  - {key}")
+                    logger.info("  - %s", key)
             else:
-                print("Ротація критичних секретів...")
+                logger.info("Ротація критичних секретів...")
                 results = rotator.rotate_all_critical()
 
-                print("\nРезультати ротації:")
+                logger.info("Результати ротації:")
                 for key, success in results.items():
                     status = "✓" if success else "✗"
-                    print(f"  {status} {key}")
+                    logger.info("  %s %s", status, key)
 
                 # Показати підсумок
                 successful = sum(1 for s in results.values() if s)
                 total = len(results)
-                print(f"\nУспішно ротовано: {successful}/{total}")
+                logger.info("Успішно ротовано: %s/%s", successful, total)
 
                 if successful < total:
                     sys.exit(1)
@@ -476,37 +476,36 @@ def main():
         elif args.rotate_key:
             # Ротувати конкретний ключ
             if args.dry_run:
-                print(f"DRY RUN: Буде ротовано ключ '{args.rotate_key}'")
+                logger.info("DRY RUN: Буде ротовано ключ '%s'", args.rotate_key)
                 new_value = rotator.generate_secret(args.secret_type)
-                print(f"Приклад нового значення: {new_value[:8]}...")
+                logger.info("Приклад нового значення: %s...", new_value[:8])
             else:
-                print(f"Ротація ключа '{args.rotate_key}'...")
+                logger.info("Ротація ключа '%s'...", args.rotate_key)
                 success, new_value = rotator.rotate_secret(
                     args.rotate_key, args.secret_type
                 )
 
                 if success:
-                    print(f"✓ Ключ успішно ротовано")
-                    print(f"Нове значення: {new_value[:8]}...")
+                    logger.info("✓ Ключ успішно ротовано")
+                    logger.info("Нове значення: %s...", new_value[:8])
                 else:
-                    print(f"✗ Помилка ротації ключа")
+                    logger.error("✗ Помилка ротації ключа")
                     sys.exit(1)
 
         elif args.verify:
             # Перевірити ротацію
             old_value = input("Введіть старе значення для перевірки: ")
             if rotator.verify_rotation(args.verify, old_value):
-                print("✓ Ротація підтверджена - значення змінено")
+                logger.info("✓ Ротація підтверджена - значення змінено")
             else:
-                print("✗ Ротація не підтверджена")
+                logger.error("✗ Ротація не підтверджена")
                 sys.exit(1)
 
         else:
             parser.print_help()
 
     except Exception as e:
-        logger.error(f"Помилка: {e}")
-        print(f"✗ Помилка: {e}")
+        logger.error("Помилка: %s", e)
         sys.exit(1)
 
 

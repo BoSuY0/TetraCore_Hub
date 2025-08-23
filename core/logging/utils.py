@@ -27,6 +27,19 @@ SENSITIVE_KEYS = {
     "secret",
     "cookie",
     "set-cookie",
+    # connection strings
+    "redis_url",
+    "database_url",
+    "db_url",
+    "dsn",
+    "connection_string",
+    # PII keys
+    "username",
+    "user",
+    "user_id",
+    "email",
+    "session_id",
+    "csrf_token",
 }
 
 
@@ -83,6 +96,12 @@ def _mask_text_patterns(text: str) -> str:
     s = re.sub(r"(?i)\btoken=([^\s&]+)", r"***=\1", s)
     # password=secret -> ***=*** (both masked)
     s = re.sub(r"(?i)\bpassword=[^\s&]+", "***=***", s)
+
+    # Mask credentials in URLs: scheme://user:pass@host -> scheme://***@host
+    s = re.sub(r"://[^/\s]*@", "://***@", s)
+
+    # Mask email addresses
+    s = re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "***@***", s)
     return s
 
 
@@ -132,6 +151,9 @@ def simple_console_renderer(logger, method_name, event_dict):
     Додаткові поля від stdlib/LogRecord (на кшталт _record, pathname, lineno)
     і службові ключі structlog не виводимо.
     """
+    # Apply masking to entire event dict first
+    event_dict = mask_event_dict(event_dict)
+
     timestamp = event_dict.pop("timestamp", "")
     level = (event_dict.pop("level", method_name) or "").upper()
     event = event_dict.pop("event", "")
@@ -181,6 +203,8 @@ def simple_console_renderer(logger, method_name, event_dict):
 
     # Можливий сформатований traceback від format_exc_info
     exception_text = event_dict.pop("exception", None)
+    if isinstance(exception_text, str):
+        exception_text = _mask_text_patterns(exception_text)
 
     # ANSI стилі
     RESET = "\x1b[0m"

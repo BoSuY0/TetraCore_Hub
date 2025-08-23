@@ -12,6 +12,7 @@ import time
 import sys
 import os
 from typing import List, Dict, Any, Callable
+import structlog
 import statistics
 from datetime import datetime
 import tempfile
@@ -42,7 +43,7 @@ class AsyncBenchmark:
     async def initialize(self):
         """Ініціалізація бенчмарку"""
         await self.optimizer.initialize()
-        print("=== Асинхронний бенчмарк TetraCore Stream Hub ===\n")
+        structlog.get_logger(__name__).info("async_benchmark_start")
 
     async def shutdown(self):
         """Завершення бенчмарку"""
@@ -66,7 +67,7 @@ class AsyncBenchmark:
 
     async def benchmark_json_operations(self, size: int = 10000):
         """Порівняння JSON операцій"""
-        print(f"📊 JSON операції (розмір: {size} елементів)")
+        structlog.get_logger(__name__).info("json_ops", size=size)
 
         # Генерація тестових даних
         data = {
@@ -97,15 +98,19 @@ class AsyncBenchmark:
         _, async_loads_time = await self.measure_async_time(async_json_loads(json_str))
 
         # Результати
-        print(f"  Серіалізація:")
-        print(f"    Синхронна:  {sync_dumps_time:.4f}с")
-        print(f"    Асинхронна: {async_dumps_time:.4f}с")
-        print(f"    Покращення: {sync_dumps_time/async_dumps_time:.2f}x")
+        structlog.get_logger(__name__).info(
+            "json_serialize",
+            sync=round(sync_dumps_time, 4),
+            async_=round(async_dumps_time, 4),
+            improvement=round(sync_dumps_time / async_dumps_time, 2),
+        )
 
-        print(f"  Десеріалізація:")
-        print(f"    Синхронна:  {sync_loads_time:.4f}с")
-        print(f"    Асинхронна: {async_loads_time:.4f}с")
-        print(f"    Покращення: {sync_loads_time/async_loads_time:.2f}x\n")
+        structlog.get_logger(__name__).info(
+            "json_deserialize",
+            sync=round(sync_loads_time, 4),
+            async_=round(async_loads_time, 4),
+            improvement=round(sync_loads_time / async_loads_time, 2),
+        )
 
         self.results["json"] = {
             "dumps": {"sync": sync_dumps_time, "async": async_dumps_time},
@@ -116,7 +121,7 @@ class AsyncBenchmark:
 
     async def benchmark_file_operations(self, size_mb: int = 10):
         """Порівняння файлових операцій"""
-        print(f"📁 Файлові операції (розмір: {size_mb}MB)")
+        structlog.get_logger(__name__).info("file_ops", size_mb=size_mb)
 
         # Генерація тестових даних
         content = "x" * (size_mb * 1024 * 1024)
@@ -151,15 +156,19 @@ class AsyncBenchmark:
             )
 
             # Результати
-            print(f"  Читання:")
-            print(f"    Синхронне:  {sync_read_time:.4f}с")
-            print(f"    Асинхронне: {async_read_time:.4f}с")
-            print(f"    Покращення: {sync_read_time/async_read_time:.2f}x")
+            structlog.get_logger(__name__).info(
+                "file_read",
+                sync=round(sync_read_time, 4),
+                async_=round(async_read_time, 4),
+                improvement=round(sync_read_time / async_read_time, 2),
+            )
 
-            print(f"  Запис:")
-            print(f"    Синхронний:  {sync_write_time:.4f}с")
-            print(f"    Асинхронний: {async_write_time:.4f}с")
-            print(f"    Покращення: {sync_write_time/async_write_time:.2f}x\n")
+            structlog.get_logger(__name__).info(
+                "file_write",
+                sync=round(sync_write_time, 4),
+                async_=round(async_write_time, 4),
+                improvement=round(sync_write_time / async_write_time, 2),
+            )
 
             self.results["file"] = {
                 "read": {"sync": sync_read_time, "async": async_read_time},
@@ -178,7 +187,7 @@ class AsyncBenchmark:
 
     async def benchmark_concurrent_operations(self, num_tasks: int = 100):
         """Порівняння конкурентних операцій"""
-        print(f"⚡ Конкурентні операції ({num_tasks} задач)")
+        structlog.get_logger(__name__).info("concurrency_ops", tasks=num_tasks)
 
         # Симуляція I/O операції
         def blocking_io_operation(n: int):
@@ -220,11 +229,14 @@ class AsyncBenchmark:
         optimizer_time = time.time() - start
 
         # Результати
-        print(f"  Синхронне виконання:       {sync_time:.4f}с")
-        print(f"  Асинхронне (послідовно):   {async_seq_time:.4f}с")
-        print(f"  Асинхронне (паралельно):   {async_par_time:.4f}с")
-        print(f"  AsyncOptimizer:            {optimizer_time:.4f}с")
-        print(f"  Покращення:                {sync_time/async_par_time:.2f}x\n")
+        structlog.get_logger(__name__).info(
+            "concurrency_results",
+            sync=round(sync_time, 4),
+            async_seq=round(async_seq_time, 4),
+            async_par=round(async_par_time, 4),
+            optimizer=round(optimizer_time, 4),
+            improvement=round(sync_time / async_par_time, 2),
+        )
 
         self.results["concurrent"] = {
             "sync": sync_time,
@@ -237,7 +249,7 @@ class AsyncBenchmark:
 
     async def benchmark_background_tasks(self, num_tasks: int = 50):
         """Бенчмарк фонових задач"""
-        print(f"🔧 Фонові задачі ({num_tasks} задач)")
+        structlog.get_logger(__name__).info("background_tasks", tasks=num_tasks)
 
         # CPU-інтенсивна функція
         def cpu_intensive_task(n: int):
@@ -288,12 +300,15 @@ class AsyncBenchmark:
         # Статистика
         stats = self.optimizer.get_stats()
 
-        print(f"  Час створення задач:       {creation_time:.4f}с")
-        print(f"  Час виконання:             {execution_time:.4f}с")
-        print(f"  Загальний час:             {creation_time + execution_time:.4f}с")
-        print(f"  Виконано задач:            {stats['tasks_completed']}")
-        print(f"  Cache hits:                {stats['cache_hits']}")
-        print(f"  Cache misses:              {stats['cache_misses']}\n")
+        structlog.get_logger(__name__).info(
+            "background_results",
+            creation=round(creation_time, 4),
+            execution=round(execution_time, 4),
+            total=round(creation_time + execution_time, 4),
+            tasks_completed=stats["tasks_completed"],
+            cache_hits=stats["cache_hits"],
+            cache_misses=stats["cache_misses"],
+        )
 
         self.results["background_tasks"] = {
             "creation_time": creation_time,
@@ -306,7 +321,7 @@ class AsyncBenchmark:
 
     async def benchmark_batching(self, num_items: int = 1000):
         """Бенчмарк батчування операцій"""
-        print(f"📦 Батчування операцій ({num_items} елементів)")
+        structlog.get_logger(__name__).info("batching_ops", items=num_items)
 
         results_storage = []
 
@@ -330,9 +345,12 @@ class AsyncBenchmark:
         await batch_process_async(items, lambda batch: save_items(batch), batch_size=50)
         batch_time = time.time() - start
 
-        print(f"  Без батчування:    {no_batch_time:.4f}с")
-        print(f"  З батчуванням:     {batch_time:.4f}с")
-        print(f"  Покращення:        {no_batch_time/batch_time:.2f}x\n")
+        structlog.get_logger(__name__).info(
+            "batching_results",
+            no_batch=round(no_batch_time, 4),
+            with_batch=round(batch_time, 4),
+            improvement=round(no_batch_time / batch_time, 2),
+        )
 
         self.results["batching"] = {"no_batch": no_batch_time, "with_batch": batch_time}
 
@@ -340,37 +358,45 @@ class AsyncBenchmark:
 
     def print_summary(self):
         """Виведення підсумкового звіту"""
-        print("=" * 60)
-        print("📈 ПІДСУМОК БЕНЧМАРКУ")
-        print("=" * 60)
+        structlog.get_logger(__name__).info("benchmark_summary_header")
 
         total_improvements = []
 
         for category, data in self.results.items():
-            print(f"\n{category.upper()}:")
+            structlog.get_logger(__name__).info("category", category=category.upper())
 
             if category in ["json", "file"]:
                 for operation, times in data.items():
                     if "sync" in times and "async" in times:
                         improvement = times["sync"] / times["async"]
                         total_improvements.append(improvement)
-                        print(f"  {operation}: {improvement:.2f}x покращення")
+                        structlog.get_logger(__name__).info(
+                            "category_op",
+                            operation=operation,
+                            improvement=round(improvement, 2),
+                        )
 
             elif category == "concurrent":
                 improvement = data["sync"] / data["async_parallel"]
                 total_improvements.append(improvement)
-                print(f"  Паралельне виконання: {improvement:.2f}x покращення")
+                structlog.get_logger(__name__).info(
+                    "category_parallel", improvement=round(improvement, 2)
+                )
 
             elif category == "batching":
                 improvement = data["no_batch"] / data["with_batch"]
                 total_improvements.append(improvement)
-                print(f"  Батчування: {improvement:.2f}x покращення")
+                structlog.get_logger(__name__).info(
+                    "category_batching", improvement=round(improvement, 2)
+                )
 
         if total_improvements:
             avg_improvement = statistics.mean(total_improvements)
-            print(f"\n🎯 Середнє покращення продуктивності: {avg_improvement:.2f}x")
+            structlog.get_logger(__name__).info(
+                "avg_improvement", avg=round(avg_improvement, 2)
+            )
 
-        print("\n" + "=" * 60)
+        structlog.get_logger(__name__).info("benchmark_summary_footer")
 
 
 async def main():

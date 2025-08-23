@@ -44,11 +44,6 @@
       "description": "TLS URL для Redis (якщо доступний, має пріоритет над REDIS_URL)",
       "required": false
     },
-    "ALLOW_START_WITHOUT_REDIS": {
-      "description": "Дозволити запуск без Redis при тимчасових збоях",
-      "value": "true",
-      "required": false
-    },
     "AUTH_TOKEN": {
       "description": "Токен аутентифікації (опціонально)",
       "required": false

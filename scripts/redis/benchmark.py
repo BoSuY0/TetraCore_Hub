@@ -16,6 +16,7 @@ from datetime import datetime
 from typing import Dict, List, Any, Tuple
 from dataclasses import dataclass, asdict
 import structlog
+from typing import Any
 import click
 
 # Додаємо шлях до кореневої директорії проекту
@@ -24,6 +25,19 @@ sys.path.append(
 )
 
 from config import Settings
+
+# Кастомне логування для заміни print
+logger = structlog.get_logger(__name__)
+
+
+def print(*args: Any, **kwargs: Any):  # type: ignore[override]
+    try:
+        msg = " ".join(str(a) for a in args)
+    except Exception:
+        msg = "".join(map(str, args))
+    logger.info(msg)
+
+
 from core.redis_manager import RedisManager
 
 
@@ -442,7 +456,14 @@ class RedisBenchmark:
         print("REDIS BENCHMARK RESULTS")
         print("=" * 100)
         print(f"Redis Mode: {self.redis_manager.redis_mode}")
-        print(f"Redis URL: {self.settings.redis_url}")
+        # Маскуємо можливий пароль у URL
+        safe_url = self.settings.redis_url
+        try:
+            if safe_url and "@" in safe_url:
+                safe_url = safe_url.split("://")[0] + "://***@" + safe_url.split("@")[1]
+        except Exception:
+            safe_url = "<hidden>"
+        print(f"Redis URL: {safe_url}")
         print(f"Pipeline Enabled: {self.redis_manager.pipeline_enabled}")
         print("=" * 100)
 
@@ -499,7 +520,7 @@ class RedisBenchmark:
         data = {
             "timestamp": datetime.utcnow().isoformat(),
             "redis_mode": self.redis_manager.redis_mode,
-            "redis_url": self.settings.redis_url,
+            "redis_url": safe_url,
             "pipeline_enabled": self.redis_manager.pipeline_enabled,
             "results": [asdict(r) for r in self.results],
         }

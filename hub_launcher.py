@@ -1788,7 +1788,23 @@ def main():
     except KeyboardInterrupt:
         launcher.logger.info("👋 Зупинено користувачем")
     except Exception as e:
-        launcher.logger.exception(f"❌ Помилка: {e}")
+        # Акуратний вихід без стек-трейсу з маскуванням
+        from core.logging.utils import _mask_text_patterns
+
+        err_text = _mask_text_patterns(str(e))
+        launcher.logger.error(f"❌ Помилка: {err_text}")
+        if any(
+            k in err_text.lower()
+            for k in [
+                "redis",
+                "gaierror",
+                "connectionerror",
+                "name or service not known",
+            ]
+        ):
+            launcher.logger.error(
+                "🔴 Redis недоступний або неправильно налаштований. Перевірте REDIS_URL/мережу/DNS. Завершення роботи."
+            )
         sys.exit(1)
 
 

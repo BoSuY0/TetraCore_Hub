@@ -444,7 +444,11 @@ class RedisManager:
             self.logger.info("✅ Redis connection successful")
 
         except Exception as e:
-            self.logger.error("❌ Redis connection test failed", error=str(e))
+            from core.logging.utils import _mask_text_patterns
+
+            self.logger.error(
+                "❌ Redis connection test failed", error=_mask_text_patterns(str(e))
+            )
 
             # Якщо ми в режимі sentinel і є REDIS_URL — пробуємо fallback на standalone
             if getattr(self, "redis_mode", "") == "sentinel" and getattr(
@@ -462,7 +466,7 @@ class RedisManager:
                 except Exception as fb_e:
                     self.logger.warning(
                         "Fallback to standalone failed, considering dev/test bypass",
-                        error=str(fb_e),
+                        error=_mask_text_patterns(str(fb_e)),
                     )
 
             # У dev/testing не валимо ініціалізацію — працюємо без Redis
@@ -1079,6 +1083,18 @@ class RedisManager:
 
     def get_stats(self) -> Dict[str, Any]:
         """Отримання статистики Redis менеджера"""
+        # Маскуємо redis_url, щоб уникнути витоку креденшалів у логах/UI
+        safe_url = None
+        try:
+            full = self.settings.redis_url or ""
+            if "@" in full:
+                safe_url = (
+                    full.split("@")[0].split("://")[0] + "://***@" + full.split("@")[1]
+                )
+            else:
+                safe_url = full
+        except Exception:
+            safe_url = "<hidden>"
         return {
             "is_connected": self.is_connected,
             "is_running": self.is_running,
@@ -1089,7 +1105,7 @@ class RedisManager:
             "connection_errors": self.connection_errors,
             "last_error": self.last_error,
             "cached_messages": len(self.message_cache),
-            "redis_url": self.settings.redis_url,
+            "redis_url": safe_url,
             "max_connections": self.settings.redis_max_connections,
         }
 

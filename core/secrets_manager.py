@@ -662,7 +662,9 @@ class SecretsManager:
                     value = os.getenv(secret_name)
                     if value:
                         self._secrets_cache[secret_name] = value
-                        logger.info(f"Loaded secret from ENV fallback: {secret_name}")
+                        logger.info(
+                            "Loaded secret from ENV fallback", secret_name=secret_name
+                        )
 
         # 3. Спробувати завантажити з config для development
         if len(self._secrets_cache) < len(
@@ -678,7 +680,9 @@ class SecretsManager:
                 for secret_name, value in config_secrets.items():
                     if secret_name not in self._secrets_cache and value:
                         self._secrets_cache[secret_name] = value
-                        logger.info(f"Loaded secret from config: {secret_name}")
+                        logger.info(
+                            "Loaded secret from config", secret_name=secret_name
+                        )
             except Exception as e:
                 logger.debug(f"Could not load from config: {e}")
 

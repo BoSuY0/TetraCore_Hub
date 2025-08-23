@@ -10,11 +10,11 @@ from typing import Dict, Any, Optional, List, Set
 from enum import Enum
 from pydantic import BaseModel, Field
 import uuid
-import logging
+import structlog
 
 from models.messages import ClientType, TaskStatus
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class ConnectionStatus(str, Enum):

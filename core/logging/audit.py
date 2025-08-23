@@ -7,6 +7,7 @@ import json
 from datetime import datetime
 from typing import Any, Dict, Optional
 import os
+from .utils import PIIMaskingFilter, mask_event_dict, _mask_text_patterns
 
 # Створюємо окремий логер для аудиту
 audit_logger = logging.getLogger("audit")
@@ -33,9 +34,19 @@ class AuditFilter(logging.Filter):
     """Фільтр для додавання додаткових даних до логів."""
 
     def filter(self, record):
-        # Додаємо extra_data якщо є
+        # Додаємо і маскуємо extra_data якщо є
         if hasattr(record, "extra_data"):
-            record.extra_data = json.dumps(record.extra_data, ensure_ascii=False)
+            try:
+                extra = record.extra_data
+                if isinstance(extra, dict):
+                    extra = mask_event_dict(extra)
+                    record.extra_data = json.dumps(extra, ensure_ascii=False)
+                elif isinstance(extra, str):
+                    record.extra_data = _mask_text_patterns(extra)
+                else:
+                    record.extra_data = json.dumps({}, ensure_ascii=False)
+            except Exception:
+                record.extra_data = json.dumps({}, ensure_ascii=False)
         else:
             record.extra_data = "{}"
         return True
@@ -46,6 +57,12 @@ AuditFilter()  # no-op create (kept for parity)
 # Додаємо фільтр на handler (щоб formatter мав extra_data)
 try:
     audit_handler.addFilter(AuditFilter())
+except Exception:
+    pass
+
+# Додаємо PII/secret маскування і для аудиту
+try:
+    audit_handler.addFilter(PIIMaskingFilter())
 except Exception:
     pass
 

@@ -28,6 +28,17 @@ from pathlib import Path
 from typing import Iterable, List, Dict, Any
 import urllib.request
 import urllib.error
+import structlog
+
+logger = structlog.get_logger(__name__)
+
+
+def print(*args: Any, **kwargs: Any):
+    try:
+        msg = " ".join(str(a) for a in args)
+    except Exception:
+        msg = "".join(map(str, args))
+    logger.info(msg)
 
 
 DEFAULT_EXCLUDES = {

@@ -109,23 +109,10 @@ class StreamHub:
                 await self.redis_manager.initialize()
                 self.logger.info("✅ Redis manager initialized")
             except Exception as e:
-                # У продакшені дозволяємо старт без Redis, якщо явно дозволено конфігом
-                if (
-                    self.settings.is_development()
-                    or self.settings.is_testing()
-                    or getattr(self.settings, "allow_start_without_redis", False)
-                ):
-                    env = (
-                        "development"
-                        if self.settings.is_development()
-                        else ("testing" if self.settings.is_testing() else "production")
-                    )
+                # У dev/testing продовжуємо без Redis, у проді піднімемо помилку (лаунчер обробить коректно)
+                if self.settings.is_development() or self.settings.is_testing():
                     self.logger.warning(
-                        "Redis init failed, continuing without Redis",
-                        environment=env,
-                        allow_start_without_redis=getattr(
-                            self.settings, "allow_start_without_redis", False
-                        ),
+                        "Redis init failed in dev/testing, continuing without Redis",
                         error=str(e),
                     )
                     self.redis_manager = None

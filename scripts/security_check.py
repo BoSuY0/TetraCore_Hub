@@ -1,3 +1,18 @@
+import structlog
+from typing import Any
+
+# Кастомний логер замість print
+logger = structlog.get_logger(__name__)
+
+
+def print(*args: Any, **kwargs: Any):  # type: ignore[override]
+    try:
+        msg = " ".join(str(a) for a in args)
+    except Exception:
+        msg = "".join(map(str, args))
+    logger.info(msg)
+
+
 #!/usr/bin/env python3
 """
 Security Check Script for TetraCore StreamHub
