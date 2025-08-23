@@ -72,10 +72,16 @@ STRICT_SESSION_VALIDATION = os.getenv(
 # Це дозволяє інвалідувати всі токени після рестарту
 SERVER_BOOT_ID = str(uuid.uuid4())
 
-# Конфігурація для паролів
-pwd_context = CryptContext(
-    schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=BCRYPT_ROUNDS
-)
+# Придушуємо попередження від passlib про bcrypt версію
+# Це відоме некритичне попередження через зміни в структурі bcrypt модуля
+import warnings
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", message=".*error reading bcrypt version.*")
+    warnings.filterwarnings("ignore", category=UserWarning, module="passlib")
+    # Конфігурація для паролів
+    pwd_context = CryptContext(
+        schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=BCRYPT_ROUNDS
+    )
 security = HTTPBearer()
 
 
@@ -219,7 +225,10 @@ class AuthManager:
 
     def hash_password(self, password: str) -> str:
         """Хешування пароля з використанням bcrypt"""
-        return pwd_context.hash(password)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=".*error reading bcrypt version.*")
+            warnings.filterwarnings("ignore", category=UserWarning, module="passlib")
+            return pwd_context.hash(password)
 
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:
         """Перевірка пароля"""
@@ -233,7 +242,12 @@ class AuthManager:
             ):
                 try:
                     method_used = "passlib"
-                    ok = pwd_context.verify(plain_password, hashed_password)
+                    # Придушуємо попередження про bcrypt версію під час верифікації
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings("ignore", message=".*error reading bcrypt version.*")
+                        warnings.filterwarnings("ignore", message=".*detected 'bcrypt' backend.*")
+                        warnings.filterwarnings("ignore", message=".*backend lacks.*")
+                        ok = pwd_context.verify(plain_password, hashed_password)
                     logger.debug(
                         "Password verify executed",
                         method=method_used,
