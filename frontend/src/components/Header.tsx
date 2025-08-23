@@ -212,11 +212,6 @@ export const Header: React.FC<HeaderProps> = ({
                         size="sm"
                         className="text-purple-500 flex-shrink-0"
                       />
-                    ) : auth.user.role === "user" ? (
-                      <UsersIcon
-                        size="sm"
-                        className="text-blue-500 flex-shrink-0"
-                      />
                     ) : (
                       <UsersIcon
                         size="sm"
@@ -224,11 +219,7 @@ export const Header: React.FC<HeaderProps> = ({
                       />
                     )}
                     <span className="text-xs text-slate-500 truncate">
-                      {auth.user.role === "admin"
-                        ? "Адміністратор"
-                        : auth.user.role === "user"
-                          ? "Користувач"
-                          : "Глядач"}
+                      {auth.user.role === "admin" ? "Адміністратор" : ""}
                     </span>
                   </div>
                 </div>
@@ -275,13 +266,6 @@ export const Header: React.FC<HeaderProps> = ({
                               />
                               <span className="text-xs font-medium text-purple-700">
                                 Адміністратор
-                              </span>
-                            </div>
-                          ) : auth.user.role === "user" ? (
-                            <div className="flex items-center space-x-1 px-2 py-1 bg-blue-100 rounded-full">
-                              <UsersIcon size="sm" className="text-blue-600" />
-                              <span className="text-xs font-medium text-blue-700">
-                                Користувач
                               </span>
                             </div>
                           ) : (

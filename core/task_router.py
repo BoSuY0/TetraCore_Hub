@@ -203,16 +203,18 @@ class TaskRouter:
                 self.logger.warning(f"Не вдалося ініціалізувати Redis: {e}")
                 self.redis_client = None
 
-            # Запуск фонових завдань з урахуванням тест-середовища
+            # Запуск фонових завдань керується лише DISABLE_BACKGROUND_TASKS
             import os
 
-            disable_bg = bool(os.getenv("PYTEST_CURRENT_TEST")) or os.getenv(
-                "DISABLE_BACKGROUND_TASKS", ""
-            ).lower() in ("1", "true", "yes")
+            disable_bg = os.getenv("DISABLE_BACKGROUND_TASKS", "").lower() in (
+                "1",
+                "true",
+                "yes",
+            )
             if disable_bg:
                 self.timeout_task = None
                 self.cleanup_task = None
-                self.logger.debug("TaskRouter background loops disabled (test env)")
+                self.logger.debug("TaskRouter background loops disabled by config")
             else:
                 # Запускаємо фонового монітора таймаутів та очистки
                 self.timeout_task = asyncio.create_task(self._timeout_monitor())

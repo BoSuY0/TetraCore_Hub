@@ -5,14 +5,14 @@ import { LoadingIcon, ErrorIcon } from "./Icons";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
-  requiredRole?: "admin" | "user" | "viewer";
+  requiredRole?: "admin";
   requiredPermissions?: string[];
   fallback?: React.ReactNode;
 }
 
 export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   children,
-  requiredRole = "viewer",
+  requiredRole = "admin",
   requiredPermissions = [],
   fallback,
 }) => {
@@ -65,17 +65,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
 
 // Функція перевірки ролі
 const hasRequiredRole = (userRole: string, requiredRole: string): boolean => {
-  const roleHierarchy = {
-    viewer: 0,
-    user: 1,
-    admin: 2,
-  };
-
-  const userLevel = roleHierarchy[userRole as keyof typeof roleHierarchy] ?? -1;
-  const requiredLevel =
-    roleHierarchy[requiredRole as keyof typeof roleHierarchy] ?? 999;
-
-  return userLevel >= requiredLevel;
+  return userRole === "admin";
 };
 
 // Функція перевірки дозволів
@@ -183,12 +173,10 @@ const AccessDeniedPage: React.FC<AccessDeniedPageProps> = ({
 // Функції для відображення назв ролей та дозволів
 const getRoleDisplayName = (role: string): string => {
   const roleNames = {
-    viewer: "Глядач",
-    user: "Користувач",
     admin: "Адміністратор",
-  };
+  } as const;
 
-  return roleNames[role as keyof typeof roleNames] || role;
+  return (roleNames as any)[role] || role;
 };
 
 const getPermissionDisplayName = (permission: string): string => {

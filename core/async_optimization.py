@@ -60,10 +60,14 @@ class AsyncOptimizer:
         self.logger = structlog.get_logger(__name__)
         self.max_workers = max_workers
         self.max_tasks = max_tasks
-        # Відключення фон-петель у тест-середовищі або за прапором
-        self.disable_background_tasks = bool(
-            os.getenv("PYTEST_CURRENT_TEST")
-        ) or os.getenv("DISABLE_BACKGROUND_TASKS", "").lower() in ("1", "true", "yes")
+        # Керується виключно прапором DISABLE_BACKGROUND_TASKS (без тест-специфіки)
+        self.disable_background_tasks = os.getenv(
+            "DISABLE_BACKGROUND_TASKS", ""
+        ).lower() in (
+            "1",
+            "true",
+            "yes",
+        )
 
         # Пули для виконання задач
         self.thread_pool = ThreadPoolExecutor(max_workers=max_workers)
@@ -103,7 +107,7 @@ class AsyncOptimizer:
         )
 
         if self.disable_background_tasks:
-            self.logger.debug("AsyncOptimizer background tasks disabled (test env)")
+            self.logger.debug("AsyncOptimizer background tasks disabled by config")
             self.worker_task = None
             self.cache_cleanup_task = None
         else:
@@ -204,7 +208,7 @@ class AsyncOptimizer:
 
         self.stats["cache_misses"] += 1
 
-        # Якщо фон-петлі вимкнені (тести) — виконуємо відразу, без воркера
+        # Якщо фон-петлі вимкнені — виконуємо відразу, без воркера
         if self.disable_background_tasks:
             try:
                 if asyncio.iscoroutinefunction(func):
@@ -227,7 +231,7 @@ class AsyncOptimizer:
                 self.result_cache[task_id] = result
                 self.stats["tasks_completed"] += 1
                 self.logger.debug(
-                    "Background task executed inline (test mode)", task_id=task_id
+                    "Background task executed inline (config mode)", task_id=task_id
                 )
                 return task_id
             except Exception as e:
@@ -245,7 +249,7 @@ class AsyncOptimizer:
                 self.completed_tasks[task_id] = bt
                 self.stats["tasks_failed"] += 1
                 self.logger.error(
-                    "Inline background task failed (test mode)",
+                    "Inline background task failed (config mode)",
                     task_id=task_id,
                     error=str(e),
                 )

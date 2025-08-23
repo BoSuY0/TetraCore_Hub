@@ -44,22 +44,14 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 15
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 ALGORITHM = "HS256"
 # Bcrypt cost factor (rounds) — налаштовується через змінну оточення BCRYPT_ROUNDS
-# У тестовому середовищі автоматично знижуємо cost для пришвидшення (уникаємо зависань)
+# Без жодних спеціальних гілок для тестів: керується виключно конфігурацією
 try:
     _DEFAULT_BCRYPT_ROUNDS = int(os.getenv("BCRYPT_ROUNDS", "12"))
 except (ValueError, TypeError):
     _DEFAULT_BCRYPT_ROUNDS = 12
 
-if os.getenv("ENVIRONMENT", "development").lower() in (
-    "test",
-    "testing",
-):
-    # У тестовому середовищі використовуємо мінімально рекомендовані 4 раунди
-    # (без попереджень Passlib)
-    BCRYPT_ROUNDS = 4
-else:
-    # У будь-якому середовищі забезпечуємо мінімум 4 раунди
-    BCRYPT_ROUNDS = max(4, _DEFAULT_BCRYPT_ROUNDS)
+# У будь-якому середовищі забезпечуємо мінімум 4 раунди
+BCRYPT_ROUNDS = max(4, _DEFAULT_BCRYPT_ROUNDS)
 LOGIN_LOCKOUT_SECONDS = int(os.getenv("LOGIN_LOCKOUT_SECONDS", "900"))  # 15 хв
 MAX_LOGIN_ATTEMPTS = 5
 LOGIN_ATTEMPT_WINDOW_MINUTES = 15
@@ -395,7 +387,7 @@ class AuthManager:
         token_data = {
             "user_id": user_data.get("id") or user_data.get("user_id"),
             "username": user_data.get("username", "unknown"),
-            "role": user_data.get("role", "user"),
+            "role": user_data.get("role", "admin"),
             "permissions": user_data.get("permissions", []),
             "session_id": session_id,
             # Додаємо відбиток клієнта якщо надано (порівняння при refresh)
@@ -827,7 +819,7 @@ class AuthManager:
         token_data = {
             "user_id": payload["user_id"],
             "username": payload.get("username", "unknown"),
-            "role": payload.get("role", "user"),
+            "role": payload.get("role", "admin"),
             "permissions": payload.get("permissions", []),
             "session_id": session_id,  # Зберігаємо існуючий session_id
         }

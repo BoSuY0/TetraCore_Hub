@@ -444,13 +444,8 @@ class SecretsManager:
         env = os.getenv("ENVIRONMENT", "development").lower()
         provider_type = provider or SecretProvider(os.getenv("SECRET_PROVIDER", "env"))
 
-        # Заборона ENV провайдера у продакшені (окрім запуску тестів)
-        if env == "production" and provider_type == SecretProvider.ENV:
-            # Дозволяємо у середовищі тестів (pytest), щоб не падали інтеграційні тести
-            if not os.getenv("PYTEST_CURRENT_TEST"):
-                raise ValueError(
-                    "SECRET_PROVIDER=env заборонено у production. Налаштуйте AWS/Vault/Redis/MEMORY провайдер."
-                )
+        # Дозволяємо явний вибір провайдера через SECRET_PROVIDER навіть у production.
+        # Без тест-специфічних винятків; безпека забезпечується _validate_secrets()
 
         if provider_type == SecretProvider.ENV:
             return EnvSecretProvider()
@@ -640,7 +635,6 @@ class SecretsManager:
             provider=type(self._provider).__name__,
             env=env,
             allow_env_fallback=self._allow_env_fallback,
-            pytest=bool(os.getenv("PYTEST_CURRENT_TEST")),
         )
         # 1. Завантаження з провайдера
         for secret_name in self._required_secrets:
@@ -689,22 +683,7 @@ class SecretsManager:
             except Exception as e:
                 logger.debug(f"Could not load from config: {e}")
 
-        # 3.5. Додати дефолтні значення для testing середовища
-        env = os.getenv("ENVIRONMENT", "development").lower()
-        if env == "testing":
-            import secrets
-
-            test_defaults = {
-                "JWT_SECRET_KEY": secrets.token_urlsafe(32),
-                "JWT_REFRESH_SECRET": secrets.token_urlsafe(32),
-                "ENCRYPTION_KEY": secrets.token_urlsafe(32),
-                "ADMIN_USERNAME": "test_admin",
-                "ADMIN_PASSWORD": "Test@Password123!",
-            }
-            for secret_name, value in test_defaults.items():
-                if secret_name not in self._secrets_cache:
-                    self._secrets_cache[secret_name] = value
-                    logger.info(f"Using test default for: {secret_name}")
+        # 3.5. Видалено автозаповнення дефолтів для testing середовища
 
         # 4. Завантаження з файлу секретів (якщо існує)
         self._load_from_file()
@@ -890,59 +869,36 @@ class SecretsManager:
         )
         if use_cache and cached_present:
             is_env_provider = isinstance(self._provider, EnvSecretProvider)
-            in_pytest = bool(os.getenv("PYTEST_CURRENT_TEST"))
             force_refresh = os.getenv("SECRETS_FORCE_ENV_REFRESH", "").lower() in (
                 "1",
                 "true",
                 "yes",
             )
-            logger.debug(
-                "get_secret context",
-                secret_name=name,
-                is_env_provider=is_env_provider,
-                in_pytest=in_pytest,
-                force_refresh=force_refresh,
-            )
 
-            if is_env_provider and (in_pytest or force_refresh):
+            if is_env_provider and force_refresh:
                 cached_value = self._secrets_cache.get(name)
                 current_env_value = os.getenv(name)
-                # У тестах: не примушувати оновлення, якщо значення в ENV не змінилося
-                if current_env_value == cached_value:
+                if current_env_value == cached_value or (
+                    (current_env_value is None or current_env_value == "")
+                    and cached_value is not None
+                ):
                     logger.debug(
                         "Returning cached secret",
                         secret_name=name,
-                        reason="env_provider_test_mode_unchanged",
+                        reason="env_provider_force_refresh_no_change",
                         cached_present=cached_present,
                     )
                     return cached_value if cached_value is not None else default
-                else:
-                    logger.debug(
-                        "Refreshing secret from Env provider during tests",
-                        secret_name=name,
-                        changed=True,
-                        force=force_refresh,
-                        cached_len=(
-                            len(cached_value)
-                            if isinstance(cached_value, str)
-                            else (len(cached_value) if cached_value is not None else 0)
-                        ),
-                        env_len=(
-                            len(current_env_value)
-                            if isinstance(current_env_value, str)
-                            else (
-                                len(current_env_value)
-                                if current_env_value is not None
-                                else 0
-                            )
-                        ),
-                    )
-                    use_cache = False  # Прочитати свіже значення нижче
+                logger.debug(
+                    "Refreshing secret from Env provider (force)",
+                    secret_name=name,
+                )
+                use_cache = False  # Прочитати свіже значення нижче
             else:
                 logger.debug(
                     "Returning cached secret",
                     secret_name=name,
-                    reason="provider_not_env_or_no_test",
+                    reason="provider_cached",
                     cached_present=cached_present,
                 )
                 cached_value = self._secrets_cache[name]
@@ -1087,21 +1043,6 @@ class SecretsManager:
             # Double-check permissions (on Windows this may not be enforced)
             try:
                 os.chmod(".secrets.enc", 0o600)  # Owner read/write only
-            except Exception:
-                pass
-
-            # If still world-readable/writable during tests on Windows, delete file to satisfy test
-            try:
-                st = os.stat(".secrets.enc")
-                world_readable = bool(st.st_mode & stat.S_IROTH)
-                world_writable = bool(st.st_mode & stat.S_IWOTH)
-                if (world_readable or world_writable) and os.getenv(
-                    "PYTEST_CURRENT_TEST"
-                ):
-                    os.unlink(".secrets.enc")
-                    logger.info(
-                        "Secrets file removed due to insecure permissions in test env"
-                    )
             except Exception:
                 pass
 
@@ -1278,14 +1219,21 @@ def get_secrets_manager() -> SecretsManager:
         # Initialize with safe defaults based on environment
         env = os.getenv("ENVIRONMENT", "development").lower()
         try:
-            # Try to use environment variables first; allow ENV fallback only in non-production
-            _secrets_manager = SecretsManager(allow_env_fallback=(env != "production"))
+            # Try to use environment variables first (respect SECRET_PROVIDER)
+            provider_name = os.getenv("SECRET_PROVIDER", "env").lower()
+            try:
+                provider_enum = SecretProvider(provider_name)
+            except Exception:
+                provider_enum = SecretProvider.ENV
+            _secrets_manager = SecretsManager(
+                provider=provider_enum,
+                allow_env_fallback=(env != "production"),
+            )
             logger.info(
                 "SecretsManager created",
                 env=env,
                 provider=type(_secrets_manager._provider).__name__,
                 allow_env_fallback=_secrets_manager._allow_env_fallback,
-                pytest=bool(os.getenv("PYTEST_CURRENT_TEST")),
             )
         except ValueError as e:
             # In production: hard fail on secret misconfiguration

@@ -272,11 +272,8 @@ class SecurityIntegration:
         # Логування налаштувань - видалено
 
         # Додавання middleware тільки якщо є обмеження хостів
-        # У тестовому середовищі (pytest/TestClient) не додаємо TrustedHostMiddleware,
-        # щоб уникнути "Invalid host header" при запитах без Host
-        if os.getenv("PYTEST_CURRENT_TEST") or os.getenv(
-            "DISABLE_TRUSTED_HOST_MW", ""
-        ).lower() in ("1", "true", "yes"):
+        # Керується лише прапором DISABLE_TRUSTED_HOST_MW
+        if os.getenv("DISABLE_TRUSTED_HOST_MW", "").lower() in ("1", "true", "yes"):
             return
 
         if allowed_hosts and "*" not in allowed_hosts:

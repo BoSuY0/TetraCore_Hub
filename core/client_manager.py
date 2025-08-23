@@ -55,14 +55,16 @@ class ClientManager:
             # Ініціалізація асинхронного оптимізатора
             await self.async_optimizer.initialize()
 
-            # Запуск задачі очищення (пропускаємо у тест-середовищі)
+            # Запуск задачі очищення (керується лише змінною DISABLE_BACKGROUND_TASKS)
             import os
 
-            if bool(os.getenv("PYTEST_CURRENT_TEST")) or os.getenv(
-                "DISABLE_BACKGROUND_TASKS", ""
-            ).lower() in ("1", "true", "yes"):
+            if os.getenv("DISABLE_BACKGROUND_TASKS", "").lower() in (
+                "1",
+                "true",
+                "yes",
+            ):
                 self.cleanup_task = None
-                self.logger.debug("ClientManager cleanup loop disabled (test env)")
+                self.logger.debug("ClientManager cleanup loop disabled by config")
             else:
                 self.cleanup_task = asyncio.create_task(self._cleanup_loop())
 

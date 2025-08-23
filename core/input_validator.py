@@ -336,9 +336,22 @@ class InputValidator:
     def validate_email(cls, email: str) -> str:
         """Валідація email"""
         try:
-            # Використовуємо Pydantic EmailStr
-            validated = EmailStr.validate(email)
-            return validated.lower()
+            # Pydantic v2: використовуємо TypeAdapter для валідації EmailStr
+            try:
+                from pydantic import TypeAdapter  # type: ignore
+
+                adapter = TypeAdapter(EmailStr)
+                validated = adapter.validate_python(email)
+                return str(validated).lower()
+            except Exception:
+                # Fallback для можливих сумісностей/версій
+                if (
+                    isinstance(email, str)
+                    and "@" in email
+                    and "." in email.split("@")[-1]
+                ):
+                    return email.lower()
+                raise
         except Exception:
             raise ValidationError("Invalid email format", field="email")
 

@@ -33,10 +33,7 @@ const AppContent: React.FC = () => {
       case "clients":
         return (
           <PageTransition pageKey="clients" animationType="clients">
-            <ProtectedRoute
-              requiredRole="user"
-              requiredPermissions={["clients.view"]}
-            >
+            <ProtectedRoute requiredRole="admin" requiredPermissions={["clients.view"]}>
               <ClientsView />
             </ProtectedRoute>
           </PageTransition>
@@ -44,10 +41,7 @@ const AppContent: React.FC = () => {
       case "tasks":
         return (
           <PageTransition pageKey="tasks" animationType="tasks">
-            <ProtectedRoute
-              requiredRole="user"
-              requiredPermissions={["tasks.view"]}
-            >
+            <ProtectedRoute requiredRole="admin" requiredPermissions={["tasks.view"]}>
               <TasksView />
             </ProtectedRoute>
           </PageTransition>
@@ -55,10 +49,7 @@ const AppContent: React.FC = () => {
       case "metrics":
         return (
           <PageTransition pageKey="metrics" animationType="metrics">
-            <ProtectedRoute
-              requiredRole="viewer"
-              requiredPermissions={["metrics.view"]}
-            >
+            <ProtectedRoute requiredRole="admin" requiredPermissions={["metrics.view"]}>
               <WorkerMetrics clients={state.clients} />
             </ProtectedRoute>
           </PageTransition>
@@ -77,7 +68,7 @@ const AppContent: React.FC = () => {
       case "console":
         return (
           <PageTransition pageKey="console" animationType="tasks">
-            <ProtectedRoute requiredRole="viewer">
+            <ProtectedRoute requiredRole="admin">
               <ConsoleLogs />
             </ProtectedRoute>
           </PageTransition>
@@ -92,7 +83,7 @@ const AppContent: React.FC = () => {
   };
 
   return (
-    <ProtectedRoute requiredRole="viewer">
+    <ProtectedRoute requiredRole="admin">
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-gray-50 to-slate-100">
         {/* Sidebar */}
         <Sidebar

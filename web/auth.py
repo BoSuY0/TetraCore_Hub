@@ -53,7 +53,7 @@ class RefreshTokenRequest(BaseModel):
 class User(BaseModel):
     id: str
     username: str
-    role: str = "viewer"
+    role: str = "admin"
     permissions: List[str] = Field(default_factory=list)
     sessionId: str
     loginTime: datetime
