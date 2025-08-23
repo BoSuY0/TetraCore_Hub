@@ -6,5 +6,3 @@
 """
 
 from .test_ws_integration_compat import *  # noqa: F401,F403
-
-

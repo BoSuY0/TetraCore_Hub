@@ -14,7 +14,9 @@ from typing import Dict, Any, Optional
 import structlog
 
 # Додаємо шлях до кореневої директорії проекту
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from config import Settings
 from core.redis_manager import RedisManager
@@ -29,14 +31,16 @@ class RedisMemoryMonitor:
         self.redis_manager = RedisManager(settings)
 
         # Налаштування моніторингу
-        self.check_interval = getattr(settings, 'redis_cleanup_interval', 3600)  # 1 година
+        self.check_interval = getattr(
+            settings, "redis_cleanup_interval", 3600
+        )  # 1 година
         self.memory_threshold = 80  # Поріг використання пам'яті у відсотках
         self.cleanup_patterns = [
-            ("tetra:tasks:*", 7),      # Завдання - зберігати 7 днів
-            ("tetra:results:*", 3),    # Результати - зберігати 3 дні
-            ("tetra:metrics:*", 1),    # Метрики - зберігати 1 день
-            ("tetra:temp:*", 0.25),    # Тимчасові дані - зберігати 6 годин
-            ("session:*", 30),         # Сесії - зберігати 30 днів
+            ("tetra:tasks:*", 7),  # Завдання - зберігати 7 днів
+            ("tetra:results:*", 3),  # Результати - зберігати 3 дні
+            ("tetra:metrics:*", 1),  # Метрики - зберігати 1 день
+            ("tetra:temp:*", 0.25),  # Тимчасові дані - зберігати 6 годин
+            ("session:*", 30),  # Сесії - зберігати 30 днів
         ]
 
         # Статистика
@@ -82,7 +86,9 @@ class RedisMemoryMonitor:
 
                     # Перевірка порогу пам'яті
                     if await self._check_memory_threshold(memory_stats):
-                        self.logger.warning("Memory threshold exceeded, starting cleanup")
+                        self.logger.warning(
+                            "Memory threshold exceeded, starting cleanup"
+                        )
                         await self.cleanup_old_data()
 
                 # Періодичне очищення незалежно від використання пам'яті
@@ -113,15 +119,17 @@ class RedisMemoryMonitor:
                     keys_deleted += deleted
 
                     if deleted > 0:
-                        self.logger.info("Cleaned up keys",
-                                       pattern=pattern,
-                                       days=days,
-                                       deleted=deleted)
+                        self.logger.info(
+                            "Cleaned up keys",
+                            pattern=pattern,
+                            days=days,
+                            deleted=deleted,
+                        )
 
                 except Exception as e:
-                    self.logger.error("Failed to cleanup pattern",
-                                    pattern=pattern,
-                                    error=str(e))
+                    self.logger.error(
+                        "Failed to cleanup pattern", pattern=pattern, error=str(e)
+                    )
 
             # Додаткове очищення ключів без TTL
             keys_without_ttl = await self._cleanup_keys_without_ttl()
@@ -134,11 +142,13 @@ class RedisMemoryMonitor:
 
             duration = (datetime.utcnow() - start_time).total_seconds()
 
-            self.logger.info("Redis cleanup completed",
-                           keys_deleted=keys_deleted,
-                           duration_seconds=duration,
-                           total_runs=self.cleanup_runs,
-                           total_deleted=self.total_keys_deleted)
+            self.logger.info(
+                "Redis cleanup completed",
+                keys_deleted=keys_deleted,
+                duration_seconds=duration,
+                total_runs=self.cleanup_runs,
+                total_deleted=self.total_keys_deleted,
+            )
 
         except Exception as e:
             self.logger.error("Failed to cleanup old data", error=str(e))
@@ -160,23 +170,22 @@ class RedisMemoryMonitor:
                     if ttl == -1:
                         # Встановлюємо дефолтний TTL
                         await self.redis_manager.redis_client.expire(
-                            key,
-                            self.redis_manager.default_ttl
+                            key, self.redis_manager.default_ttl
                         )
                         deleted += 1
 
                         if deleted % 100 == 0:
-                            self.logger.debug("Set TTL for keys without expiration",
-                                            count=deleted)
+                            self.logger.debug(
+                                "Set TTL for keys without expiration", count=deleted
+                            )
 
                 except Exception as e:
-                    self.logger.error("Failed to check/set TTL for key",
-                                    key=key,
-                                    error=str(e))
+                    self.logger.error(
+                        "Failed to check/set TTL for key", key=key, error=str(e)
+                    )
 
             if deleted > 0:
-                self.logger.info("Set TTL for keys without expiration",
-                               total=deleted)
+                self.logger.info("Set TTL for keys without expiration", total=deleted)
 
             return deleted
 
@@ -191,11 +200,11 @@ class RedisMemoryMonitor:
             used_memory = memory_stats.get("used_memory", "0")
             if isinstance(used_memory, str):
                 # Видалення суфіксів типу 'M', 'G'
-                if used_memory.endswith('M'):
+                if used_memory.endswith("M"):
                     used_bytes = float(used_memory[:-1]) * 1024 * 1024
-                elif used_memory.endswith('G'):
+                elif used_memory.endswith("G"):
                     used_bytes = float(used_memory[:-1]) * 1024 * 1024 * 1024
-                elif used_memory.endswith('K'):
+                elif used_memory.endswith("K"):
                     used_bytes = float(used_memory[:-1]) * 1024
                 else:
                     used_bytes = float(used_memory)
@@ -210,9 +219,11 @@ class RedisMemoryMonitor:
                 usage_percent = (used_bytes / max_memory) * 100
 
                 if usage_percent > self.memory_threshold:
-                    self.logger.warning("Memory usage above threshold",
-                                      usage_percent=usage_percent,
-                                      threshold=self.memory_threshold)
+                    self.logger.warning(
+                        "Memory usage above threshold",
+                        usage_percent=usage_percent,
+                        threshold=self.memory_threshold,
+                    )
                     return True
 
             return False
@@ -231,11 +242,13 @@ class RedisMemoryMonitor:
 
     async def _log_memory_stats(self, memory_stats: Dict[str, Any]):
         """Логування статистики пам'яті"""
-        self.logger.info("Redis memory statistics",
-                       used_memory=memory_stats.get("used_memory"),
-                       used_memory_peak=memory_stats.get("used_memory_peak"),
-                       fragmentation_ratio=memory_stats.get("mem_fragmentation_ratio"),
-                       evicted_keys=memory_stats.get("evicted_keys"))
+        self.logger.info(
+            "Redis memory statistics",
+            used_memory=memory_stats.get("used_memory"),
+            used_memory_peak=memory_stats.get("used_memory_peak"),
+            fragmentation_ratio=memory_stats.get("mem_fragmentation_ratio"),
+            evicted_keys=memory_stats.get("evicted_keys"),
+        )
 
     def get_stats(self) -> Dict[str, Any]:
         """Отримання статистики монітора"""
@@ -243,10 +256,12 @@ class RedisMemoryMonitor:
             "is_running": self.is_running,
             "cleanup_runs": self.cleanup_runs,
             "total_keys_deleted": self.total_keys_deleted,
-            "last_cleanup": self.last_cleanup.isoformat() if self.last_cleanup else None,
+            "last_cleanup": (
+                self.last_cleanup.isoformat() if self.last_cleanup else None
+            ),
             "check_interval": self.check_interval,
             "memory_threshold": self.memory_threshold,
-            "cleanup_patterns": self.cleanup_patterns
+            "cleanup_patterns": self.cleanup_patterns,
         }
 
 

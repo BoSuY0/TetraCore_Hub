@@ -17,6 +17,7 @@ from models.messages import TaskStatus, TaskPriority
 
 class TaskType(str, Enum):
     """Типи завдань у системі"""
+
     API_REQUEST = "api_request"
     DATA_PROCESSING = "data_processing"
     FILE_UPLOAD = "file_upload"
@@ -42,6 +43,7 @@ class TaskType(str, Enum):
 
 class ExecutorType(str, Enum):
     """Типи виконавців завдань"""
+
     BOT = "bot"
     WORKER = "worker"
     WORKER_API = "worker_api"
@@ -143,38 +145,44 @@ class TaskContext(BaseModel):
     class Config:
         json_encoders = {
             datetime: lambda v: v.isoformat(),
-            set: lambda v: list(v)  # Конвертуємо set в list для JSON серіалізації
+            set: lambda v: list(v),  # Конвертуємо set в list для JSON серіалізації
         }
 
     def add_status_change(self, new_status: TaskStatus, message: str = ""):
         """Додавання зміни статусу"""
-        self.status_history.append({
-            "from_status": self.current_status.value,
-            "to_status": new_status.value,
-            "timestamp": datetime.utcnow().isoformat(),
-            "message": message
-        })
+        self.status_history.append(
+            {
+                "from_status": self.current_status.value,
+                "to_status": new_status.value,
+                "timestamp": datetime.utcnow().isoformat(),
+                "message": message,
+            }
+        )
         self.current_status = new_status
 
     def add_attempt(self, worker_id: str, error: str = None):
         """Додавання спроби виконання"""
-        self.attempt_history.append({
-            "attempt": self.current_attempt,
-            "worker_id": worker_id,
-            "started_at": datetime.utcnow().isoformat(),
-            "error": error
-        })
+        self.attempt_history.append(
+            {
+                "attempt": self.current_attempt,
+                "worker_id": worker_id,
+                "started_at": datetime.utcnow().isoformat(),
+                "error": error,
+            }
+        )
         self.current_attempt += 1
 
     def add_error(self, error_type: str, error_message: str, error_trace: str = None):
         """Додавання помилки"""
-        self.errors.append({
-            "error_type": error_type,
-            "error_message": error_message,
-            "error_trace": error_trace,
-            "timestamp": datetime.utcnow().isoformat(),
-            "attempt": self.current_attempt
-        })
+        self.errors.append(
+            {
+                "error_type": error_type,
+                "error_message": error_message,
+                "error_trace": error_trace,
+                "timestamp": datetime.utcnow().isoformat(),
+                "attempt": self.current_attempt,
+            }
+        )
 
     def get_execution_time(self) -> Optional[float]:
         """Отримання часу виконання в секундах"""
@@ -199,7 +207,7 @@ class TaskContext(BaseModel):
             TaskStatus.COMPLETED,
             TaskStatus.FAILED,
             TaskStatus.CANCELLED,
-            TaskStatus.TIMEOUT
+            TaskStatus.TIMEOUT,
         ]
 
     def reset_assignment(self):
@@ -207,7 +215,9 @@ class TaskContext(BaseModel):
         self.worker_id = None
         self.assigned_at = None
         self.started_at = None
-        self.add_status_change(TaskStatus.PENDING, "Assignment reset due to communication failure")
+        self.add_status_change(
+            TaskStatus.PENDING, "Assignment reset due to communication failure"
+        )
 
 
 class Task(BaseModel):
@@ -244,12 +254,14 @@ class Task(BaseModel):
     metadata: TaskMetadata = Field(default_factory=TaskMetadata)
 
     # Контекст виконання
-    context: TaskContext = Field(default_factory=lambda: TaskContext(task_id=str(uuid.uuid4())))
+    context: TaskContext = Field(
+        default_factory=lambda: TaskContext(task_id=str(uuid.uuid4()))
+    )
 
     class Config:
         json_encoders = {
             datetime: lambda v: v.isoformat(),
-            set: lambda v: list(v)  # Конвертуємо set в list для JSON серіалізації
+            set: lambda v: list(v),  # Конвертуємо set в list для JSON серіалізації
         }
 
     def __init__(self, **data):
@@ -261,49 +273,50 @@ class Task(BaseModel):
     @classmethod
     def create(cls, task_type: TaskType, data: Dict[str, Any], **kwargs) -> "Task":
         """Створення нового завдання"""
-        task_id = kwargs.get('task_id', str(uuid.uuid4()))
+        task_id = kwargs.get("task_id", str(uuid.uuid4()))
         context = TaskContext(task_id=task_id)
 
         # Валідація та нормалізація executor_type
-        executor_type = kwargs.get('executor_type', ExecutorType.WORKER)
+        executor_type = kwargs.get("executor_type", ExecutorType.WORKER)
         if isinstance(executor_type, str):
             # Автоматичний мапінг строкових значень
             executor_mapping = {
-                'bot': ExecutorType.BOT,
-                'worker': ExecutorType.WORKER,
-                'worker_api': ExecutorType.WORKER_API,
-                'api': ExecutorType.WORKER_API,  # Альтернативна назва
-                'api_worker': ExecutorType.WORKER_API  # Альтернативна назва
+                "bot": ExecutorType.BOT,
+                "worker": ExecutorType.WORKER,
+                "worker_api": ExecutorType.WORKER_API,
+                "api": ExecutorType.WORKER_API,  # Альтернативна назва
+                "api_worker": ExecutorType.WORKER_API,  # Альтернативна назва
             }
-            
+
             executor_type_lower = executor_type.lower()
             if executor_type_lower in executor_mapping:
                 executor_type = executor_mapping[executor_type_lower]
             else:
                 # Невідомий тип - використовуємо WORKER за замовчуванням
                 from structlog import get_logger
+
                 logger = get_logger(__name__)
-                logger.warning("Unknown executor_type, using WORKER as default",
-                             provided_executor_type=executor_type,
-                             valid_types=list(executor_mapping.keys()))
+                logger.warning(
+                    "Unknown executor_type, using WORKER as default",
+                    provided_executor_type=executor_type,
+                    valid_types=list(executor_mapping.keys()),
+                )
                 executor_type = ExecutorType.WORKER
-        
+
         # Встановлюємо executor_type в kwargs для передачі в конструктор
-        kwargs['executor_type'] = executor_type
+        kwargs["executor_type"] = executor_type
 
         return cls(
-            task_id=task_id,
-            task_type=task_type,
-            data=data,
-            context=context,
-            **kwargs
+            task_id=task_id, task_type=task_type, data=data, context=context, **kwargs
         )
 
     def assign_to_worker(self, worker_id: str):
         """Призначення завдання воркеру"""
         self.context.worker_id = worker_id
         self.context.assigned_at = datetime.utcnow()
-        self.context.add_status_change(TaskStatus.ASSIGNED, f"Assigned to worker {worker_id}")
+        self.context.add_status_change(
+            TaskStatus.ASSIGNED, f"Assigned to worker {worker_id}"
+        )
 
     def start_execution(self):
         """Початок виконання завдання"""
@@ -314,13 +327,17 @@ class Task(BaseModel):
         """Завершення завдання з успіхом"""
         self.context.result = result
         self.context.completed_at = datetime.utcnow()
-        self.context.add_status_change(TaskStatus.COMPLETED, "Task completed successfully")
+        self.context.add_status_change(
+            TaskStatus.COMPLETED, "Task completed successfully"
+        )
 
     def fail(self, error_message: str, error_trace: str = None):
         """Завершення завдання з помилкою"""
         self.context.add_error("execution_error", error_message, error_trace)
         self.context.completed_at = datetime.utcnow()
-        self.context.add_status_change(TaskStatus.FAILED, f"Task failed: {error_message}")
+        self.context.add_status_change(
+            TaskStatus.FAILED, f"Task failed: {error_message}"
+        )
 
     def timeout(self):
         """Завершення завдання через таймаут"""
@@ -330,24 +347,33 @@ class Task(BaseModel):
     def cancel(self, reason: str = ""):
         """Скасування завдання"""
         self.context.completed_at = datetime.utcnow()
-        self.context.add_status_change(TaskStatus.CANCELLED, f"Task cancelled: {reason}")
+        self.context.add_status_change(
+            TaskStatus.CANCELLED, f"Task cancelled: {reason}"
+        )
 
     def can_retry(self) -> bool:
         """Перевірка чи можна повторити завдання"""
-        return (self.metadata.is_retryable and
-                self.context.current_attempt <= self.max_retries and
-                self.context.current_status in [TaskStatus.FAILED, TaskStatus.TIMEOUT])
+        return (
+            self.metadata.is_retryable
+            and self.context.current_attempt <= self.max_retries
+            and self.context.current_status in [TaskStatus.FAILED, TaskStatus.TIMEOUT]
+        )
 
     def schedule_retry(self):
         """Планування повторної спроби"""
         if self.can_retry():
-            self.context.add_status_change(TaskStatus.RETRY, f"Scheduling retry attempt {self.context.current_attempt}")
+            self.context.add_status_change(
+                TaskStatus.RETRY,
+                f"Scheduling retry attempt {self.context.current_attempt}",
+            )
             return True
         return False
 
     def set_expiration(self, expires_in_seconds: int):
         """Встановлення часу експірації"""
-        self.context.expires_at = datetime.utcnow() + timedelta(seconds=expires_in_seconds)
+        self.context.expires_at = datetime.utcnow() + timedelta(
+            seconds=expires_in_seconds
+        )
 
     def get_priority_score(self) -> int:
         """Отримання числового пріоритету для сортування"""
@@ -355,7 +381,7 @@ class Task(BaseModel):
             TaskPriority.LOW: 1,
             TaskPriority.NORMAL: 2,
             TaskPriority.HIGH: 3,
-            TaskPriority.CRITICAL: 4
+            TaskPriority.CRITICAL: 4,
         }
 
         score = priority_scores.get(self.priority, 2)
@@ -381,8 +407,14 @@ class Task(BaseModel):
             "worker_id": self.context.worker_id,
             "client_id": self.context.client_id,
             "created_at": self.context.created_at.isoformat(),
-            "started_at": self.context.started_at.isoformat() if self.context.started_at else None,
-            "completed_at": self.context.completed_at.isoformat() if self.context.completed_at else None,
+            "started_at": (
+                self.context.started_at.isoformat() if self.context.started_at else None
+            ),
+            "completed_at": (
+                self.context.completed_at.isoformat()
+                if self.context.completed_at
+                else None
+            ),
             "execution_time": self.context.get_execution_time(),
             "attempt": self.context.current_attempt,
             "max_retries": self.max_retries,
@@ -390,7 +422,7 @@ class Task(BaseModel):
             "is_expired": self.context.is_expired(),
             "can_retry": self.can_retry(),
             "task_data": self.data,
-            "metadata": self.metadata.model_dump()
+            "metadata": self.metadata.model_dump(),
         }
 
 
@@ -412,7 +444,7 @@ class TaskQueue(BaseModel):
             TaskPriority.CRITICAL: deque(),
             TaskPriority.HIGH: deque(),
             TaskPriority.NORMAL: deque(),
-            TaskPriority.LOW: deque()
+            TaskPriority.LOW: deque(),
         }
     )
 
@@ -438,7 +470,12 @@ class TaskQueue(BaseModel):
     def get_next_task(self, worker_requirements: List[str] = None) -> Optional[Task]:
         """Отримання наступного завдання з черги"""
         # Пошук за пріоритетом
-        for priority in [TaskPriority.CRITICAL, TaskPriority.HIGH, TaskPriority.NORMAL, TaskPriority.LOW]:
+        for priority in [
+            TaskPriority.CRITICAL,
+            TaskPriority.HIGH,
+            TaskPriority.NORMAL,
+            TaskPriority.LOW,
+        ]:
             queue = self.priority_queues[priority]
 
             # Пошук підходящого завдання у черзі пріоритету
@@ -452,7 +489,9 @@ class TaskQueue(BaseModel):
 
                 # Перевірка вимог до воркера
                 if worker_requirements and task.worker_requirements:
-                    if not all(req in worker_requirements for req in task.worker_requirements):
+                    if not all(
+                        req in worker_requirements for req in task.worker_requirements
+                    ):
                         queue.append(task_id)  # Повертаємо в кінець черги
                         continue
 
@@ -520,7 +559,7 @@ class TaskQueue(BaseModel):
             "total_added": self.total_added,
             "total_processed": self.total_processed,
             "total_failed": self.total_failed,
-            "utilization": len(self.tasks) / self.max_size * 100
+            "utilization": len(self.tasks) / self.max_size * 100,
         }
 
     def clear_expired_tasks(self) -> int:

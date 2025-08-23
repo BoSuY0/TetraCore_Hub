@@ -23,9 +23,12 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.async_optimization import AsyncOptimizer, TaskPriority
 from utils.async_helpers import (
-    async_json_dumps, async_json_loads,
-    async_read_file, async_write_file,
-    batch_process_async, AsyncTimer
+    async_json_dumps,
+    async_json_loads,
+    async_read_file,
+    async_write_file,
+    batch_process_async,
+    AsyncTimer,
 )
 
 
@@ -72,7 +75,7 @@ class AsyncBenchmark:
                     "id": i,
                     "name": f"User {i}",
                     "email": f"user{i}@example.com",
-                    "metadata": {"score": random.randint(0, 1000)}
+                    "metadata": {"score": random.randint(0, 1000)},
                 }
                 for i in range(size)
             ]
@@ -82,9 +85,7 @@ class AsyncBenchmark:
         _, sync_dumps_time = self.measure_time(json.dumps, data)
 
         # Асинхронна серіалізація
-        _, async_dumps_time = await self.measure_async_time(
-            async_json_dumps(data)
-        )
+        _, async_dumps_time = await self.measure_async_time(async_json_dumps(data))
 
         # Серіалізуємо для тесту десеріалізації
         json_str = json.dumps(data)
@@ -93,9 +94,7 @@ class AsyncBenchmark:
         _, sync_loads_time = self.measure_time(json.loads, json_str)
 
         # Асинхронна десеріалізація
-        _, async_loads_time = await self.measure_async_time(
-            async_json_loads(json_str)
-        )
+        _, async_loads_time = await self.measure_async_time(async_json_loads(json_str))
 
         # Результати
         print(f"  Серіалізація:")
@@ -110,7 +109,7 @@ class AsyncBenchmark:
 
         self.results["json"] = {
             "dumps": {"sync": sync_dumps_time, "async": async_dumps_time},
-            "loads": {"sync": sync_loads_time, "async": async_loads_time}
+            "loads": {"sync": sync_loads_time, "async": async_loads_time},
         }
 
     # === Файлові операції ===
@@ -122,14 +121,14 @@ class AsyncBenchmark:
         # Генерація тестових даних
         content = "x" * (size_mb * 1024 * 1024)
 
-        with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
             temp_file = f.name
             f.write(content)
 
         try:
             # Синхронне читання
             def sync_read():
-                with open(temp_file, 'r') as f:
+                with open(temp_file, "r") as f:
                     return f.read()
 
             _, sync_read_time = self.measure_time(sync_read)
@@ -141,7 +140,7 @@ class AsyncBenchmark:
 
             # Синхронний запис
             def sync_write():
-                with open(temp_file + ".copy", 'w') as f:
+                with open(temp_file + ".copy", "w") as f:
                     f.write(content)
 
             _, sync_write_time = self.measure_time(sync_write)
@@ -164,7 +163,7 @@ class AsyncBenchmark:
 
             self.results["file"] = {
                 "read": {"sync": sync_read_time, "async": async_read_time},
-                "write": {"sync": sync_write_time, "async": async_write_time}
+                "write": {"sync": sync_write_time, "async": async_write_time},
             }
 
         finally:
@@ -184,11 +183,11 @@ class AsyncBenchmark:
         # Симуляція I/O операції
         def blocking_io_operation(n: int):
             time.sleep(0.01)  # Симуляція I/O
-            return n ** 2
+            return n**2
 
         async def async_io_operation(n: int):
             await asyncio.sleep(0.01)  # Симуляція I/O
-            return n ** 2
+            return n**2
 
         # Синхронне виконання
         start = time.time()
@@ -208,17 +207,15 @@ class AsyncBenchmark:
 
         # Асинхронне виконання (паралельно)
         start = time.time()
-        async_par_results = await asyncio.gather(*[
-            async_io_operation(i) for i in range(num_tasks)
-        ])
+        async_par_results = await asyncio.gather(
+            *[async_io_operation(i) for i in range(num_tasks)]
+        )
         async_par_time = time.time() - start
 
         # Використання AsyncOptimizer
         start = time.time()
         optimizer_results = await self.optimizer.map_async(
-            async_io_operation,
-            list(range(num_tasks)),
-            max_concurrent=10
+            async_io_operation, list(range(num_tasks)), max_concurrent=10
         )
         optimizer_time = time.time() - start
 
@@ -233,7 +230,7 @@ class AsyncBenchmark:
             "sync": sync_time,
             "async_sequential": async_seq_time,
             "async_parallel": async_par_time,
-            "optimizer": optimizer_time
+            "optimizer": optimizer_time,
         }
 
     # === Фонові задачі ===
@@ -246,7 +243,7 @@ class AsyncBenchmark:
         def cpu_intensive_task(n: int):
             result = 0
             for i in range(n * 1000):
-                result += i ** 2
+                result += i**2
             return result
 
         # Створення задач з різними пріоритетами
@@ -256,30 +253,21 @@ class AsyncBenchmark:
         # Критичні задачі
         for i in range(num_tasks // 3):
             task_id = await self.optimizer.create_background_task(
-                f"critical_{i}",
-                cpu_intensive_task,
-                10,
-                priority=TaskPriority.CRITICAL
+                f"critical_{i}", cpu_intensive_task, 10, priority=TaskPriority.CRITICAL
             )
             task_ids.append(task_id)
 
         # Звичайні задачі
         for i in range(num_tasks // 3):
             task_id = await self.optimizer.create_background_task(
-                f"normal_{i}",
-                cpu_intensive_task,
-                10,
-                priority=TaskPriority.NORMAL
+                f"normal_{i}", cpu_intensive_task, 10, priority=TaskPriority.NORMAL
             )
             task_ids.append(task_id)
 
         # Низькопріоритетні задачі
         for i in range(num_tasks // 3):
             task_id = await self.optimizer.create_background_task(
-                f"low_{i}",
-                cpu_intensive_task,
-                10,
-                priority=TaskPriority.LOW
+                f"low_{i}", cpu_intensive_task, 10, priority=TaskPriority.LOW
             )
             task_ids.append(task_id)
 
@@ -311,7 +299,7 @@ class AsyncBenchmark:
             "creation_time": creation_time,
             "execution_time": execution_time,
             "total_time": creation_time + execution_time,
-            "stats": stats
+            "stats": stats,
         }
 
     # === Батчування ===
@@ -339,29 +327,22 @@ class AsyncBenchmark:
         # З батчуванням
         start = time.time()
         items = [{"id": i, "value": i * 2} for i in range(num_items)]
-        await batch_process_async(
-            items,
-            lambda batch: save_items(batch),
-            batch_size=50
-        )
+        await batch_process_async(items, lambda batch: save_items(batch), batch_size=50)
         batch_time = time.time() - start
 
         print(f"  Без батчування:    {no_batch_time:.4f}с")
         print(f"  З батчуванням:     {batch_time:.4f}с")
         print(f"  Покращення:        {no_batch_time/batch_time:.2f}x\n")
 
-        self.results["batching"] = {
-            "no_batch": no_batch_time,
-            "with_batch": batch_time
-        }
+        self.results["batching"] = {"no_batch": no_batch_time, "with_batch": batch_time}
 
     # === Фінальний звіт ===
 
     def print_summary(self):
         """Виведення підсумкового звіту"""
-        print("="*60)
+        print("=" * 60)
         print("📈 ПІДСУМОК БЕНЧМАРКУ")
-        print("="*60)
+        print("=" * 60)
 
         total_improvements = []
 
@@ -389,7 +370,7 @@ class AsyncBenchmark:
             avg_improvement = statistics.mean(total_improvements)
             print(f"\n🎯 Середнє покращення продуктивності: {avg_improvement:.2f}x")
 
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
 
 
 async def main():

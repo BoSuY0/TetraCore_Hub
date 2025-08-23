@@ -1,4 +1,5 @@
 """Basic smoke tests for health and protected endpoints."""
+
 import os
 import pytest
 from fastapi.testclient import TestClient
@@ -14,7 +15,9 @@ def app_client(monkeypatch):
     monkeypatch.setenv("REDIS_ENABLED", "false")
     monkeypatch.setenv("ENCRYPTION_KEY", "oNzmRFrNzXqkj00TCa8jY7MJX39HWSoiVnf2WlnXVTg=")
     monkeypatch.setenv("JWT_SECRET_KEY", "test-jwt-secret-key-32chars-long-1234567890")
-    monkeypatch.setenv("JWT_REFRESH_SECRET", "test-refresh-secret-key-32chars-long-1234567890")
+    monkeypatch.setenv(
+        "JWT_REFRESH_SECRET", "test-refresh-secret-key-32chars-long-1234567890"
+    )
     # Allow TestClient host
     monkeypatch.setenv("DISABLE_TRUSTED_HOST_MW", "1")
     monkeypatch.setenv("ADMIN_USERNAME", "admin")

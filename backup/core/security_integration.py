@@ -17,8 +17,16 @@ from core.auth_manager import get_auth_manager, get_current_user
 from core.network_security import network_security, security_middleware
 from core.websocket_security import ws_security_manager
 from core.input_validator import InputValidator
-from core.security_headers import security_headers, security_headers_middleware, security_headers_router
-from core.https_enforcement import https_enforcer, https_enforcement_middleware, https_router
+from core.security_headers import (
+    security_headers,
+    security_headers_middleware,
+    security_headers_router,
+)
+from core.https_enforcement import (
+    https_enforcer,
+    https_enforcement_middleware,
+    https_router,
+)
 from web.auth import auth_router
 
 logger = structlog.get_logger()
@@ -67,15 +75,12 @@ class SecurityIntegration:
         async def rate_limit_handler(request: Request, exc):
             return JSONResponse(
                 status_code=429,
-                content={"detail": "Too many requests. Please try again later."}
+                content={"detail": "Too many requests. Please try again later."},
             )
 
         @app.exception_handler(403)
         async def forbidden_handler(request: Request, exc):
-            return JSONResponse(
-                status_code=403,
-                content={"detail": "Access forbidden"}
-            )
+            return JSONResponse(status_code=403, content={"detail": "Access forbidden"})
 
         # 8. Додавання auth router
         app.include_router(auth_router)
@@ -83,10 +88,17 @@ class SecurityIntegration:
         # 9. Додавання security management endpoints
         # Включаємо в development для тестування
         environment = os.getenv("ENVIRONMENT", "development")
-        enable_security = os.getenv("ENABLE_SECURITY_ENDPOINTS", "true" if environment == "development" else "false").lower() == "true"
-        
+        enable_security = (
+            os.getenv(
+                "ENABLE_SECURITY_ENDPOINTS",
+                "true" if environment == "development" else "false",
+            ).lower()
+            == "true"
+        )
+
         if enable_security:
             from core.network_security import security_router
+
             app.include_router(security_router)
             app.include_router(security_headers_router)
             app.include_router(https_router)
@@ -96,45 +108,48 @@ class SecurityIntegration:
     def _setup_trusted_host_middleware(self, app: FastAPI):
         """Налаштування TrustedHostMiddleware з підтримкою Heroku"""
         environment = os.getenv("ENVIRONMENT", "development")
-        
+
         # Базові дозволені хости
         allowed_hosts = []
-        
+
         # Для development
         if environment == "development":
-            allowed_hosts.extend([
-                "localhost",
-                "127.0.0.1",
-                "0.0.0.0",
-                "localhost:3000",
-                "localhost:8000",
-                "127.0.0.1:3000", 
-                "127.0.0.1:8000"
-            ])
-        
+            allowed_hosts.extend(
+                [
+                    "localhost",
+                    "127.0.0.1",
+                    "0.0.0.0",
+                    "localhost:3000",
+                    "localhost:8000",
+                    "127.0.0.1:3000",
+                    "127.0.0.1:8000",
+                ]
+            )
+
         # Для Heroku production
         if os.getenv("DYNO") or environment == "production":
             # Додаємо домени Heroku
-            allowed_hosts.extend([
-                "hub.tetra-core.website",
-                "tetracore-hub-29fb6c8b7947.herokuapp.com",
-                "*.herokuapp.com",  # Для різних додатків Heroku
-                "*.tetra-core.website"  # Для subdomains
-            ])
-        
+            allowed_hosts.extend(
+                [
+                    "hub.tetra-core.website",
+                    "tetracore-hub-29fb6c8b7947.herokuapp.com",
+                    "*.herokuapp.com",  # Для різних додатків Heroku
+                    "*.tetra-core.website",  # Для subdomains
+                ]
+            )
+
         # Дозволені хости з змінних оточення
         env_hosts = os.getenv("ALLOWED_HOSTS", "")
         if env_hosts:
-            allowed_hosts.extend([host.strip() for host in env_hosts.split(",") if host.strip()])
-        
+            allowed_hosts.extend(
+                [host.strip() for host in env_hosts.split(",") if host.strip()]
+            )
+
         # Логування налаштувань - видалено
-        
+
         # Додавання middleware тільки якщо є обмеження хостів
         if allowed_hosts and "*" not in allowed_hosts:
-            app.add_middleware(
-                TrustedHostMiddleware,
-                allowed_hosts=allowed_hosts
-            )
+            app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
         else:
             pass
 
@@ -146,7 +161,9 @@ class SecurityIntegration:
         """Повертає функцію для валідації WebSocket повідомлень"""
         return ws_security_manager.validate_message
 
-    async def validate_api_request(self, request: Request, data: Dict[str, Any]) -> Dict[str, Any]:
+    async def validate_api_request(
+        self, request: Request, data: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Валідація даних API запиту"""
         # Перевірка на небезпечні патерни
         for key, value in data.items():
@@ -187,7 +204,9 @@ class SecurityIntegration:
                 if session_data:
                     try:
                         data = json.loads(session_data)
-                        last_activity = datetime.fromisoformat(data.get("last_activity", ""))
+                        last_activity = datetime.fromisoformat(
+                            data.get("last_activity", "")
+                        )
 
                         # Видаляємо сесії старші 7 днів
                         if (current_time - last_activity).days > 7:
@@ -215,20 +234,32 @@ class SecurityIntegration:
                 "websocket_security": "active",
                 "input_validator": "active",
                 "security_headers": "active",
-                "https_enforcement": "active" if https_enforcer.enabled else "disabled"
+                "https_enforcement": "active" if https_enforcer.enabled else "disabled",
             },
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
         # Додаткова статистика якщо доступна
         if self.redis_client:
             try:
                 # Кількість активних сесій
-                sessions = len([key async for key in self.redis_client.scan_iter(match="session:*")])
+                sessions = len(
+                    [
+                        key
+                        async for key in self.redis_client.scan_iter(match="session:*")
+                    ]
+                )
                 status["active_sessions"] = sessions
 
                 # Кількість заблокованих IP
-                blocked_ips = len([key async for key in self.redis_client.scan_iter(match="blocked_ip:*")])
+                blocked_ips = len(
+                    [
+                        key
+                        async for key in self.redis_client.scan_iter(
+                            match="blocked_ip:*"
+                        )
+                    ]
+                )
                 status["blocked_ips"] = blocked_ips
 
             except Exception as e:
@@ -244,7 +275,7 @@ security_integration = SecurityIntegration()
 # Middleware для перевірки автентифікації на всіх endpoints
 async def require_auth_middleware(request: Request, call_next):
     """Middleware що вимагає автентифікацію для всіх endpoints крім публічних"""
-    
+
     # Публічні endpoints що не потребують автентифікації
     public_paths = [
         "/api/auth/login",
@@ -253,13 +284,13 @@ async def require_auth_middleware(request: Request, call_next):
         "/api/auth/debug",  # Debug endpoint для development
         "/health",  # Виправлено: endpoint реально на /health, а не /api/health
         "/metrics",  # Додано metrics endpoint
-        "/config",   # Додано config endpoint для frontend
+        "/config",  # Додано config endpoint для frontend
         "/docs",
         "/openapi.json",
         "/favicon.ico",
         # Нові основні API ендпоінти - ТЕПЕР ПУБЛІЧНІ для авторизованих користувачів
         "/api/health",
-        "/api/metrics", 
+        "/api/metrics",
         "/api/clients",
         "/api/tasks",
         # Frontend API ендпоінти - ПУБЛІЧНІ
@@ -273,7 +304,7 @@ async def require_auth_middleware(request: Request, call_next):
         "/dashboard/api/clients",
         "/dashboard/api/tasks",
         "/dashboard/api/status",
-        "/dashboard/api/system-logs"
+        "/dashboard/api/system-logs",
     ]
 
     # Dashboard routes (HTML сторінки мають бути публічними для React SPA)
@@ -281,7 +312,7 @@ async def require_auth_middleware(request: Request, call_next):
         "/dashboard/",
         "/dashboard/clients",
         "/dashboard/api/status",  # Статус дашборду має бути публічним
-        "/api/auth/validate"
+        "/api/auth/validate",
     ]
 
     # Пропускаємо OPTIONS запити для CORS preflight
@@ -295,7 +326,7 @@ async def require_auth_middleware(request: Request, call_next):
     # Перевірка чи шлях публічний
     if request.url.path in public_paths:
         return await call_next(request)
-    
+
     # Перевірка для auth ендпоінтів (всі auth ендпоінти публічні)
     if request.url.path.startswith("/api/auth/"):
         return await call_next(request)
@@ -310,19 +341,22 @@ async def require_auth_middleware(request: Request, call_next):
 
     # Перевірка автентифікації для захищених ендпоінтів
     needs_auth = False
-    
+
     # Dashboard API ендпоінти (крім status) потребують автентифікації
-    if request.url.path.startswith("/dashboard/api/") and request.url.path != "/dashboard/api/status":
+    if (
+        request.url.path.startswith("/dashboard/api/")
+        and request.url.path != "/dashboard/api/status"
+    ):
         needs_auth = True
-    
-    # Security ендпоінти потребують автентифікації 
+
+    # Security ендпоінти потребують автентифікації
     if request.url.path.startswith("/api/security/"):
         needs_auth = True
-        
+
     # Admin ендпоінти потребують автентифікації
     if request.url.path.startswith("/api/admin/"):
         needs_auth = True
-    
+
     # Якщо цей ендпоінт не потребує автентифікації, пропускаємо
     if not needs_auth:
         return await call_next(request)
@@ -333,8 +367,7 @@ async def require_auth_middleware(request: Request, call_next):
         authorization = request.headers.get("Authorization")
         if not authorization or not authorization.startswith("Bearer "):
             return JSONResponse(
-                status_code=401,
-                content={"detail": "Authentication required"}
+                status_code=401, content={"detail": "Authentication required"}
             )
 
         token = authorization.split(" ")[1]
@@ -346,8 +379,7 @@ async def require_auth_middleware(request: Request, call_next):
     except Exception as e:
         logger.warning("Authentication failed", path=request.url.path, error=str(e))
         return JSONResponse(
-            status_code=401,
-            content={"detail": "Invalid authentication credentials"}
+            status_code=401, content={"detail": "Invalid authentication credentials"}
         )
 
     return await call_next(request)
@@ -355,9 +387,7 @@ async def require_auth_middleware(request: Request, call_next):
 
 # Функція для швидкої інтеграції в існуючий додаток
 def integrate_security(
-    app: FastAPI,
-    redis_client: Optional[redis.Redis] = None,
-    require_auth: bool = True
+    app: FastAPI, redis_client: Optional[redis.Redis] = None, require_auth: bool = True
 ) -> SecurityIntegration:
     """
     Швидка інтеграція всіх security компонентів в FastAPI додаток

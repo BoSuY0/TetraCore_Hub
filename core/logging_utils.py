@@ -81,6 +81,18 @@ class RedactSecretsProcessor:  # pragma: no cover – простий допом�
 
         return event_dict
 
+    def _is_sensitive_key(self, key: str) -> bool:
+        k = key.lower()
+        return any(s in k for s in self.SENSITIVE_KEYS)
+
+    def _redact(self, value: Any) -> str:
+        try:
+            if isinstance(value, str) and value.lower().startswith("bearer "):
+                return "Bearer <redacted>"
+            return "<redacted>"
+        except Exception:
+            return "<redacted>"
+
 
 class SampleInfoProcessor:  # pragma: no cover – простий допоміжний клас
     """Відкидає частину INFO логів за семпл-рейтом для зменшення шуму.
@@ -103,15 +115,3 @@ class SampleInfoProcessor:  # pragma: no cover – простий допоміж
             if self.random.random() > self.rate:
                 raise structlog.DropEvent
         return event_dict
-
-    def _is_sensitive_key(self, key: str) -> bool:
-        k = key.lower()
-        return any(s in k for s in self.SENSITIVE_KEYS)
-
-    def _redact(self, value: Any) -> str:
-        try:
-            if isinstance(value, str) and value.lower().startswith("bearer "):
-                return "Bearer <redacted>"
-            return "<redacted>"
-        except Exception:
-            return "<redacted>"

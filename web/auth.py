@@ -185,7 +185,9 @@ async def login(request: Request, credentials: LoginRequest):
                 credentials.password, admin_password
             )
             logger.debug(
-                "Password verification result", method="bcrypt", success=bool(login_successful)
+                "Password verification result",
+                method="bcrypt",
+                success=bool(login_successful),
             )
         else:
             # У продакшені вимагаємо хешований пароль

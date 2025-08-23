@@ -914,12 +914,26 @@ class SecretsManager:
                     logger.debug(
                         "Refreshing secret from Env provider during tests",
                         secret_name=name,
-                        changed=(current_env_value != cached_value)
-                        if cached_value is not None
-                        else True,
+                        changed=(
+                            (current_env_value != cached_value)
+                            if cached_value is not None
+                            else True
+                        ),
                         force=force_refresh,
-                        cached_len=(len(cached_value) if isinstance(cached_value, str) else (len(cached_value) if cached_value is not None else 0)),
-                        env_len=(len(current_env_value) if isinstance(current_env_value, str) else (len(current_env_value) if current_env_value is not None else 0)),
+                        cached_len=(
+                            len(cached_value)
+                            if isinstance(cached_value, str)
+                            else (len(cached_value) if cached_value is not None else 0)
+                        ),
+                        env_len=(
+                            len(current_env_value)
+                            if isinstance(current_env_value, str)
+                            else (
+                                len(current_env_value)
+                                if current_env_value is not None
+                                else 0
+                            )
+                        ),
                     )
                     use_cache = False  # Прочитати свіже значення нижче
                 else:

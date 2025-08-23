@@ -42,7 +42,7 @@ class WebSocketConnection:
 
             if compress and self.compression_enabled and len(message) > 1024:
                 # Компресія для великих повідомлень
-                compressed = gzip.compress(message.encode('utf-8'))
+                compressed = gzip.compress(message.encode("utf-8"))
                 if len(compressed) < len(message):
                     await self.websocket.send_bytes(compressed)
                     self.bytes_sent += len(compressed)
@@ -72,7 +72,7 @@ class WebSocketConnection:
                     self.bytes_received += len(data)
                 elif "bytes" in message:
                     # Декомпресія якщо потрібно
-                    data = gzip.decompress(message["bytes"]).decode('utf-8')
+                    data = gzip.decompress(message["bytes"]).decode("utf-8")
                     self.bytes_received += len(message["bytes"])
                 else:
                     raise ValueError("No text or bytes in message")
@@ -96,10 +96,7 @@ class WebSocketConnection:
     async def ping(self):
         """Відправка ping"""
         try:
-            ping_data = {
-                "type": "ping",
-                "timestamp": datetime.utcnow().isoformat()
-            }
+            ping_data = {"type": "ping", "timestamp": datetime.utcnow().isoformat()}
             await self.send_json(ping_data)
             self.last_ping = datetime.utcnow()
 
@@ -110,10 +107,7 @@ class WebSocketConnection:
     async def pong(self):
         """Відправка pong у відповідь на ping"""
         try:
-            pong_data = {
-                "type": "pong",
-                "timestamp": datetime.utcnow().isoformat()
-            }
+            pong_data = {"type": "pong", "timestamp": datetime.utcnow().isoformat()}
             await self.send_json(pong_data)
             self.last_pong = datetime.utcnow()
 
@@ -154,7 +148,7 @@ class WebSocketConnection:
             "errors": self.errors,
             "compression_enabled": self.compression_enabled,
             "last_ping": self.last_ping.isoformat() if self.last_ping else None,
-            "last_pong": self.last_pong.isoformat() if self.last_pong else None
+            "last_pong": self.last_pong.isoformat() if self.last_pong else None,
         }
 
 
@@ -228,13 +222,17 @@ class WebSocketManager:
         """Додавання нового WebSocket з'єднання"""
         try:
             # Генерація унікального ID з'єднання
-            connection_id = f"ws_{datetime.utcnow().timestamp()}_{len(self.connections)}"
+            connection_id = (
+                f"ws_{datetime.utcnow().timestamp()}_{len(self.connections)}"
+            )
 
             # Перевірка ліміту з'єднань
             if len(self.connections) >= self.settings.max_connections:
                 await websocket.close(4008, "Maximum connections exceeded")
-                self.logger.warning("Connection rejected: max connections exceeded",
-                                  connection_id=connection_id)
+                self.logger.warning(
+                    "Connection rejected: max connections exceeded",
+                    connection_id=connection_id,
+                )
                 return None
 
             # Створення з'єднання
@@ -251,7 +249,9 @@ class WebSocketManager:
                 # Закриття попереднього з'єднання клієнта якщо є
                 if client_id in self.connections_by_client:
                     old_connection_id = self.connections_by_client[client_id]
-                    await self.remove_connection(old_connection_id, "New connection established")
+                    await self.remove_connection(
+                        old_connection_id, "New connection established"
+                    )
 
                 self.connections_by_client[client_id] = connection_id
 
@@ -265,24 +265,28 @@ class WebSocketManager:
             if self.on_connection_opened:
                 await self.on_connection_opened(connection_id, client_id)
 
-            self.logger.info("WebSocket connection added",
-                           connection_id=connection_id,
-                           client_id=client_id,
-                           total_connections=len(self.connections))
+            self.logger.info(
+                "WebSocket connection added",
+                connection_id=connection_id,
+                client_id=client_id,
+                total_connections=len(self.connections),
+            )
 
             return connection_id
 
         except Exception as e:
-            self.logger.error("Failed to add WebSocket connection",
-                            client_id=client_id,
-                            error=str(e))
+            self.logger.error(
+                "Failed to add WebSocket connection", client_id=client_id, error=str(e)
+            )
             try:
                 await websocket.close(4000, "Internal server error")
             except:
                 pass
             return None
 
-    async def remove_connection(self, connection_id: str, reason: str = "Connection closed") -> bool:
+    async def remove_connection(
+        self, connection_id: str, reason: str = "Connection closed"
+    ) -> bool:
         """Видалення WebSocket з'єднання"""
         try:
             if connection_id not in self.connections:
@@ -308,21 +312,27 @@ class WebSocketManager:
             if self.on_connection_closed:
                 await self.on_connection_closed(connection_id, client_id, reason)
 
-            self.logger.info("WebSocket connection removed",
-                           connection_id=connection_id,
-                           client_id=client_id,
-                           reason=reason,
-                           total_connections=len(self.connections))
+            self.logger.info(
+                "WebSocket connection removed",
+                connection_id=connection_id,
+                client_id=client_id,
+                reason=reason,
+                total_connections=len(self.connections),
+            )
 
             return True
 
         except Exception as e:
-            self.logger.error("Failed to remove WebSocket connection",
-                            connection_id=connection_id,
-                            error=str(e))
+            self.logger.error(
+                "Failed to remove WebSocket connection",
+                connection_id=connection_id,
+                error=str(e),
+            )
             return False
 
-    async def send_to_connection(self, connection_id: str, message: Dict[str, Any]) -> bool:
+    async def send_to_connection(
+        self, connection_id: str, message: Dict[str, Any]
+    ) -> bool:
         """Відправка повідомлення конкретному з'єднанню"""
         try:
             if connection_id not in self.connections:
@@ -340,9 +350,11 @@ class WebSocketManager:
             return True
 
         except Exception as e:
-            self.logger.error("Failed to send message to connection",
-                            connection_id=connection_id,
-                            error=str(e))
+            self.logger.error(
+                "Failed to send message to connection",
+                connection_id=connection_id,
+                error=str(e),
+            )
 
             # Видалення неробочого з'єднання
             await self.remove_connection(connection_id, f"Send error: {str(e)}")
@@ -359,14 +371,17 @@ class WebSocketManager:
             return await self.send_to_connection(connection_id, message)
 
         except Exception as e:
-            self.logger.error("Failed to send message to client",
-                            client_id=client_id,
-                            error=str(e))
+            self.logger.error(
+                "Failed to send message to client", client_id=client_id, error=str(e)
+            )
             return False
 
-    async def broadcast(self, message: Dict[str, Any],
-                      exclude_connections: Set[str] = None,
-                      exclude_clients: Set[str] = None) -> int:
+    async def broadcast(
+        self,
+        message: Dict[str, Any],
+        exclude_connections: Set[str] = None,
+        exclude_clients: Set[str] = None,
+    ) -> int:
         """Широкомовна розсилка повідомлення"""
         try:
             exclude_connections = exclude_connections or set()
@@ -391,14 +406,18 @@ class WebSocketManager:
                         failed_count += 1
                 except Exception as e:
                     failed_count += 1
-                    self.logger.debug("Failed to send broadcast message",
-                                    connection_id=connection_id,
-                                    error=str(e))
+                    self.logger.debug(
+                        "Failed to send broadcast message",
+                        connection_id=connection_id,
+                        error=str(e),
+                    )
 
-            self.logger.info("Broadcast completed",
-                           sent=sent_count,
-                           failed=failed_count,
-                           total_connections=len(self.connections))
+            self.logger.info(
+                "Broadcast completed",
+                sent=sent_count,
+                failed=failed_count,
+                total_connections=len(self.connections),
+            )
 
             return sent_count
 
@@ -406,7 +425,9 @@ class WebSocketManager:
             self.logger.error("Failed to broadcast message", error=str(e))
             return 0
 
-    async def receive_from_connection(self, connection_id: str) -> Optional[Dict[str, Any]]:
+    async def receive_from_connection(
+        self, connection_id: str
+    ) -> Optional[Dict[str, Any]]:
         """Отримання повідомлення від з'єднання"""
         try:
             if connection_id not in self.connections:
@@ -431,9 +452,11 @@ class WebSocketManager:
             await self.remove_connection(connection_id, "Client disconnected")
             return None
         except Exception as e:
-            self.logger.error("Failed to receive message from connection",
-                            connection_id=connection_id,
-                            error=str(e))
+            self.logger.error(
+                "Failed to receive message from connection",
+                connection_id=connection_id,
+                error=str(e),
+            )
             await self.remove_connection(connection_id, f"Receive error: {str(e)}")
             return None
 
@@ -448,9 +471,9 @@ class WebSocketManager:
             return True
 
         except Exception as e:
-            self.logger.error("Failed to ping connection",
-                            connection_id=connection_id,
-                            error=str(e))
+            self.logger.error(
+                "Failed to ping connection", connection_id=connection_id, error=str(e)
+            )
             await self.remove_connection(connection_id, f"Ping error: {str(e)}")
             return False
 
@@ -504,7 +527,9 @@ class WebSocketManager:
 
         # Статистика трафіку
         total_bytes_sent = sum(conn.bytes_sent for conn in self.connections.values())
-        total_bytes_received = sum(conn.bytes_received for conn in self.connections.values())
+        total_bytes_received = sum(
+            conn.bytes_received for conn in self.connections.values()
+        )
         total_errors = sum(conn.errors for conn in self.connections.values())
 
         return {
@@ -519,16 +544,18 @@ class WebSocketManager:
             "total_bytes_received": total_bytes_received,
             "total_errors": total_errors,
             "client_stats": dict(client_stats),
-            "is_running": self.is_running
+            "is_running": self.is_running,
         }
 
     def is_healthy(self) -> bool:
         """Перевірка здоров'я менеджера"""
-        return (self.is_running and
-                self.heartbeat_task is not None and
-                not self.heartbeat_task.done() and
-                self.cleanup_task is not None and
-                not self.cleanup_task.done())
+        return (
+            self.is_running
+            and self.heartbeat_task is not None
+            and not self.heartbeat_task.done()
+            and self.cleanup_task is not None
+            and not self.cleanup_task.done()
+        )
 
     async def _heartbeat_loop(self):
         """Фонова задача heartbeat"""
@@ -569,8 +596,9 @@ class WebSocketManager:
                 await self.remove_connection(connection_id, "Connection unhealthy")
 
             if unhealthy_connections:
-                self.logger.info("Cleaned up unhealthy connections",
-                               count=len(unhealthy_connections))
+                self.logger.info(
+                    "Cleaned up unhealthy connections", count=len(unhealthy_connections)
+                )
 
         except Exception as e:
             self.logger.error("Error cleaning up unhealthy connections", error=str(e))
@@ -583,8 +611,9 @@ class WebSocketManager:
             for connection_id in connection_ids:
                 await self.remove_connection(connection_id, "Server shutdown")
 
-            self.logger.info("All WebSocket connections closed",
-                           count=len(connection_ids))
+            self.logger.info(
+                "All WebSocket connections closed", count=len(connection_ids)
+            )
 
         except Exception as e:
             self.logger.error("Error closing all connections", error=str(e))

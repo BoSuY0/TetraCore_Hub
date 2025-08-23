@@ -44,7 +44,7 @@ def mock_settings(monkeypatch):
     """
     # Create a fresh Settings object for each test
     settings = Settings()
-    
+
     return settings
 
 
@@ -53,6 +53,7 @@ class MockRedisManager:
     A mock implementation of the RedisManager for testing purposes.
     It simulates the async methods without actual Redis connection.
     """
+
     def __init__(self):
         self._cache = {}
         self.publish = AsyncMock()
@@ -81,7 +82,7 @@ class MockRedisManager:
 
     async def exists(self, key):
         return key in self._cache
-        
+
     def get_redis_client(self):
         # Return a mock client
         return AsyncMock()
@@ -100,9 +101,12 @@ def mock_redis_manager(monkeypatch):
     # The patch target depends on where RedisManager is imported.
     # Updated to the refactored path 'core.cache.redis.RedisManager'
     monkeypatch.setattr("core.cache.redis.RedisManager", lambda: mock_instance)
-    
+
     # If there's a singleton getInstance pattern, we patch that.
-    if hasattr(mock_instance, 'get_instance'):
-        monkeypatch.setattr("core.cache.redis.RedisManager.get_instance", AsyncMock(return_value=mock_instance))
-        
-    return mock_instance 
+    if hasattr(mock_instance, "get_instance"):
+        monkeypatch.setattr(
+            "core.cache.redis.RedisManager.get_instance",
+            AsyncMock(return_value=mock_instance),
+        )
+
+    return mock_instance

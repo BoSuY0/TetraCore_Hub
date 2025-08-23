@@ -40,4 +40,4 @@ class RateLimiterProcessor:  # pragma: no cover – простий допомі�
                 raise structlog.DropEvent
             self._last[key] = now
         # Пропускаємо event_dict далі в конвеєр
-        return event_dict 
+        return event_dict

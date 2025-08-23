@@ -3,24 +3,33 @@ from pathlib import Path
 
 # Directories to ignore during test creation
 IGNORED_DIRS = {
-    '.git', '__pycache__', 'venv', 'node_modules', 'frontend', 
-    'static', 'templates', 'logs', 'docs', 'examples', 'scripts', 'tests'
+    ".git",
+    "__pycache__",
+    "venv",
+    "node_modules",
+    "frontend",
+    "static",
+    "templates",
+    "logs",
+    "docs",
+    "examples",
+    "scripts",
+    "tests",
 }
 
 # Files to ignore
-IGNORED_FILES = {
-    'celery_worker.py', 'celeryconfig.py' # These are planned for removal
-}
+IGNORED_FILES = {"celery_worker.py", "celeryconfig.py"}  # These are planned for removal
+
 
 def create_test_structure(source_dir: str, test_dir: str):
     """Creates a test file structure based on the existing project structure."""
     print(f"Starting to create test structure in '{test_dir}'...")
-    
+
     source_path = Path(source_dir)
     test_path = Path(test_dir)
     test_path.mkdir(exist_ok=True)
 
-    for path_object in source_path.rglob('*.py'):
+    for path_object in source_path.rglob("*.py"):
         # Skip files in ignored directories
         if any(ignored in str(path_object) for ignored in IGNORED_DIRS):
             continue
@@ -28,9 +37,9 @@ def create_test_structure(source_dir: str, test_dir: str):
         # Skip specific ignored files
         if path_object.name in IGNORED_FILES:
             continue
-            
+
         # Skip __init__.py files in the root
-        if path_object.name == '__init__.py' and path_object.parent == source_path:
+        if path_object.name == "__init__.py" and path_object.parent == source_path:
             continue
 
         relative_path = path_object.relative_to(source_path)
@@ -38,16 +47,16 @@ def create_test_structure(source_dir: str, test_dir: str):
 
         # Create parent directories for the test file if they don't exist
         test_file_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Create __init__.py in test subdirectories
-        init_file = test_file_path.parent / '__init__.py'
+        init_file = test_file_path.parent / "__init__.py"
         if not init_file.exists():
             print(f"Creating __init__.py at: {init_file}")
             init_file.touch()
 
         if not test_file_path.exists():
-            module_path = ".".join(relative_path.with_suffix('').parts)
-            
+            module_path = ".".join(relative_path.with_suffix("").parts)
+
             content = f'''"""
 Unit tests for the {module_path} module.
 """
@@ -63,11 +72,12 @@ def test_placeholder():
     assert True
 '''
             print(f"Creating test file: {test_file_path}")
-            test_file_path.write_text(content, encoding='utf-8')
+            test_file_path.write_text(content, encoding="utf-8")
+
 
 def create_pytest_ini(root_dir: str):
     """Creates pytest.ini with base configurations."""
-    content = '''[pytest]
+    content = """[pytest]
 python_files = test_*.py
 python_classes = Test*
 python_functions = test_*
@@ -89,11 +99,11 @@ addopts = -v -ra --showlocals
 # Filter warnings
 filterwarnings =
     ignore::DeprecationWarning
-'''
-    pytest_ini_path = Path(root_dir) / 'pytest.ini'
+"""
+    pytest_ini_path = Path(root_dir) / "pytest.ini"
     if not pytest_ini_path.exists():
         print(f"Creating {pytest_ini_path}")
-        pytest_ini_path.write_text(content, encoding='utf-8')
+        pytest_ini_path.write_text(content, encoding="utf-8")
     else:
         print(f"{pytest_ini_path} already exists. Skipping.")
 
@@ -103,13 +113,14 @@ def main():
     # The script is in tetra-core-hub/scripts, so project root is two levels up.
     project_root = Path(__file__).parent.parent
     source_dir = str(project_root)
-    test_dir = str(project_root / 'tests')
-    
+    test_dir = str(project_root / "tests")
+
     create_test_structure(source_dir, test_dir)
     create_pytest_ini(source_dir)
-    
+
     print("\\nTest structure creation complete!")
     print("Please review the generated files and start filling in the tests.")
 
+
 if __name__ == "__main__":
-    main() 
+    main()

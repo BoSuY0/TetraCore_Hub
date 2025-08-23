@@ -43,12 +43,13 @@ SECURITY_HEADERS = {
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
     "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';",
     "Referrer-Policy": "strict-origin-when-cross-origin",
-    "Permissions-Policy": "geolocation=(), microphone=(), camera=()"
+    "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
 }
 
 
 class RateLimitConfig(BaseModel):
     """Конфігурація rate limiting"""
+
     requests_per_minute: int = Field(default=DEFAULT_RATE_LIMIT)
     burst_limit: int = Field(default=BURST_RATE_LIMIT)
     window_seconds: int = Field(default=RATE_LIMIT_WINDOW)
@@ -57,6 +58,7 @@ class RateLimitConfig(BaseModel):
 
 class IPInfo(BaseModel):
     """Інформація про IP адресу"""
+
     ip: str
     request_count: int = 0
     first_seen: datetime = Field(default_factory=datetime.utcnow)
@@ -94,11 +96,7 @@ class NetworkSecurityManager:
     def _load_whitelist(self):
         """Завантаження IP адрес у whitelist"""
         # Локальні адреси завжди в whitelist
-        self.whitelist_ips.update([
-            "127.0.0.1",
-            "::1",
-            "localhost"
-        ])
+        self.whitelist_ips.update(["127.0.0.1", "::1", "localhost"])
 
         # Додаткові trusted IP з конфігурації
         # TODO: Завантажити з конфігурації або БД
@@ -112,7 +110,7 @@ class NetworkSecurityManager:
             allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
             allow_headers=["*"],
             expose_headers=["X-Total-Count", "X-Page-Count"],
-            max_age=3600
+            max_age=3600,
         )
 
     def get_client_ip(self, request: Request) -> str:
@@ -122,8 +120,8 @@ class NetworkSecurityManager:
             "X-Real-IP",
             "X-Forwarded-For",
             "CF-Connecting-IP",  # Cloudflare
-            "True-Client-IP",    # Cloudflare Enterprise
-            "X-Client-IP"
+            "True-Client-IP",  # Cloudflare Enterprise
+            "X-Client-IP",
         ]
 
         for header in headers_to_check:
@@ -146,7 +144,9 @@ class NetworkSecurityManager:
 
         return "unknown"
 
-    async def check_rate_limit(self, identifier: str, custom_limit: Optional[int] = None) -> bool:
+    async def check_rate_limit(
+        self, identifier: str, custom_limit: Optional[int] = None
+    ) -> bool:
         """Перевірка rate limit"""
         current_time = time.time()
         limit = custom_limit or self.rate_limit_config.requests_per_minute
@@ -213,7 +213,7 @@ class NetworkSecurityManager:
             block_info = {
                 "blocked_at": datetime.utcnow().isoformat(),
                 "duration": duration,
-                "reason": reason or "Rate limit exceeded"
+                "reason": reason or "Rate limit exceeded",
             }
             await self.redis_client.setex(blocked_key, duration, json.dumps(block_info))
 
@@ -250,7 +250,9 @@ class NetworkSecurityManager:
 
         # 2. Підозрілі User-Agent (тільки для не-API запитів)
         user_agent = request.headers.get("User-Agent", "")
-        if not request.url.path.startswith("/api/") and (not user_agent or len(user_agent) < 10):
+        if not request.url.path.startswith("/api/") and (
+            not user_agent or len(user_agent) < 10
+        ):
             patterns.append("suspicious_user_agent")
 
         # 3. Відсутні важливі заголовки (тільки для браузерних запитів, не API)
@@ -266,8 +268,14 @@ class NetworkSecurityManager:
 
         # 5. Підозрілі шляхи (виключаємо legitimate API paths)
         suspicious_paths = [
-            "/.env", "/wp-admin", "/phpmyadmin", "/.git",
-            "/admin", "/backup", "/.aws", "/config"
+            "/.env",
+            "/wp-admin",
+            "/phpmyadmin",
+            "/.git",
+            "/admin",
+            "/backup",
+            "/.aws",
+            "/config",
         ]
         path_lower = request.url.path.lower()
         if any(path in path_lower for path in suspicious_paths):
@@ -277,7 +285,9 @@ class NetworkSecurityManager:
         threshold = 3 if request.url.path.startswith("/api/") else 2
         if len(patterns) >= threshold:
             logger.warning("DDoS pattern detected", ip=ip, patterns=patterns)
-            await self.block_ip(ip, DDOS_BLOCK_DURATION, f"DDoS patterns: {', '.join(patterns)}")
+            await self.block_ip(
+                ip, DDOS_BLOCK_DURATION, f"DDoS patterns: {', '.join(patterns)}"
+            )
             return True
 
         return False
@@ -285,37 +295,45 @@ class NetworkSecurityManager:
     async def validate_request(self, request: Request):
         """Валідація запиту на безпеку"""
         client_ip = self.get_client_ip(request)
-        
+
         # Перевіряємо environment та налаштовуємо відповідні ліміти
         environment = os.getenv("ENVIRONMENT", "development").lower()
         is_development = environment == "development"
-        
+
         # У development режимі збільшуємо ліміти та спрощуємо перевірки
         if is_development:
             # Більш м'які ліміти для development
             dev_rate_limit = 500  # 500 запитів на хвилину
-            logger.debug("Development mode - using relaxed rate limits", 
-                        client_ip=client_ip, 
-                        rate_limit=dev_rate_limit)
-            
+            logger.debug(
+                "Development mode - using relaxed rate limits",
+                client_ip=client_ip,
+                rate_limit=dev_rate_limit,
+            )
+
             # Тільки базова перевірка rate limit без блокування
             if not await self.check_rate_limit(client_ip, dev_rate_limit):
-                logger.warning("Rate limit exceeded in development mode", 
-                             client_ip=client_ip,
-                             limit=dev_rate_limit)
-                raise HTTPException(status_code=429, detail="Too many requests. Please try again later.")
-            
+                logger.warning(
+                    "Rate limit exceeded in development mode",
+                    client_ip=client_ip,
+                    limit=dev_rate_limit,
+                )
+                raise HTTPException(
+                    status_code=429, detail="Too many requests. Please try again later."
+                )
+
             # Пропускаємо DDoS detection та блокування в dev режимі
             return {
                 "ip": client_ip,
                 "validated": True,
                 "timestamp": datetime.utcnow(),
-                "environment": "development"
+                "environment": "development",
             }
-        
+
         # Production режим - повна перевірка
-        logger.debug("Production mode - using full security validation", client_ip=client_ip)
-        
+        logger.debug(
+            "Production mode - using full security validation", client_ip=client_ip
+        )
+
         # 1. Перевірка блокування
         if await self.is_ip_blocked(client_ip):
             raise HTTPException(status_code=403, detail="Access denied")
@@ -341,7 +359,7 @@ class NetworkSecurityManager:
             "ip": client_ip,
             "validated": True,
             "timestamp": datetime.utcnow(),
-            "environment": "production"
+            "environment": "production",
         }
 
     def add_security_headers(self, response: Response):
@@ -360,7 +378,7 @@ class NetworkSecurityManager:
             "status": response.status_code,
             "duration": duration,
             "user_agent": request.headers.get("User-Agent", ""),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
         # Зберігаємо в Redis для аналізу
@@ -375,7 +393,7 @@ class NetworkSecurityManager:
             "blocked_ips": len(self.blocked_ips),
             "active_connections": sum(self.ip_connections.values()),
             "rate_limiters_active": len(self.rate_limiters),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
         # Додаткова статистика з Redis
@@ -383,7 +401,14 @@ class NetworkSecurityManager:
             try:
                 # Кількість заблокованих IP в Redis
                 blocked_pattern = "blocked_ip:*"
-                blocked_count = len([key async for key in self.redis_client.scan_iter(match=blocked_pattern)])
+                blocked_count = len(
+                    [
+                        key
+                        async for key in self.redis_client.scan_iter(
+                            match=blocked_pattern
+                        )
+                    ]
+                )
                 stats["total_blocked_ips"] = blocked_count + len(self.blocked_ips)
             except Exception as e:
                 logger.error("Error getting Redis stats", error=str(e))
@@ -420,7 +445,11 @@ async def security_middleware(request: Request, call_next):
         # Логування (тільки у production або при помилках)
         duration = time.time() - start_time
         environment = os.getenv("ENVIRONMENT", "development").lower()
-        if environment != "development" or duration > 5.0 or response.status_code >= 400:
+        if (
+            environment != "development"
+            or duration > 5.0
+            or response.status_code >= 400
+        ):
             await network_security.log_request(request, response, duration)
 
         return response
@@ -429,16 +458,19 @@ async def security_middleware(request: Request, call_next):
         # Логуємо тільки серйозні помилки в development
         environment = os.getenv("ENVIRONMENT", "development").lower()
         if environment != "development" or http_ex.status_code != 429:
-            logger.warning("Security middleware HTTP exception", 
-                         status_code=http_ex.status_code, 
-                         detail=http_ex.detail,
-                         path=request.url.path)
+            logger.warning(
+                "Security middleware HTTP exception",
+                status_code=http_ex.status_code,
+                detail=http_ex.detail,
+                path=request.url.path,
+            )
         raise
     except Exception as e:
-        logger.error("Security middleware error", error=str(e), exception_type=type(e).__name__)
+        logger.error(
+            "Security middleware error", error=str(e), exception_type=type(e).__name__
+        )
         return JSONResponse(
-            status_code=500,
-            content={"detail": "Internal server error"}
+            status_code=500, content={"detail": "Internal server error"}
         )
     finally:
         # Очищення з'єднання
@@ -449,22 +481,30 @@ async def security_middleware(request: Request, call_next):
 # Декоратори для специфічних endpoints
 def rate_limit(requests_per_minute: int = None):
     """Декоратор для кастомного rate limiting"""
+
     def decorator(func):
         @wraps(func)
         async def wrapper(request: Request, *args, **kwargs):
             ip = network_security.get_client_ip(request)
             endpoint_key = f"{ip}:{request.url.path}"
 
-            if not await network_security.check_rate_limit(endpoint_key, requests_per_minute):
-                raise HTTPException(status_code=429, detail="Rate limit exceeded for this endpoint")
+            if not await network_security.check_rate_limit(
+                endpoint_key, requests_per_minute
+            ):
+                raise HTTPException(
+                    status_code=429, detail="Rate limit exceeded for this endpoint"
+                )
 
             return await func(request, *args, **kwargs)
+
         return wrapper
+
     return decorator
 
 
 def require_ip_whitelist(func):
     """Декоратор для endpoints що вимагають whitelist"""
+
     @wraps(func)
     async def wrapper(*args, **kwargs):
         # Шукаємо request в аргументах
@@ -473,21 +513,24 @@ def require_ip_whitelist(func):
             if isinstance(arg, Request):
                 request = arg
                 break
-        
+
         # Або в kwargs
         if not request:
-            request = kwargs.get('request')
-        
+            request = kwargs.get("request")
+
         if not request:
             raise HTTPException(status_code=500, detail="Request object not found")
-            
+
         ip = network_security.get_client_ip(request)
 
         if ip not in network_security.whitelist_ips:
-            logger.warning("Access denied for non-whitelisted IP", ip=ip, path=request.url.path)
+            logger.warning(
+                "Access denied for non-whitelisted IP", ip=ip, path=request.url.path
+            )
             raise HTTPException(status_code=403, detail="Access denied")
 
         return await func(*args, **kwargs)
+
     return wrapper
 
 

@@ -1,9 +1,11 @@
 """
 Unit tests for the config module.
 """
+
 import pytest
 
 # TODO: Add necessary imports from 'config'
+
 
 def test_placeholder():
     """

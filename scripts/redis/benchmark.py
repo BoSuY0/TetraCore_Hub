@@ -19,7 +19,9 @@ import structlog
 import click
 
 # Додаємо шлях до кореневої директорії проекту
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from config import Settings
 from core.redis_manager import RedisManager
@@ -28,6 +30,7 @@ from core.redis_manager import RedisManager
 @dataclass
 class BenchmarkResult:
     """Результат бенчмарку"""
+
     operation: str
     total_operations: int
     total_time: float
@@ -61,9 +64,9 @@ class RedisBenchmark:
 
     async def run_benchmarks(self, operations: int = 10000, data_size: int = 1024):
         """Запуск всіх бенчмарків"""
-        self.logger.info("Starting Redis benchmarks",
-                        operations=operations,
-                        data_size=data_size)
+        self.logger.info(
+            "Starting Redis benchmarks", operations=operations, data_size=data_size
+        )
 
         # Генерація тестових даних
         test_data = self._generate_test_data(data_size)
@@ -109,7 +112,9 @@ class RedisBenchmark:
                 errors += 1
                 self.logger.error("SET operation failed", error=str(e))
 
-        set_result = self._calculate_result("SET", operations, start_time, latencies, errors)
+        set_result = self._calculate_result(
+            "SET", operations, start_time, latencies, errors
+        )
         self.results.append(set_result)
 
         # GET операції
@@ -128,7 +133,9 @@ class RedisBenchmark:
                 errors += 1
                 self.logger.error("GET operation failed", error=str(e))
 
-        get_result = self._calculate_result("GET", operations, start_time, latencies, errors)
+        get_result = self._calculate_result(
+            "GET", operations, start_time, latencies, errors
+        )
         self.results.append(get_result)
 
         # Очищення
@@ -160,7 +167,7 @@ class RedisBenchmark:
                     message = {
                         "message_id": f"bench_{i}",
                         "data": data,
-                        "timestamp": datetime.utcnow().isoformat()
+                        "timestamp": datetime.utcnow().isoformat(),
                     }
                     await self.redis_manager.publish("bench:pipeline", message)
                     latencies.append((time.time() - op_start) * 1000)
@@ -176,7 +183,7 @@ class RedisBenchmark:
                 operations,
                 start_time,
                 latencies,
-                errors
+                errors,
             )
             self.results.append(result)
 
@@ -209,7 +216,7 @@ class RedisBenchmark:
                 message = {
                     "message_id": f"pubsub_{i}",
                     "data": data,
-                    "timestamp": datetime.utcnow().isoformat()
+                    "timestamp": datetime.utcnow().isoformat(),
                 }
                 await self.redis_manager.publish("bench:pubsub", message)
                 latencies.append((time.time() - op_start) * 1000)
@@ -220,12 +227,14 @@ class RedisBenchmark:
         # Очікування отримання всіх повідомлень
         await asyncio.sleep(1)
 
-        result = self._calculate_result("Pub/Sub", operations, start_time, latencies, errors)
+        result = self._calculate_result(
+            "Pub/Sub", operations, start_time, latencies, errors
+        )
         self.results.append(result)
 
-        self.logger.info("Pub/Sub results",
-                        sent=operations,
-                        received=len(received_messages))
+        self.logger.info(
+            "Pub/Sub results", sent=operations, received=len(received_messages)
+        )
 
         # Відписка
         await self.redis_manager.unsubscribe(["bench:pubsub"])
@@ -247,9 +256,7 @@ class RedisBenchmark:
 
             for i in range(concurrency):
                 task = self._concurrent_operations(
-                    i * operations_per_task,
-                    operations_per_task,
-                    data
+                    i * operations_per_task, operations_per_task, data
                 )
                 tasks.append(task)
 
@@ -269,11 +276,13 @@ class RedisBenchmark:
                 operations,
                 start_time,
                 latencies,
-                errors
+                errors,
             )
             self.results.append(result)
 
-    async def _concurrent_operations(self, start_idx: int, count: int, data: str) -> List[float]:
+    async def _concurrent_operations(
+        self, start_idx: int, count: int, data: str
+    ) -> List[float]:
         """Виконання операцій для конкурентного тесту"""
         latencies = []
 
@@ -312,11 +321,7 @@ class RedisBenchmark:
                     self.logger.error("TTL operation failed", error=str(e))
 
             result = self._calculate_result(
-                f"SET with TTL={ttl}s",
-                len(latencies),
-                start_time,
-                latencies,
-                errors
+                f"SET with TTL={ttl}s", len(latencies), start_time, latencies, errors
             )
             self.results.append(result)
 
@@ -344,7 +349,9 @@ class RedisBenchmark:
 
                 try:
                     count = 0
-                    async for key in self.redis_manager.redis_client.scan_iter(match=pattern):
+                    async for key in self.redis_manager.redis_client.scan_iter(
+                        match=pattern
+                    ):
                         count += 1
                     keys_found = count
                     latencies.append((time.time() - op_start) * 1000)
@@ -357,7 +364,7 @@ class RedisBenchmark:
                 len(latencies),
                 start_time,
                 latencies,
-                errors
+                errors,
             )
             self.results.append(result)
 
@@ -366,14 +373,13 @@ class RedisBenchmark:
 
     def _generate_test_data(self, size: int) -> str:
         """Генерація тестових даних"""
-        return json.dumps({
-            "data": "x" * size,
-            "timestamp": datetime.utcnow().isoformat(),
-            "metadata": {
-                "test": True,
-                "size": size
+        return json.dumps(
+            {
+                "data": "x" * size,
+                "timestamp": datetime.utcnow().isoformat(),
+                "metadata": {"test": True, "size": size},
             }
-        })
+        )
 
     async def _cleanup_keys(self, pattern: str):
         """Очищення тестових ключів"""
@@ -387,8 +393,14 @@ class RedisBenchmark:
         except Exception as e:
             self.logger.error("Failed to cleanup keys", pattern=pattern, error=str(e))
 
-    def _calculate_result(self, operation: str, total_ops: int, start_time: float,
-                         latencies: List[float], errors: int) -> BenchmarkResult:
+    def _calculate_result(
+        self,
+        operation: str,
+        total_ops: int,
+        start_time: float,
+        latencies: List[float],
+        errors: int,
+    ) -> BenchmarkResult:
         """Розрахунок результатів бенчмарку"""
         total_time = time.time() - start_time
         valid_latencies = [l for l in latencies if l > 0]
@@ -405,7 +417,7 @@ class RedisBenchmark:
                 p50_latency_ms=0,
                 p95_latency_ms=0,
                 p99_latency_ms=0,
-                errors=errors
+                errors=errors,
             )
 
         sorted_latencies = sorted(valid_latencies)
@@ -421,7 +433,7 @@ class RedisBenchmark:
             p50_latency_ms=sorted_latencies[len(sorted_latencies) // 2],
             p95_latency_ms=sorted_latencies[int(len(sorted_latencies) * 0.95)],
             p99_latency_ms=sorted_latencies[int(len(sorted_latencies) * 0.99)],
-            errors=errors
+            errors=errors,
         )
 
     def _print_results(self):
@@ -446,7 +458,7 @@ class RedisBenchmark:
             "P50 (ms)",
             "P95 (ms)",
             "P99 (ms)",
-            "Errors"
+            "Errors",
         ]
 
         # Форматування заголовків
@@ -458,19 +470,21 @@ class RedisBenchmark:
         row_format = "{:<35} {:>10} {:>10.2f} {:>10.0f} {:>10.2f} {:>10.2f} {:>10.2f} {:>10.2f} {:>10.2f} {:>10.2f} {:>8}"
 
         for result in self.results:
-            print(row_format.format(
-                result.operation,
-                result.total_operations,
-                result.total_time,
-                result.operations_per_second,
-                result.avg_latency_ms,
-                result.min_latency_ms,
-                result.max_latency_ms,
-                result.p50_latency_ms,
-                result.p95_latency_ms,
-                result.p99_latency_ms,
-                result.errors
-            ))
+            print(
+                row_format.format(
+                    result.operation,
+                    result.total_operations,
+                    result.total_time,
+                    result.operations_per_second,
+                    result.avg_latency_ms,
+                    result.min_latency_ms,
+                    result.max_latency_ms,
+                    result.p50_latency_ms,
+                    result.p95_latency_ms,
+                    result.p99_latency_ms,
+                    result.errors,
+                )
+            )
 
         print("=" * 150)
 
@@ -487,21 +501,27 @@ class RedisBenchmark:
             "redis_mode": self.redis_manager.redis_mode,
             "redis_url": self.settings.redis_url,
             "pipeline_enabled": self.redis_manager.pipeline_enabled,
-            "results": [asdict(r) for r in self.results]
+            "results": [asdict(r) for r in self.results],
         }
 
-        with open(filename, 'w') as f:
+        with open(filename, "w") as f:
             json.dump(data, f, indent=2)
 
         print(f"\nResults saved to: {filename}")
 
 
 @click.command()
-@click.option('--operations', '-o', default=10000, help='Number of operations to perform')
-@click.option('--data-size', '-s', default=1024, help='Size of test data in bytes')
-@click.option('--redis-url', '-r', help='Redis URL (overrides config)')
-@click.option('--mode', '-m', type=click.Choice(['standalone', 'sentinel', 'cluster']),
-              help='Redis mode to test')
+@click.option(
+    "--operations", "-o", default=10000, help="Number of operations to perform"
+)
+@click.option("--data-size", "-s", default=1024, help="Size of test data in bytes")
+@click.option("--redis-url", "-r", help="Redis URL (overrides config)")
+@click.option(
+    "--mode",
+    "-m",
+    type=click.Choice(["standalone", "sentinel", "cluster"]),
+    help="Redis mode to test",
+)
 async def main(operations: int, data_size: int, redis_url: str, mode: str):
     """Redis Performance Benchmark"""
     # Ініціалізація налаштувань
@@ -512,16 +532,16 @@ async def main(operations: int, data_size: int, redis_url: str, mode: str):
         settings.redis_url = redis_url
 
     if mode:
-        if mode == 'sentinel':
+        if mode == "sentinel":
             # Для тестування Sentinel потрібно задати URLs
-            sentinel_urls = os.getenv('REDIS_SENTINEL_URLS')
+            sentinel_urls = os.getenv("REDIS_SENTINEL_URLS")
             if sentinel_urls:
-                settings.redis_sentinel_urls = sentinel_urls.split(',')
-        elif mode == 'cluster':
+                settings.redis_sentinel_urls = sentinel_urls.split(",")
+        elif mode == "cluster":
             # Для тестування Cluster потрібно задати nodes
-            cluster_nodes = os.getenv('REDIS_CLUSTER_NODES')
+            cluster_nodes = os.getenv("REDIS_CLUSTER_NODES")
             if cluster_nodes:
-                settings.redis_cluster_nodes = cluster_nodes.split(',')
+                settings.redis_cluster_nodes = cluster_nodes.split(",")
 
     # Створення та запуск бенчмарку
     benchmark = RedisBenchmark(settings)

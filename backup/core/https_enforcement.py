@@ -20,20 +20,10 @@ SECURE_SCHEMES = {"https", "wss"}
 INSECURE_SCHEMES = {"http", "ws"}
 
 # Виключення для health checks та внутрішніх сервісів
-EXCLUDED_PATHS = {
-    "/health",
-    "/api/health",
-    "/_health",
-    "/metrics",
-    "/_internal"
-}
+EXCLUDED_PATHS = {"/health", "/api/health", "/_health", "/metrics", "/_internal"}
 
 # User agents що не підтримують redirect (для WebSocket)
-WS_USER_AGENTS = [
-    "websocket",
-    "ws-client",
-    "tetracore-worker"
-]
+WS_USER_AGENTS = ["websocket", "ws-client", "tetracore-worker"]
 
 
 class HTTPSEnforcer:
@@ -49,7 +39,7 @@ class HTTPSEnforcer:
         hsts_include_subdomains: bool = True,
         hsts_preload: bool = False,
         exclude_paths: Optional[List[str]] = None,
-        trusted_proxies: Optional[List[str]] = None
+        trusted_proxies: Optional[List[str]] = None,
     ):
         self.enabled = enabled and environment == "production"
         self.environment = environment
@@ -66,7 +56,7 @@ class HTTPSEnforcer:
             "total_requests": 0,
             "secure_requests": 0,
             "redirected_requests": 0,
-            "blocked_requests": 0
+            "blocked_requests": 0,
         }
 
     def is_secure_request(self, request: Request) -> bool:
@@ -81,6 +71,7 @@ class HTTPSEnforcer:
         if cf_visitor:
             try:
                 import json
+
                 visitor_data = json.loads(cf_visitor)
                 if visitor_data.get("scheme") in SECURE_SCHEMES:
                     return True
@@ -186,18 +177,15 @@ class HTTPSEnforcer:
             logger.warning(
                 "Insecure WebSocket connection blocked",
                 path=request.url.path,
-                client=request.client.host if request.client else "unknown"
+                client=request.client.host if request.client else "unknown",
             )
             return JSONResponse(
                 status_code=426,  # Upgrade Required
                 content={
                     "error": "Secure WebSocket connection required",
-                    "detail": "Please use WSS protocol instead of WS"
+                    "detail": "Please use WSS protocol instead of WS",
                 },
-                headers={
-                    "Upgrade": "websocket",
-                    "Connection": "Upgrade"
-                }
+                headers={"Upgrade": "websocket", "Connection": "Upgrade"},
             )
 
         # HTTP запити можуть бути перенаправлені
@@ -209,24 +197,20 @@ class HTTPSEnforcer:
                 "Redirecting to HTTPS",
                 from_url=str(request.url),
                 to_url=secure_url,
-                client=request.client.host if request.client else "unknown"
+                client=request.client.host if request.client else "unknown",
             )
 
-            return RedirectResponse(
-                url=secure_url,
-                status_code=REDIRECT_STATUS_CODE
-            )
+            return RedirectResponse(url=secure_url, status_code=REDIRECT_STATUS_CODE)
         else:
             # Якщо redirect вимкнено, блокуємо запит
             self.stats["blocked_requests"] += 1
             logger.warning(
                 "Insecure request blocked",
                 path=request.url.path,
-                client=request.client.host if request.client else "unknown"
+                client=request.client.host if request.client else "unknown",
             )
             raise HTTPException(
-                status_code=426,  # Upgrade Required
-                detail="HTTPS required"
+                status_code=426, detail="HTTPS required"  # Upgrade Required
             )
 
     def add_security_headers(self, response: Response, is_secure: bool):
@@ -236,11 +220,9 @@ class HTTPSEnforcer:
 
         # Додаткові headers для безпеки
         if is_secure:
-            response.headers["Content-Security-Policy"] = (
-                response.headers.get("Content-Security-Policy", "").replace(
-                    "http:", "https:"
-                )
-            )
+            response.headers["Content-Security-Policy"] = response.headers.get(
+                "Content-Security-Policy", ""
+            ).replace("http:", "https:")
 
     def get_stats(self) -> Dict[str, Any]:
         """Отримання статистики"""
@@ -258,7 +240,7 @@ class HTTPSEnforcer:
             ),
             "redirect_percentage": round(
                 (self.stats["redirected_requests"] / total) * 100, 2
-            )
+            ),
         }
 
     def reset_stats(self):
@@ -267,7 +249,7 @@ class HTTPSEnforcer:
             "total_requests": 0,
             "secure_requests": 0,
             "redirected_requests": 0,
-            "blocked_requests": 0
+            "blocked_requests": 0,
         }
 
 
@@ -276,7 +258,7 @@ https_enforcer = HTTPSEnforcer(
     enabled=False,  # Вимкнуто за замовчуванням
     environment="development",  # Development за замовчуванням
     redirect_enabled=False,  # Вимкнуто редіректи
-    hsts_enabled=False  # Вимкнуто HSTS
+    hsts_enabled=False,  # Вимкнуто HSTS
 )
 
 
@@ -300,10 +282,7 @@ async def https_enforcement_middleware(request: Request, call_next):
 
 # Допоміжні функції
 def configure_https_enforcement(
-    app,
-    enabled: Optional[bool] = None,
-    environment: Optional[str] = None,
-    **kwargs
+    app, enabled: Optional[bool] = None, environment: Optional[str] = None, **kwargs
 ):
     """Налаштування HTTPS enforcement для додатка"""
     global https_enforcer
@@ -325,7 +304,7 @@ def configure_https_enforcement(
     logger.info(
         "HTTPS enforcement configured",
         enabled=https_enforcer.enabled,
-        environment=https_enforcer.environment
+        environment=https_enforcer.environment,
     )
 
 
@@ -363,5 +342,5 @@ async def get_https_config(user: Dict = Depends(get_current_user)):
         "hsts_max_age": https_enforcer.hsts_max_age,
         "hsts_include_subdomains": https_enforcer.hsts_include_subdomains,
         "hsts_preload": https_enforcer.hsts_preload,
-        "exclude_paths": list(https_enforcer.exclude_paths)
+        "exclude_paths": list(https_enforcer.exclude_paths),
     }

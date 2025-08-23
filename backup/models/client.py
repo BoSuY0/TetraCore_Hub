@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 class ConnectionStatus(str, Enum):
     """Статуси підключення клієнта"""
+
     CONNECTED = "connected"
     DISCONNECTED = "disconnected"
     CONNECTING = "connecting"
@@ -28,6 +29,7 @@ class ConnectionStatus(str, Enum):
 
 class WorkerStatus(str, Enum):
     """Статуси воркера"""
+
     IDLE = "idle"
     BUSY = "busy"
     OVERLOADED = "overloaded"
@@ -111,9 +113,7 @@ class ClientStats(BaseModel):
     resource_usage: Dict[str, float] = Field(default_factory=dict)
 
     class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+        json_encoders = {datetime: lambda v: v.isoformat()}
 
 
 class ClientInfo(BaseModel):
@@ -168,7 +168,7 @@ class ClientInfo(BaseModel):
     class Config:
         json_encoders = {
             datetime: lambda v: v.isoformat(),
-            set: lambda v: list(v)  # Конвертуємо set в list для JSON серіалізації
+            set: lambda v: list(v),  # Конвертуємо set в list для JSON серіалізації
         }
 
     def is_connected(self) -> bool:
@@ -197,7 +197,10 @@ class ClientInfo(BaseModel):
             return False
 
         # Для воркерів перевіряємо статус
-        if self.is_worker() and self.worker_status in [WorkerStatus.MAINTENANCE, WorkerStatus.ERROR]:
+        if self.is_worker() and self.worker_status in [
+            WorkerStatus.MAINTENANCE,
+            WorkerStatus.ERROR,
+        ]:
             return False
 
         if not self.capabilities:
@@ -248,8 +251,8 @@ class Client(BaseModel):
 
     # WebSocket з'єднання (не серіалізується)
     websocket: Optional[Any] = Field(exclude=True, default=None)
-    
-    # ID для security менеджера (не серіалізується) 
+
+    # ID для security менеджера (не серіалізується)
     security_client_id: Optional[str] = Field(exclude=True, default=None)
 
     # Черга завдань для воркера
@@ -265,7 +268,7 @@ class Client(BaseModel):
         arbitrary_types_allowed = True
         json_encoders = {
             datetime: lambda v: v.isoformat(),
-            set: lambda v: list(v)  # Конвертуємо set в list для JSON серіалізації
+            set: lambda v: list(v),  # Конвертуємо set в list для JSON серіалізації
         }
 
     @classmethod
@@ -275,13 +278,18 @@ class Client(BaseModel):
             client_id=client_id,
             client_type=ClientType.BOT,
             client_name=client_name,
-            **kwargs
+            **kwargs,
         )
         return cls(info=info)
 
     @classmethod
-    def create_worker(cls, client_id: str, client_name: str,
-                      capabilities: WorkerCapabilities, **kwargs) -> "Client":
+    def create_worker(
+        cls,
+        client_id: str,
+        client_name: str,
+        capabilities: WorkerCapabilities,
+        **kwargs,
+    ) -> "Client":
         """Створення клієнта-воркера"""
         info = ClientInfo(
             client_id=client_id,
@@ -289,7 +297,7 @@ class Client(BaseModel):
             client_name=client_name,
             capabilities=capabilities,
             worker_status=WorkerStatus.IDLE,
-            **kwargs
+            **kwargs,
         )
         return cls(info=info)
 
@@ -300,13 +308,18 @@ class Client(BaseModel):
             client_id=client_id,
             client_type=ClientType.MONITOR,
             client_name=client_name,
-            **kwargs
+            **kwargs,
         )
         return cls(info=info)
 
     @classmethod
-    def create_worker_api(cls, client_id: str, client_name: str,
-                         capabilities: WorkerCapabilities, **kwargs) -> "Client":
+    def create_worker_api(
+        cls,
+        client_id: str,
+        client_name: str,
+        capabilities: WorkerCapabilities,
+        **kwargs,
+    ) -> "Client":
         """Створення API воркера"""
         info = ClientInfo(
             client_id=client_id,
@@ -314,7 +327,7 @@ class Client(BaseModel):
             client_name=client_name,
             capabilities=capabilities,
             worker_status=WorkerStatus.IDLE,
-            **kwargs
+            **kwargs,
         )
         return cls(info=info)
 
@@ -325,7 +338,7 @@ class Client(BaseModel):
             client_id=client_id,
             client_type=ClientType.STREAM_HUB,
             client_name=client_name,
-            **kwargs
+            **kwargs,
         )
         return cls(info=info)
 
@@ -336,7 +349,7 @@ class Client(BaseModel):
             client_id=client_id,
             client_type=ClientType.ADMIN,
             client_name=client_name,
-            **kwargs
+            **kwargs,
         )
         return cls(info=info)
 
@@ -355,14 +368,22 @@ class Client(BaseModel):
 
         # Оновлення загального часу підключення
         if self.info.stats.connected_at:
-            connection_time = (datetime.utcnow() - self.info.stats.connected_at).total_seconds()
+            connection_time = (
+                datetime.utcnow() - self.info.stats.connected_at
+            ).total_seconds()
             self.info.stats.total_connection_time += connection_time
 
     def assign_task(self, task_id: str):
         """Призначення завдання клієнту"""
-        logger.info(f"[ASSIGN_TASK] Attempting to assign task {task_id} to client {self.info.client_id}")
-        logger.info(f"[ASSIGN_TASK] Client checks: is_worker={self.info.is_worker()}, is_bot={self.info.is_bot()}, has_capabilities={bool(self.info.capabilities)}")
-        logger.info(f"[ASSIGN_TASK] Load: active_tasks={self.info.stats.active_tasks}, max_concurrent={self.info.capabilities.max_concurrent_tasks if self.info.capabilities else 0}")
+        logger.info(
+            f"[ASSIGN_TASK] Attempting to assign task {task_id} to client {self.info.client_id}"
+        )
+        logger.info(
+            f"[ASSIGN_TASK] Client checks: is_worker={self.info.is_worker()}, is_bot={self.info.is_bot()}, has_capabilities={bool(self.info.capabilities)}"
+        )
+        logger.info(
+            f"[ASSIGN_TASK] Load: active_tasks={self.info.stats.active_tasks}, max_concurrent={self.info.capabilities.max_concurrent_tasks if self.info.capabilities else 0}"
+        )
 
         if not self.info.is_worker() and not self.info.is_bot():
             logger.warning(f"[ASSIGN_TASK] Rejected: not worker or bot")
@@ -373,7 +394,9 @@ class Client(BaseModel):
             return False
 
         if self.info.stats.active_tasks >= self.info.capabilities.max_concurrent_tasks:
-            logger.warning(f"[ASSIGN_TASK] Rejected: max tasks reached ({self.info.stats.active_tasks}/{self.info.capabilities.max_concurrent_tasks})")
+            logger.warning(
+                f"[ASSIGN_TASK] Rejected: max tasks reached ({self.info.stats.active_tasks}/{self.info.capabilities.max_concurrent_tasks})"
+            )
             return False
 
         self.active_tasks[task_id] = datetime.utcnow()
@@ -389,11 +412,15 @@ class Client(BaseModel):
             self.active_tasks.pop(task_id)
             self.info.stats.active_tasks = len(self.active_tasks)
             self.info.stats.last_activity = datetime.utcnow()
-            logger.info(f"[RELEASE_TASK] Task {task_id} released from client {self.info.client_id}")
+            logger.info(
+                f"[RELEASE_TASK] Task {task_id} released from client {self.info.client_id}"
+            )
             return True
         return False
 
-    def complete_task(self, task_id: str, status: TaskStatus, execution_time: float = None):
+    def complete_task(
+        self, task_id: str, status: TaskStatus, execution_time: float = None
+    ):
         """Завершення завдання"""
         if task_id in self.active_tasks:
             start_time = self.active_tasks.pop(task_id)
@@ -407,17 +434,24 @@ class Client(BaseModel):
             self.info.increment_task_count(status)
 
             # Оновлення середнього часу обробки
-            total_time = (self.info.stats.average_processing_time *
-                         (self.info.stats.total_tasks - 1) + execution_time)
-            self.info.stats.average_processing_time = total_time / self.info.stats.total_tasks
+            total_time = (
+                self.info.stats.average_processing_time
+                * (self.info.stats.total_tasks - 1)
+                + execution_time
+            )
+            self.info.stats.average_processing_time = (
+                total_time / self.info.stats.total_tasks
+            )
 
             # Додавання до історії
-            self.task_history.append({
-                "task_id": task_id,
-                "status": status.value,
-                "execution_time": execution_time,
-                "completed_at": datetime.utcnow().isoformat()
-            })
+            self.task_history.append(
+                {
+                    "task_id": task_id,
+                    "status": status.value,
+                    "execution_time": execution_time,
+                    "completed_at": datetime.utcnow().isoformat(),
+                }
+            )
 
             # Обмеження розміру історії
             if len(self.task_history) > 100:
@@ -450,18 +484,28 @@ class Client(BaseModel):
             "client_name": self.info.client_name,
             "client_version": self.info.client_version,
             "connection_status": self.info.connection_status.value,
-            "worker_status": self.info.worker_status.value if self.info.worker_status else None,
+            "worker_status": (
+                self.info.worker_status.value if self.info.worker_status else None
+            ),
             "current_load": self.info.get_load_percentage(),
             "remote_address": self.info.remote_address,
             "session_id": self.info.session_id,
-            "last_ping": self.info.last_ping.isoformat() if self.info.last_ping else None,
-            "last_pong": self.info.last_pong.isoformat() if self.info.last_pong else None,
-            "registered_at": self.info.registered_at.isoformat() if self.info.registered_at else None,
+            "last_ping": (
+                self.info.last_ping.isoformat() if self.info.last_ping else None
+            ),
+            "last_pong": (
+                self.info.last_pong.isoformat() if self.info.last_pong else None
+            ),
+            "registered_at": (
+                self.info.registered_at.isoformat() if self.info.registered_at else None
+            ),
             "stats": self.info.stats.model_dump(),
-            "capabilities": self.info.capabilities.model_dump() if self.info.capabilities else None,
+            "capabilities": (
+                self.info.capabilities.model_dump() if self.info.capabilities else None
+            ),
             "active_tasks_count": len(self.active_tasks),
             "is_healthy": self.is_healthy(),
             "metadata": self.info.metadata,
             "config": self.info.config,
-            "tags": list(self.info.tags) if self.info.tags else []
+            "tags": list(self.info.tags) if self.info.tags else [],
         }

@@ -38,6 +38,7 @@ def reset_env(monkeypatch):
 def ws_sec(monkeypatch):
     # Ініціалізуємо заново менеджер безпеки з чистим станом
     from core import websocket_security as ws_mod
+
     # Пересоздаємо інстанс
     ws_mod.ws_security_manager = ws_mod.WebSocketSecurityManager()
     mgr = ws_mod.ws_security_manager
@@ -48,12 +49,17 @@ def ws_sec(monkeypatch):
     return mgr
 
 
-def _make_hmac_headers(secret: str, client_id: str = "client-1", client_type: str = "worker") -> dict:
+def _make_hmac_headers(
+    secret: str, client_id: str = "client-1", client_type: str = "worker"
+) -> dict:
     ts = str(int(time.time()))
     nonce = "fixed-nonce-for-test"  # фіксовано для керованих тестів (replay)
     canonical = f"{client_id}|{ts}|{nonce}|{client_type}|1.0.0"
     import hmac, hashlib
-    sig = hmac.new(secret.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    sig = hmac.new(
+        secret.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
     return {
         "Authorization": f"Bearer {secret}",
         "X-Client-Id": client_id,
@@ -104,7 +110,10 @@ async def test_expired_timestamp_fails(ws_sec, monkeypatch):
     nonce = "nonce-expired"
     canonical = f"{client_id}|{old_ts}|{nonce}|worker|1.0.0"
     import hmac, hashlib
-    sig = hmac.new(secret.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    sig = hmac.new(
+        secret.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
     headers = {
         "Authorization": f"Bearer {secret}",
         "X-Client-Id": client_id,
@@ -164,6 +173,7 @@ async def test_dev_guest_access(monkeypatch):
     # У development без токена пускаємо гостей
     monkeypatch.setenv("ENVIRONMENT", "development")
     from core import websocket_security as ws_mod
+
     ws_mod.ws_security_manager = ws_mod.WebSocketSecurityManager()
     ws = FakeWebSocket(headers={})
     res = await ws_mod.ws_security_manager.authenticate_websocket(ws, token=None)
@@ -174,6 +184,7 @@ async def test_dev_guest_access(monkeypatch):
 @pytest.mark.anyio
 async def test_validate_message_size_limit(monkeypatch):
     from core.websocket_security import WebSocketSecurityManager, ConnectionInfo
+
     mgr = WebSocketSecurityManager()
     ws = FakeWebSocket()
     conn = ConnectionInfo(ws, user_id="u1", client_id="c1")
@@ -184,12 +195,14 @@ async def test_validate_message_size_limit(monkeypatch):
     msg = await mgr.validate_message("c1", raw)
     assert msg is None
 
+
 """
 Unit tests for the core.websocket_security module.
 """
 import pytest
 
 # TODO: Add necessary imports from 'core.websocket_security'
+
 
 def test_placeholder():
     """

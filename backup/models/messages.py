@@ -52,6 +52,7 @@ class MessageType(str, Enum):
 
 class ClientType(str, Enum):
     """Типи клієнтів у системі"""
+
     BOT = "bot"
     WORKER = "worker"
     WORKER_API = "worker_api"
@@ -62,6 +63,7 @@ class ClientType(str, Enum):
 
 class TaskStatus(str, Enum):
     """Статуси завдань"""
+
     PENDING = "pending"
     ASSIGNED = "assigned"
     PROCESSING = "processing"
@@ -74,6 +76,7 @@ class TaskStatus(str, Enum):
 
 class TaskPriority(str, Enum):
     """Пріоритети завдань"""
+
     LOW = "low"
     NORMAL = "normal"
     HIGH = "high"
@@ -99,10 +102,7 @@ class BaseMessage(BaseModel):
     recipient_id: Optional[str] = None
 
     model_config = ConfigDict(
-        use_enum_values=True,
-        json_encoders={
-            datetime: lambda v: v.isoformat()
-        }
+        use_enum_values=True, json_encoders={datetime: lambda v: v.isoformat()}
     )
 
     # Ідентифікатор кореляції для зв'язування запитів/відповідей
@@ -110,8 +110,6 @@ class BaseMessage(BaseModel):
 
     # Метадані повідомлення
     metadata: Dict[str, Any] = Field(default_factory=dict)
-
-
 
 
 class ClientRegistration(BaseMessage):
@@ -398,29 +396,34 @@ Message = Union[
     ErrorMessage,
     MetricsRequest,
     MetricsResponse,
-    StatsUpdate
+    StatsUpdate,
 ]
 
 
 def create_message(message_type: MessageType, **kwargs) -> Message:
     """Фабрика для створення повідомлень"""
     import structlog
+
     logger = structlog.get_logger(__name__)
 
-    logger.info("[DEBUG] create_message called",
-                message_type=message_type,
-                kwargs_keys=list(kwargs.keys()),
-                has_task_type=("task_type" in kwargs),
-                has_task_data=("task_data" in kwargs),
-                task_type_value=kwargs.get("task_type") if "task_type" in kwargs else None,
-                kwargs_count=len(kwargs))
+    logger.info(
+        "[DEBUG] create_message called",
+        message_type=message_type,
+        kwargs_keys=list(kwargs.keys()),
+        has_task_type=("task_type" in kwargs),
+        has_task_data=("task_data" in kwargs),
+        task_type_value=kwargs.get("task_type") if "task_type" in kwargs else None,
+        kwargs_count=len(kwargs),
+    )
 
     # Спеціальне логування для TASK_SUBMIT
     if message_type == MessageType.TASK_SUBMIT:
-        logger.info("[DEBUG] TASK_SUBMIT specific data",
-                    task_type=kwargs.get("task_type", "MISSING"),
-                    task_data=kwargs.get("task_data", "MISSING"),
-                    all_fields=list(kwargs.keys()))
+        logger.info(
+            "[DEBUG] TASK_SUBMIT specific data",
+            task_type=kwargs.get("task_type", "MISSING"),
+            task_data=kwargs.get("task_data", "MISSING"),
+            all_fields=list(kwargs.keys()),
+        )
 
     message_classes = {
         MessageType.CLIENT_REGISTRATION: ClientRegistration,
@@ -439,9 +442,11 @@ def create_message(message_type: MessageType, **kwargs) -> Message:
 
     message_class = message_classes.get(message_type, BaseMessage)
 
-    logger.info("[DEBUG] Creating message instance",
-                message_class=message_class.__name__,
-                will_pass_kwargs=kwargs)
+    logger.info(
+        "[DEBUG] Creating message instance",
+        message_class=message_class.__name__,
+        will_pass_kwargs=kwargs,
+    )
 
     try:
         # Для TaskMessage та інших класів з фіксованим message_type,
@@ -451,36 +456,45 @@ def create_message(message_type: MessageType, **kwargs) -> Message:
         else:
             return message_class(message_type=message_type, **kwargs)
     except Exception as e:
-        logger.error("[DEBUG] Failed to create message",
-                    message_class=message_class.__name__,
-                    error=str(e),
-                    error_type=type(e).__name__)
+        logger.error(
+            "[DEBUG] Failed to create message",
+            message_class=message_class.__name__,
+            error=str(e),
+            error_type=type(e).__name__,
+        )
         raise
 
 
 def parse_message(message_data: Dict[str, Any]) -> Message:
     """Парсинг повідомлення з JSON"""
     import structlog
+
     logger = structlog.get_logger(__name__)
 
     # Логування вхідних даних
-    logger.info("[DEBUG] parse_message called",
-                message_data_keys=list(message_data.keys()),
-                message_type_value=message_data.get("message_type"),
-                has_task_type=("task_type" in message_data),
-                has_task_data=("task_data" in message_data),
-                task_type_value=message_data.get("task_type") if "task_type" in message_data else None,
-                full_data=message_data)
+    logger.info(
+        "[DEBUG] parse_message called",
+        message_data_keys=list(message_data.keys()),
+        message_type_value=message_data.get("message_type"),
+        has_task_type=("task_type" in message_data),
+        has_task_data=("task_data" in message_data),
+        task_type_value=(
+            message_data.get("task_type") if "task_type" in message_data else None
+        ),
+        full_data=message_data,
+    )
 
     message_type = MessageType(message_data.get("message_type"))
     # Remove message_type from data to avoid duplicate parameter
     data_copy = message_data.copy()
     data_copy.pop("message_type", None)
 
-    logger.info("[DEBUG] Creating message",
-                message_type=message_type,
-                data_copy_keys=list(data_copy.keys()),
-                has_task_type_in_copy=("task_type" in data_copy),
-                has_task_data_in_copy=("task_data" in data_copy))
+    logger.info(
+        "[DEBUG] Creating message",
+        message_type=message_type,
+        data_copy_keys=list(data_copy.keys()),
+        has_task_type_in_copy=("task_type" in data_copy),
+        has_task_data_in_copy=("task_data" in data_copy),
+    )
 
     return create_message(message_type, **data_copy)

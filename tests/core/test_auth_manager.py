@@ -1,6 +1,7 @@
 """
 Unit tests for the core.auth_manager module.
 """
+
 import pytest
 import jwt
 import time
@@ -10,7 +11,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import bcrypt
 from fastapi import HTTPException
 
-from core.auth_manager import AuthManager, TokenPair, UserCredentials, TokenData, SERVER_BOOT_ID
+from core.auth_manager import (
+    AuthManager,
+    TokenPair,
+    UserCredentials,
+    TokenData,
+    SERVER_BOOT_ID,
+)
 
 
 class TestAuthManager:
@@ -37,7 +44,7 @@ class TestAuthManager:
     def test_initialization_with_redis_client(self, mock_redis_client):
         """Test AuthManager initialization with Redis client."""
         manager = AuthManager(redis_client=mock_redis_client)
-        
+
         assert manager.redis_client == mock_redis_client
         assert manager.secret_key is not None
         assert manager.refresh_secret is not None
@@ -46,7 +53,7 @@ class TestAuthManager:
     def test_initialization_without_redis(self):
         """Test AuthManager initialization without Redis client."""
         manager = AuthManager()
-        
+
         assert manager.redis_client is None
         assert manager.secret_key is not None
         assert manager.refresh_secret is not None
@@ -55,16 +62,16 @@ class TestAuthManager:
     def test_password_hashing_and_verification(self, auth_manager):
         """Test password hashing and verification."""
         password = "my-secure-password"
-        
+
         # Test hashing
         hashed = auth_manager.hash_password(password)
         assert hashed != password
         assert isinstance(hashed, str)
         assert hashed.startswith("$2b$")  # bcrypt prefix
-        
+
         # Test verification with correct password
         assert auth_manager.verify_password(password, hashed) is True
-        
+
         # Test verification with incorrect password
         assert auth_manager.verify_password("wrong-password", hashed) is False
 
@@ -72,7 +79,7 @@ class TestAuthManager:
         """Test session ID generation."""
         session_id1 = auth_manager.generate_session_id()
         session_id2 = auth_manager.generate_session_id()
-        
+
         assert isinstance(session_id1, str)
         assert isinstance(session_id2, str)
         assert len(session_id1) > 0
@@ -81,24 +88,16 @@ class TestAuthManager:
 
     def test_create_access_token(self, auth_manager):
         """Test access token creation."""
-        user_data = {
-            "user_id": "123",
-            "username": "testuser",
-            "role": "admin"
-        }
-        
+        user_data = {"user_id": "123", "username": "testuser", "role": "admin"}
+
         token = auth_manager.create_access_token(user_data)
-        
+
         assert isinstance(token, str)
         assert len(token) > 0
-        
+
         # Decode and verify token structure
-        decoded = jwt.decode(
-            token, 
-            auth_manager.secret_key, 
-            algorithms=["HS256"]
-        )
-        
+        decoded = jwt.decode(token, auth_manager.secret_key, algorithms=["HS256"])
+
         assert decoded["user_id"] == "123"
         assert decoded["username"] == "testuser"
         assert decoded["role"] == "admin"
@@ -109,23 +108,16 @@ class TestAuthManager:
 
     def test_create_refresh_token(self, auth_manager):
         """Test refresh token creation."""
-        user_data = {
-            "user_id": "123",
-            "username": "testuser"
-        }
-        
+        user_data = {"user_id": "123", "username": "testuser"}
+
         token = auth_manager.create_refresh_token(user_data)
-        
+
         assert isinstance(token, str)
         assert len(token) > 0
-        
+
         # Decode and verify token structure
-        decoded = jwt.decode(
-            token, 
-            auth_manager.refresh_secret, 
-            algorithms=["HS256"]
-        )
-        
+        decoded = jwt.decode(token, auth_manager.refresh_secret, algorithms=["HS256"])
+
         assert decoded["user_id"] == "123"
         assert decoded["token_type"] == "refresh"
         assert "exp" in decoded
@@ -139,13 +131,13 @@ class TestAuthManager:
             "id": "123",
             "username": "testuser",
             "role": "user",
-            "permissions": ["read", "write"]
+            "permissions": ["read", "write"],
         }
-        
+
         auth_manager.redis_client.setex.return_value = True
-        
+
         token_pair = await auth_manager.create_token_pair(user_data)
-        
+
         assert isinstance(token_pair, TokenPair)
         assert token_pair.access_token is not None
         assert token_pair.refresh_token is not None
@@ -155,15 +147,11 @@ class TestAuthManager:
     @pytest.mark.asyncio
     async def test_decode_token_valid_access(self, auth_manager):
         """Test decoding a valid access token."""
-        user_data = {
-            "user_id": "123",
-            "username": "testuser",
-            "role": "user"
-        }
-        
+        user_data = {"user_id": "123", "username": "testuser", "role": "user"}
+
         token = auth_manager.create_access_token(user_data)
         decoded = await auth_manager.decode_token(token, "access")
-        
+
         assert decoded["user_id"] == "123"
         assert decoded["username"] == "testuser"
         assert decoded["token_type"] == "access"
@@ -171,14 +159,11 @@ class TestAuthManager:
     @pytest.mark.asyncio
     async def test_decode_token_valid_refresh(self, auth_manager):
         """Test decoding a valid refresh token."""
-        user_data = {
-            "user_id": "123",
-            "username": "testuser"
-        }
-        
+        user_data = {"user_id": "123", "username": "testuser"}
+
         token = auth_manager.create_refresh_token(user_data)
         decoded = await auth_manager.decode_token(token, "refresh")
-        
+
         assert decoded["user_id"] == "123"
         assert decoded["token_type"] == "refresh"
 
@@ -187,14 +172,14 @@ class TestAuthManager:
         """Test decoding token with invalid signature."""
         # Create token with different secret
         invalid_token = jwt.encode(
-            {"user_id": "123", "token_type": "access"}, 
-            "wrong-secret", 
-            algorithm="HS256"
+            {"user_id": "123", "token_type": "access"},
+            "wrong-secret",
+            algorithm="HS256",
         )
-        
+
         with pytest.raises(HTTPException) as exc_info:
             await auth_manager.decode_token(invalid_token, "access")
-        
+
         assert exc_info.value.status_code == 401
 
     @pytest.mark.asyncio
@@ -202,23 +187,21 @@ class TestAuthManager:
         """Test decoding expired token."""
         # Create expired token manually
         past_time = int(time.time()) - 3600  # 1 hour ago
-        
+
         expired_payload = {
             "user_id": "123",
             "token_type": "access",
             "exp": past_time,
-            "iat": past_time
+            "iat": past_time,
         }
-        
+
         expired_token = jwt.encode(
-            expired_payload, 
-            auth_manager.secret_key, 
-            algorithm="HS256"
+            expired_payload, auth_manager.secret_key, algorithm="HS256"
         )
-        
+
         with pytest.raises(HTTPException) as exc_info:
             await auth_manager.decode_token(expired_token, "access")
-        
+
         assert exc_info.value.status_code == 401
 
     @pytest.mark.asyncio
@@ -228,24 +211,22 @@ class TestAuthManager:
             "id": "123",
             "username": "testuser",
             "role": "user",
-            "permissions": ["read"]
+            "permissions": ["read"],
         }
-        
+
         # Create initial token pair
         auth_manager.redis_client.setex.return_value = True
         initial_pair = await auth_manager.create_token_pair(user_data)
-        
+
         # Mock session retrieval for refresh - return string, not coroutine
-        session_data = {
-            **user_data,
-            "session_id": "test-session-id"
-        }
+        session_data = {**user_data, "session_id": "test-session-id"}
         import json
+
         auth_manager.redis_client.get.return_value = json.dumps(session_data)
-        
+
         # Refresh the token
         new_pair = await auth_manager.refresh_access_token(initial_pair.refresh_token)
-        
+
         assert isinstance(new_pair, TokenPair)
         assert new_pair.access_token != initial_pair.access_token
         assert new_pair.refresh_token is not None
@@ -255,10 +236,10 @@ class TestAuthManager:
         # Create a valid token first
         user_data = {"user_id": "123", "username": "testuser"}
         token = auth_manager.create_access_token(user_data)
-        
+
         # Test token revocation
         auth_manager.revoke_token(token)
-        
+
         # The actual implementation may store revoked tokens differently
         # Let's just verify the method doesn't crash
         assert True  # If we get here, the method worked
@@ -266,11 +247,11 @@ class TestAuthManager:
     def test_logout(self, auth_manager):
         """Test user logout functionality."""
         session_id = "test-session-id"
-        
+
         auth_manager.redis_client.delete.return_value = 1
-        
+
         result = auth_manager.logout(session_id)
-        
+
         # The logout method may not return a boolean, check the call was made
         auth_manager.redis_client.delete.assert_called_with(f"session:{session_id}")
 
@@ -278,47 +259,50 @@ class TestAuthManager:
         """Test login attempt checking within limits."""
         username = "testuser"
         ip_address = "192.168.1.1"
-        
+
         # Mock no previous attempts
         auth_manager._login_attempts = {}
-        
+
         result = auth_manager.check_login_attempts(username, ip_address)
-        
+
         assert result is True
 
     def test_check_login_attempts_exceeded_limit(self, auth_manager):
         """Test login attempt checking when limit is exceeded."""
         username = "testuser"
         ip_address = "192.168.1.1"
-        
+
         # Mock excessive attempts with timezone-aware datetime
         current_time = datetime.now(timezone.utc)
         auth_manager._login_attempts = {
             f"{username}:{ip_address}": [current_time] * 6  # Exceed limit of 5
         }
-        
+
         result = auth_manager.check_login_attempts(username, ip_address)
-        
+
         assert result is False
 
     def test_record_login_attempt_success(self, auth_manager):
         """Test recording successful login attempt."""
         username = "testuser"
         ip_address = "192.168.1.1"
-        
+
         auth_manager.record_login_attempt(username, ip_address, success=True)
-        
+
         # Successful attempts should clear the record
         key = f"{username}:{ip_address}"
-        assert key not in auth_manager._login_attempts or not auth_manager._login_attempts[key]
+        assert (
+            key not in auth_manager._login_attempts
+            or not auth_manager._login_attempts[key]
+        )
 
     def test_record_login_attempt_failure(self, auth_manager):
         """Test recording failed login attempt."""
         username = "testuser"
         ip_address = "192.168.1.1"
-        
+
         auth_manager.record_login_attempt(username, ip_address, success=False)
-        
+
         # Failed attempts should be recorded
         key = f"{username}:{ip_address}"
         assert key in auth_manager._login_attempts
@@ -328,22 +312,23 @@ class TestAuthManager:
     async def test_update_session_activity(self, auth_manager):
         """Test updating session activity."""
         session_id = "test-session-id"
-        
+
         # Mock existing session data - return string, not coroutine
         existing_data = {
             "user_id": "123",
             "username": "testuser",
             "session_id": session_id,
             "created_at": "2023-01-01T00:00:00",
-            "last_activity": "2023-01-01T00:00:00"
+            "last_activity": "2023-01-01T00:00:00",
         }
-        
+
         import json
+
         auth_manager.redis_client.get.return_value = json.dumps(existing_data)
         auth_manager.redis_client.setex.return_value = True
-        
+
         await auth_manager.update_session_activity(session_id)
-        
+
         # Should update the session with new activity time
         auth_manager.redis_client.setex.assert_called()
 
@@ -351,23 +336,23 @@ class TestAuthManager:
     async def test_get_active_sessions_all(self, auth_manager):
         """Test getting all active sessions."""
         # Mock Redis scan for session keys
-        auth_manager.redis_client.scan_iter = MagicMock(return_value=[
-            b"session:session1",
-            b"session:session2"
-        ])
-        
+        auth_manager.redis_client.scan_iter = MagicMock(
+            return_value=[b"session:session1", b"session:session2"]
+        )
+
         # Mock session data - return string, not coroutine
         session_data = {
             "user_id": "123",
             "username": "testuser",
-            "session_id": "session1"
+            "session_id": "session1",
         }
-        
+
         import json
+
         auth_manager.redis_client.get.return_value = json.dumps(session_data)
-        
+
         sessions = await auth_manager.get_active_sessions()
-        
+
         assert isinstance(sessions, list)
         assert len(sessions) >= 0
 
@@ -376,26 +361,29 @@ class TestAuthManager:
         request_data = "test request data"
         # Use ISO format timestamp as expected by the implementation
         from datetime import datetime, timezone
+
         timestamp = datetime.now(timezone.utc).isoformat()
-        
+
         # Create valid signature using the same method as the implementation
         import hmac
         import hashlib
-        
+
         # Ensure we use the same format as the actual implementation
         message = f"{request_data}{timestamp}"
         signature = hmac.new(
-            auth_manager.secret_key.encode(),
-            message.encode(),
-            hashlib.sha256
+            auth_manager.secret_key.encode(), message.encode(), hashlib.sha256
         ).hexdigest()
-        
+
         # Test valid signature
-        result = auth_manager.validate_request_signature(request_data, signature, timestamp)
+        result = auth_manager.validate_request_signature(
+            request_data, signature, timestamp
+        )
         assert result is True
-        
+
         # Test invalid signature
-        invalid_result = auth_manager.validate_request_signature(request_data, "invalid", timestamp)
+        invalid_result = auth_manager.validate_request_signature(
+            request_data, "invalid", timestamp
+        )
         assert invalid_result is False
 
     def test_user_credentials_validation(self):
@@ -404,9 +392,11 @@ class TestAuthManager:
         valid_creds = UserCredentials(username="testuser", password="securepassword123")
         assert valid_creds.username == "testuser"
         assert valid_creds.password == "securepassword123"
-        
+
         # Test username normalization
-        creds_with_caps = UserCredentials(username="TestUser", password="securepassword123")
+        creds_with_caps = UserCredentials(
+            username="TestUser", password="securepassword123"
+        )
         assert creds_with_caps.username == "testuser"
 
     def test_token_data_model(self):
@@ -418,9 +408,9 @@ class TestAuthManager:
             permissions=["read", "write"],
             session_id="session123",
             exp=datetime.now(),
-            iat=datetime.now()
+            iat=datetime.now(),
         )
-        
+
         assert token_data.user_id == "123"
         assert token_data.username == "testuser"
         assert token_data.role == "user"
@@ -430,26 +420,26 @@ class TestAuthManager:
     def test_token_pair_model(self):
         """Test TokenPair model."""
         token_pair = TokenPair(
-            access_token="access.jwt.token",
-            refresh_token="refresh.jwt.token"
+            access_token="access.jwt.token", refresh_token="refresh.jwt.token"
         )
-        
+
         assert token_pair.access_token == "access.jwt.token"
         assert token_pair.refresh_token == "refresh.jwt.token"
         assert token_pair.token_type == "bearer"  # default value
         assert token_pair.expires_in == 15 * 60  # default 15 minutes in seconds
 
     # ============= EDGE CASES AND SECURITY TESTS =============
-    
+
     @pytest.mark.asyncio
     async def test_jwt_algorithm_confusion_attack(self, auth_manager):
         """Test protection against JWT algorithm confusion attacks."""
         # Create a token with HS256
         user_data = {"user_id": "123", "username": "testuser"}
         valid_token = auth_manager.create_access_token(user_data)
-        
+
         # Try to create a token with 'none' algorithm
         import jwt
+
         try:
             # Attempt to create unsigned token
             malicious_payload = {
@@ -457,16 +447,16 @@ class TestAuthManager:
                 "username": "hacker",
                 "role": "superadmin",
                 "token_type": "access",
-                "exp": datetime.now(timezone.utc) + timedelta(hours=1)
+                "exp": datetime.now(timezone.utc) + timedelta(hours=1),
             }
-            
+
             # Try with 'none' algorithm
             none_token = jwt.encode(malicious_payload, "", algorithm="none")
-            
+
             # This should be rejected
             with pytest.raises(HTTPException):
                 await auth_manager.decode_token(none_token, "access")
-                
+
         except Exception:
             # Good - should not accept 'none' algorithm
             pass
@@ -475,15 +465,15 @@ class TestAuthManager:
     async def test_jwt_key_confusion_attack(self, auth_manager):
         """Test that access tokens cannot be used as refresh tokens and vice versa."""
         user_data = {"user_id": "123", "username": "testuser", "role": "user"}
-        
+
         # Create both tokens
         access_token = auth_manager.create_access_token(user_data)
         refresh_token = auth_manager.create_refresh_token(user_data)
-        
+
         # Try to use access token as refresh token
         with pytest.raises(HTTPException):
             await auth_manager.decode_token(access_token, "refresh")
-        
+
         # Try to use refresh token as access token
         with pytest.raises(HTTPException):
             await auth_manager.decode_token(refresh_token, "access")
@@ -493,10 +483,10 @@ class TestAuthManager:
         """Test protection against token replay attacks."""
         user_data = {"user_id": "123", "username": "testuser"}
         token = auth_manager.create_access_token(user_data)
-        
+
         # Revoke the token
         auth_manager.revoke_token(token)
-        
+
         # Try to use revoked token
         with pytest.raises(HTTPException):
             await auth_manager.decode_token(token, "access")
@@ -504,23 +494,23 @@ class TestAuthManager:
     def test_brute_force_protection_bypass(self, auth_manager):
         """Test that brute force protection cannot be bypassed."""
         username = "testuser"
-        
+
         # Import the constant
         from core.auth_manager import MAX_LOGIN_ATTEMPTS
-        
+
         # Try different bypass techniques
         bypass_attempts = [
             ("testuser", "192.168.1.1"),
             ("TestUser", "192.168.1.1"),  # Different case
             ("testuser ", "192.168.1.1"),  # Trailing space
-            ("testuser", "192.168.1.01"), # Different IP format
-            ("testuser", "192.168.001.001"), # Zero-padded IP
+            ("testuser", "192.168.1.01"),  # Different IP format
+            ("testuser", "192.168.001.001"),  # Zero-padded IP
         ]
-        
+
         # Make max attempts on first combination
         for _ in range(MAX_LOGIN_ATTEMPTS):
             auth_manager.record_login_attempt("testuser", "192.168.1.1", success=False)
-        
+
         # Check that variations are also blocked (or not - document behavior)
         for user, ip in bypass_attempts:
             result = auth_manager.check_login_attempts(user, ip)
@@ -531,20 +521,20 @@ class TestAuthManager:
         """Test protection against session fixation attacks."""
         # Create a session with known ID
         fixed_session_id = "FIXED-SESSION-ID-12345"
-        
+
         # Try to create token with fixed session ID
         user_data = {
             "user_id": "123",
             "username": "victim",
-            "session_id": fixed_session_id
+            "session_id": fixed_session_id,
         }
-        
+
         # The system should either:
         # 1. Generate new session ID
         # 2. Validate the provided session ID
         token = auth_manager.create_access_token(user_data)
         decoded = jwt.decode(token, auth_manager.secret_key, algorithms=["HS256"])
-        
+
         # Document the behavior
         if decoded.get("session_id") == fixed_session_id:
             print("WARNING: System accepts externally provided session IDs")
@@ -552,20 +542,20 @@ class TestAuthManager:
     def test_timing_attack_on_password_verification(self, auth_manager):
         """Test that password verification is timing-safe."""
         import time
-        
+
         # Create a known password hash
         correct_password = "correct_password_123"
         password_hash = auth_manager.hash_password(correct_password)
-        
+
         # Test passwords that fail at different points
         test_passwords = [
             "a",  # Very different
             "correct_",  # Partial match
             "correct_password_",  # Almost match
             "correct_password_124",  # One char different
-            correct_password  # Exact match
+            correct_password,  # Exact match
         ]
-        
+
         times = []
         for password in test_passwords:
             start = time.perf_counter()
@@ -573,7 +563,7 @@ class TestAuthManager:
                 auth_manager.verify_password(password, password_hash)
             elapsed = time.perf_counter() - start
             times.append(elapsed)
-        
+
         # Check for timing leaks
         # bcrypt should be timing-safe, but verify
         max_variance = max(times) / min(times)
@@ -589,12 +579,12 @@ class TestAuthManager:
             {"user_id": "123", "__proto__": {"admin": True}},  # Prototype pollution
             {"user_id": "'; DROP TABLE users; --", "username": "test"},
         ]
-        
+
         for payload in malicious_payloads:
             try:
                 token = auth_manager.create_access_token(payload)
                 decoded = await auth_manager.decode_token(token, "access")
-                
+
                 # Check that injection didn't work
                 if "admin" in decoded and decoded.get("admin"):
                     assert False, f"JWT injection successful with: {payload}"
@@ -606,10 +596,10 @@ class TestAuthManager:
     async def test_concurrent_session_manipulation(self, auth_manager):
         """Test race conditions in session management."""
         import asyncio
-        
+
         session_id = "test-session-123"
         errors = []
-        
+
         async def manipulate_session(operation):
             try:
                 if operation == "update":
@@ -621,15 +611,15 @@ class TestAuthManager:
                     await auth_manager.create_token_pair(user_data)
             except Exception as e:
                 errors.append((operation, str(e)))
-        
+
         # Run concurrent operations
         tasks = []
         for i in range(10):
             op = ["update", "logout", "create"][i % 3]
             tasks.append(manipulate_session(op))
-        
+
         await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         # Should handle concurrency without crashes
         assert len(errors) < 5, f"Too many concurrency errors: {errors}"
 
@@ -637,23 +627,24 @@ class TestAuthManager:
         """Test that request signature validation cannot be bypassed."""
         request_data = "sensitive_operation"
         timestamp = datetime.now(timezone.utc).isoformat()
-        
+
         # Valid signature
         import hmac
         import hashlib
+
         valid_signature = hmac.new(
             auth_manager.secret_key.encode(),
             f"{request_data}{timestamp}".encode(),
-            hashlib.sha256
+            hashlib.sha256,
         ).hexdigest()
-        
+
         # Test bypass attempts
         bypass_attempts = [
             (request_data, valid_signature, timestamp + "Z"),  # Timezone manipulation
             (request_data + "\x00", valid_signature, timestamp),  # Null byte injection
             (request_data.upper(), valid_signature, timestamp),  # Case manipulation
         ]
-        
+
         for data, sig, ts in bypass_attempts:
             result = auth_manager.validate_request_signature(data, sig, ts)
             if result:
@@ -664,20 +655,20 @@ class TestAuthManager:
         """Test that token expiration cannot be manipulated."""
         import jwt
         import time
-        
+
         # Create a token
         user_data = {"user_id": "123", "username": "test"}
         token = auth_manager.create_access_token(user_data)
-        
+
         # Decode without verification to get payload
         unverified = jwt.decode(token, options={"verify_signature": False})
-        
+
         # Try to extend expiration
         unverified["exp"] = int(time.time()) + 86400  # 24 hours
-        
+
         # Re-encode with wrong key
         manipulated = jwt.encode(unverified, "wrong_key", algorithm="HS256")
-        
+
         # Should reject manipulated token
         with pytest.raises(HTTPException):
             await auth_manager.decode_token(manipulated, "access")
@@ -693,31 +684,33 @@ class TestAuthManager:
             "admin\u200b",  # With zero-width space
             "admin\ufeff",  # With BOM
         ]
-        
+
         # Create tokens for each variant
         for username in usernames:
             creds = UserCredentials(username=username, password="test123")
             normalized = creds.username
-            
+
             # All should normalize to same value or be rejected
             if normalized != "admin" and normalized in ["admin", "аdmin"]:
-                print(f"WARNING: Unicode variant accepted: {repr(username)} -> {repr(normalized)}")
+                print(
+                    f"WARNING: Unicode variant accepted: {repr(username)} -> {repr(normalized)}"
+                )
 
     def test_memory_leak_in_blocked_tokens(self, auth_manager):
         """Test that blocked tokens don't cause memory leaks."""
         import sys
-        
+
         # Get initial memory usage
         initial_tokens = len(auth_manager._blocked_tokens)
-        
+
         # Revoke many tokens
         for i in range(1000):
             token = auth_manager.create_access_token({"user_id": str(i)})
             auth_manager.revoke_token(token)
-        
+
         # Check memory usage
         current_tokens = len(auth_manager._blocked_tokens)
-        
+
         # Should have some cleanup mechanism
         if current_tokens > initial_tokens + 1000:
             print(f"WARNING: Blocked tokens set growing unbounded: {current_tokens}")
@@ -735,15 +728,17 @@ class TestAuthManager:
             pass
         invalid_time = time.time() - start_time
 
-        # Test with properly formatted but expired token  
+        # Test with properly formatted but expired token
         expired_payload = {
             "user_id": "123",
             "token_type": "access",
             "exp": int(time.time()) - 3600,
-            "iat": int(time.time()) - 3600
+            "iat": int(time.time()) - 3600,
         }
-        expired_token = jwt.encode(expired_payload, auth_manager.secret_key, algorithm="HS256")
-        
+        expired_token = jwt.encode(
+            expired_payload, auth_manager.secret_key, algorithm="HS256"
+        )
+
         start_time = time.time()
         try:
             await auth_manager.decode_token(expired_token, "access")
@@ -753,19 +748,21 @@ class TestAuthManager:
 
         # Timing should be similar (difference < 100ms)
         time_difference = abs(invalid_time - expired_time)
-        assert time_difference < 0.1, f"Potential timing leak detected: {time_difference:.3f}s difference"
+        assert (
+            time_difference < 0.1
+        ), f"Potential timing leak detected: {time_difference:.3f}s difference"
 
     def test_server_boot_id_in_tokens(self, auth_manager):
         """Test that server_boot_id is included in tokens."""
         user_data = {"user_id": "123", "username": "test"}
-        
+
         access_token = auth_manager.create_access_token(user_data)
         refresh_token = auth_manager.create_refresh_token(user_data)
-        
+
         # Decode without verification to check payload
         access_payload = jwt.decode(access_token, options={"verify_signature": False})
         refresh_payload = jwt.decode(refresh_token, options={"verify_signature": False})
-        
+
         assert access_payload.get("boot_id") == auth_manager.server_boot_id
         assert refresh_payload.get("boot_id") == auth_manager.server_boot_id
 
@@ -773,25 +770,25 @@ class TestAuthManager:
     async def test_token_invalidation_after_server_restart(self, auth_manager):
         """Test that tokens from previous server boot are invalidated."""
         user_data = {"user_id": "123", "username": "test"}
-        
+
         # Create token with current boot_id
         token = auth_manager.create_access_token(user_data)
-        
+
         # Verify token works with current boot_id
         decoded = await auth_manager.decode_token(token, "access")
         assert decoded["user_id"] == "123"
-        
+
         # Simulate server restart by changing boot_id
         original_boot_id = auth_manager.server_boot_id
         auth_manager.server_boot_id = str(uuid.uuid4())
-        
+
         # Token should now be invalid
         with pytest.raises(HTTPException) as exc_info:
             await auth_manager.decode_token(token, "access")
-        
+
         assert exc_info.value.status_code == 401
         assert "Server restarted" in exc_info.value.detail
-        
+
         # Restore original boot_id
         auth_manager.server_boot_id = original_boot_id
 
@@ -799,21 +796,21 @@ class TestAuthManager:
     async def test_refresh_token_blocked_after_restart(self, auth_manager):
         """Test that refresh tokens are blocked after server restart."""
         user_data = {"user_id": "123", "username": "test"}
-        
+
         # Create token pair
         token_pair = await auth_manager.create_token_pair(user_data)
-        
+
         # Simulate server restart
         original_boot_id = auth_manager.server_boot_id
         auth_manager.server_boot_id = str(uuid.uuid4())
-        
+
         # Refresh should fail due to boot_id mismatch
         with pytest.raises(HTTPException) as exc_info:
             await auth_manager.refresh_access_token(token_pair.refresh_token)
-        
+
         assert exc_info.value.status_code == 401
         assert "Server restarted" in exc_info.value.detail
-        
+
         # Restore original boot_id
         auth_manager.server_boot_id = original_boot_id
 
@@ -821,18 +818,20 @@ class TestAuthManager:
     async def test_automatic_refresh_blocked(self, auth_manager):
         """Test that automatic token refresh is blocked for security."""
         user_data = {"user_id": "123", "username": "test"}
-        
+
         # Create token pair
         token_pair = await auth_manager.create_token_pair(user_data)
-        
+
         # Mock Redis session exists
         auth_manager.redis_client.exists.return_value = True
-        auth_manager.redis_client.get.return_value = '{"last_activity": "' + datetime.now(timezone.utc).isoformat() + '"}'
-        
+        auth_manager.redis_client.get.return_value = (
+            '{"last_activity": "' + datetime.now(timezone.utc).isoformat() + '"}'
+        )
+
         # Refresh should be blocked even with valid tokens
         with pytest.raises(HTTPException) as exc_info:
             await auth_manager.refresh_access_token(token_pair.refresh_token)
-        
+
         assert exc_info.value.status_code == 401
         assert "disabled for security" in exc_info.value.detail
 
@@ -840,17 +839,17 @@ class TestAuthManager:
     async def test_session_not_restored_after_restart(self, auth_manager):
         """Test that sessions are not automatically restored after server restart."""
         user_data = {"user_id": "123", "username": "test"}
-        
+
         # Create token with session
         token = auth_manager.create_access_token(user_data)
-        
+
         # Mock Redis session does not exist (simulating restart)
         auth_manager.redis_client.exists.return_value = False
-        
+
         # Token validation should fail without session restoration
         with pytest.raises(HTTPException) as exc_info:
             await auth_manager.decode_token(token, "access")
-        
+
         assert exc_info.value.status_code == 401
         assert "Session expired" in exc_info.value.detail
 
@@ -858,20 +857,22 @@ class TestAuthManager:
     async def test_logout_blacklists_tokens(self, auth_manager):
         """Test that logout adds tokens to blacklist."""
         session_id = "test_session_123"
-        
+
         # Mock session data with token JTIs
         session_data = {
             "access_token_jti": "access_jti_123",
-            "refresh_token_jti": "refresh_jti_456"
+            "refresh_token_jti": "refresh_jti_456",
         }
-        auth_manager.redis_client.get.return_value = auth_manager.async_optimizer.json_dumps(session_data)
-        
+        auth_manager.redis_client.get.return_value = (
+            auth_manager.async_optimizer.json_dumps(session_data)
+        )
+
         # Logout should blacklist tokens
         await auth_manager.logout(session_id)
-        
+
         # Verify tokens were added to blacklist
         assert "access_jti_123" in auth_manager._blocked_tokens
         assert "refresh_jti_456" in auth_manager._blocked_tokens
-        
+
         # Verify Redis setex was called for blacklisting
         assert auth_manager.redis_client.setex.call_count >= 2

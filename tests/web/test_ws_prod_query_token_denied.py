@@ -21,8 +21,7 @@ def app_client(monkeypatch):
 def test_ws_query_token_denied_in_production(app_client: TestClient):
     import pytest
     from starlette.websockets import WebSocketDisconnect
+
     with pytest.raises(WebSocketDisconnect):
         with app_client.websocket_connect("/ws?token=abc"):
             pass
-
-
