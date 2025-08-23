@@ -441,7 +441,6 @@ class SecretsManager:
         self, provider: Optional[SecretProvider]
     ) -> SecretProviderInterface:
         """Ініціалізувати провайдер секретів"""
-        env = os.getenv("ENVIRONMENT", "development").lower()
         provider_type = provider or SecretProvider(os.getenv("SECRET_PROVIDER", "env"))
 
         # Дозволяємо явний вибір провайдера через SECRET_PROVIDER навіть у production.
@@ -1023,7 +1022,6 @@ class SecretsManager:
 
             # Create file with secure permissions (owner read/write only)
             import os
-            import stat
 
             # Use a temporary file to avoid race conditions
             temp_file = ".secrets.enc.tmp"
