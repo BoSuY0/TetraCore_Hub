@@ -7,6 +7,7 @@ TetraCore StreamHub Redis Manager
 """
 
 import asyncio
+import os
 import json
 from datetime import datetime
 from typing import Dict, List, Optional, Callable, Any, Set, Union
@@ -40,7 +41,7 @@ class RedisManager:
         )
 
         # Режим роботи Redis
-        self.redis_mode: str = "standalone"  # standalone, sentinel, cluster
+        self.redis_mode: str = "standalone"  # standalone, sentinel, cluster, disabled
 
         # Pipeline для batch операцій
         self.pipeline_enabled: bool = getattr(settings, "redis_pipeline_enabled", True)
@@ -235,44 +236,63 @@ class RedisManager:
     async def _detect_redis_mode(self):
         """Визначення режиму роботи Redis"""
         try:
-            # Перевірка наявності валідної конфігурації Sentinel
-            if (
-                self.settings.redis_sentinel_urls
-                and len(self.settings.redis_sentinel_urls) > 0
-                and not any(
-                    "host" in url and "port" in url
-                    for url in self.settings.redis_sentinel_urls
-                )
-            ):
+            # 1) Якщо задано REDIS_URL — завжди standalone (пріоритетно простий Redis)
+            if getattr(self.settings, "redis_url", ""):
+                self.redis_mode = "standalone"
+                return
+
+            # 2) Sentinel — лише якщо немає REDIS_URL, але явно налаштовано sentinel
+            if getattr(self.settings, "redis_sentinel_urls", []):
                 self.redis_mode = "sentinel"
                 return
 
-            # Перевірка наявності валідної конфігурації Cluster
-            if (
-                self.settings.redis_cluster_nodes
-                and len(self.settings.redis_cluster_nodes) > 0
-                and not any(
-                    "host" in node and "port" in node
-                    for node in self.settings.redis_cluster_nodes
-                )
-            ):
+            # 3) Cluster — лише якщо немає REDIS_URL і sentinel, але налаштовано cluster
+            if getattr(self.settings, "redis_cluster_nodes", []):
                 self.redis_mode = "cluster"
                 return
 
-            # За замовчуванням - standalone
-            self.redis_mode = "standalone"
+            # 4) Інакше Redis відключений
+            self.redis_mode = "disabled"
 
         except Exception as e:
             self.logger.warning(
-                "Failed to detect Redis mode, using standalone", error=str(e)
+                "Failed to detect Redis mode, disabling Redis", error=str(e)
             )
-            self.redis_mode = "standalone"
+            self.redis_mode = "disabled"
 
     async def _create_redis_clients(self):
         """Створення Redis клієнтів залежно від режиму"""
         try:
+            if self.redis_mode == "disabled":
+                # Вимкнений Redis — працюємо без клієнтів
+                self.redis_client = None
+                self.pubsub_client = None
+                self.logger.info("Redis disabled (no configuration provided)")
+                return
+
             if self.redis_mode == "sentinel":
-                await self._create_sentinel_clients()
+                try:
+                    await self._create_sentinel_clients()
+                except Exception as e:
+                    # У dev/testing надаємо безпечний fallback
+                    if (
+                        hasattr(self.settings, "is_development")
+                        and (self.settings.is_development() or self.settings.is_testing())
+                    ):
+                        self.logger.warning(
+                            "Sentinel setup failed in dev/testing, applying fallback",
+                            error=str(e),
+                        )
+                        if getattr(self.settings, "redis_url", ""):
+                            self.redis_mode = "standalone"
+                            await self._create_standalone_clients()
+                        else:
+                            self.redis_mode = "disabled"
+                            self.redis_client = None
+                            self.pubsub_client = None
+                            self.logger.info("Redis disabled due to missing fallback URL")
+                    else:
+                        raise
             elif self.redis_mode == "cluster":
                 await self._create_cluster_clients()
             else:
@@ -411,10 +431,51 @@ class RedisManager:
             if self.pubsub_client:
                 await self.pubsub_client.ping()
 
+            self.is_connected = True
             self.logger.info("✅ Redis connection successful")
 
         except Exception as e:
             self.logger.error("❌ Redis connection test failed", error=str(e))
+
+            # Якщо ми в режимі sentinel і є REDIS_URL — пробуємо fallback на standalone
+            if (
+                getattr(self, "redis_mode", "") == "sentinel"
+                and getattr(self.settings, "redis_url", "")
+            ):
+                try:
+                    self.logger.warning(
+                        "Sentinel ping failed, falling back to standalone using REDIS_URL"
+                    )
+                    await self._close_connections()
+                    self.redis_mode = "standalone"
+                    await self._create_standalone_clients()
+                    await self._test_connection()
+                    return
+                except Exception as fb_e:
+                    self.logger.warning(
+                        "Fallback to standalone failed, considering dev/test bypass",
+                        error=str(fb_e),
+                    )
+
+            # У dev/testing не валимо ініціалізацію — працюємо без Redis
+            try:
+                is_dev = (
+                    hasattr(self.settings, "is_development")
+                    and (self.settings.is_development() or self.settings.is_testing())
+                )
+            except Exception:
+                is_dev = os.getenv("ENVIRONMENT", "development").lower() in (
+                    "development",
+                    "testing",
+                )
+            if is_dev:
+                self.logger.warning(
+                    "Development/testing mode: continuing without Redis"
+                )
+                self.redis_client = None
+                self.pubsub_client = None
+                self.is_connected = False
+                return
             raise
 
     async def _close_connections(self):

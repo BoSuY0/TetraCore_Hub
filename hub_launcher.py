@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).parent.absolute()))
 import structlog
 import uvicorn
 from fastapi import FastAPI
-from core.logging_utils import RateLimiterProcessor, SampleInfoProcessor
+from core.logging import configure_unified_logging
 
 # Константи безпеки
 MAX_PATH_LENGTH = 4096
@@ -332,125 +332,57 @@ class StreamHubLauncher:
 ║  ⏰ Started:    {datetime.now().strftime('%Y-%m-%d %H:%M:%S'):<44}║
 ╚══════════════════════════════════════════════════════════════╝
         """
-        print(banner)
+        self.logger.info(banner)
 
         if mode == "dev":
-            print("🔧 Development режим:")
-            print("   • Hot reload активний")
-            print("   • Debug логування увімкнено")
-            print("   • Frontend dev server на :3000")
-            print("   • Backend API на :8000")
-            print("   • Один процес для всього\n")
+            self.logger.info("🔧 Development режим:")
+            self.logger.info("   • Hot reload активний")
+            self.logger.info("   • Debug логування увімкнено")
+            self.logger.info("   • Frontend dev server на :3000")
+            self.logger.info("   • Backend API на :8000")
+            self.logger.info("   • Один процес для всього\n")
         elif mode == "fast":
-            print("⚡ Fast режим:")
-            print("   • Тільки backend")
-            print("   • Використовує готову збірку frontend")
-            print("   • Швидкий старт\n")
+            self.logger.info("⚡ Fast режим:")
+            self.logger.info("   • Тільки backend")
+            self.logger.info("   • Використовує готову збірку frontend")
+            self.logger.info("   • Швидкий старт\n")
         elif mode == "prod":
-            print("🚀 Production режим:")
-            print("   • Оптимізована збірка")
-            print("   • Статичні файли з /static")
-            print("   • Production налаштування\n")
+            self.logger.info("🚀 Production режим:")
+            self.logger.info("   • Оптимізована збірка")
+            self.logger.info("   • Статичні файли з /static")
+            self.logger.info("   • Production налаштування\n")
 
     def setup_logging(self, verbose=False):
-        """Налаштування системи логування"""
+        """Налаштування системи логування (уніфікована конфігурація)."""
+        # Локальна директорія для логів
         log_dir = self.project_root / "logs"
         log_dir.mkdir(exist_ok=True)
 
-        # Видаляємо всі існуючі handlers
+        # Підлаштовуємо рівень через ENV для уніфікованої конфігурації
+        if verbose:
+            os.environ["LOG_LEVEL"] = "DEBUG"
+        else:
+            os.environ.setdefault("LOG_LEVEL", "INFO")
+
+        # Очищаємо існуючі хендлери і застосовуємо єдину конфігурацію
         root_logger = logging.getLogger()
         for handler in root_logger.handlers[:]:
             root_logger.removeHandler(handler)
 
-        # Встановлюємо базовий рівень логування
-        if verbose:
-            log_level = logging.DEBUG
-            uvicorn_log_level = "debug"
-        else:
-            log_level = logging.INFO
-            uvicorn_log_level = "info"
+        configure_unified_logging()
 
-        # Налаштування Uvicorn логерів (пропагуємо до root)
+        # Налаштовуємо Uvicorn логери для пропагації у root (до structlog)
         uvicorn_loggers = ["uvicorn", "uvicorn.error", "uvicorn.access", "uvicorn.asgi"]
         for logger_name in uvicorn_loggers:
             logger = logging.getLogger(logger_name)
-            logger.setLevel(log_level)
             logger.handlers = []
-            logger.propagate = True  # ВИПРАВЛЕННЯ: пропагуємо до root
+            logger.propagate = True
 
-        # Встановлюємо рівень для root
-        root_logger.setLevel(log_level)
+        # Визначаємо рівень для Uvicorn за LOG_LEVEL
+        env_level = os.getenv("LOG_LEVEL", "INFO").upper()
+        uvicorn_log_level = "debug" if env_level == "DEBUG" else "info"
 
-        # Rate limiter
-        rate_limiter = RateLimiterProcessor(
-            min_interval=float(os.getenv("LOG_RATE_LIMIT_SEC", "5"))
-        )
-        info_sampler = SampleInfoProcessor()
-        from core.logging_utils import RedactSecretsProcessor
-
-        redact_secrets = RedactSecretsProcessor()
-
-        # Кастомний рендерер з кольорами (ваш beautiful рендерер)
-        def custom_console_renderer(logger, method_name, event_dict):
-            timestamp = event_dict.pop("timestamp", "")
-            level = method_name.upper()
-            event = event_dict.pop("event", "")
-
-            colors = {
-                "DEBUG": "\033[36m",  # Cyan
-                "INFO": "\033[32m",  # Green
-                "WARNING": "\033[33m",  # Yellow
-                "ERROR": "\033[31m",  # Red
-                "CRITICAL": "\033[35m",  # Magenta
-            }
-            reset = "\033[0m"
-
-            level_color = colors.get(level, "")
-            colored_level = f"{level_color}{level:<8}{reset}"
-
-            extras = []
-            for key, value in event_dict.items():
-                if key not in ["logger", "level"]:
-                    extras.append(f"\033[90m{key}=\033[37m{value}\033[0m")
-
-            extra_str = " " + " ".join(extras) if extras else ""
-            message = f"\033[90m{timestamp}\033[0m [{colored_level}] {event}{extra_str}"
-
-            return message
-
-        # Processors для structlog (останній - wrap_for_formatter для stdlib)
-        processors = [
-            structlog.stdlib.filter_by_level,  # Стандартний фільтр по рівню
-            structlog.stdlib.add_logger_name,
-            structlog.stdlib.add_log_level,
-            structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S"),
-            rate_limiter,
-            info_sampler,
-            redact_secrets,
-            structlog.processors.StackInfoRenderer(),
-            structlog.processors.format_exc_info,
-            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,  # ВАЖЛИВО для stdlib
-        ]
-
-        structlog.configure(
-            processors=processors,
-            context_class=dict,
-            logger_factory=structlog.stdlib.LoggerFactory(),  # ВИПРАВЛЕННЯ: stdlib інтеграція
-            cache_logger_on_first_use=True,
-        )
-
-        # Додаємо handler з ProcessorFormatter + ваш custom_renderer
-        formatter = structlog.stdlib.ProcessorFormatter(
-            processor=custom_console_renderer,  # Ваш рендерер як processor
-        )
-        handler = logging.StreamHandler()  # Вивід на stdout
-        handler.setFormatter(formatter)
-        root_logger.addHandler(handler)
-
-        # Логування налаштувань
-        logger = structlog.get_logger()
-
-        # Зберігаємо логер
+        # Зберігаємо логер класу
         self._logger = structlog.get_logger(__name__)
 
         return uvicorn_log_level
@@ -716,18 +648,17 @@ class StreamHubLauncher:
                 self.logger.error(error_msg)
 
                 if stdout.strip():
-                    print(f"STDOUT: {stdout.strip()}")
                     self.logger.error(f"npm stdout: {stdout.strip()}")
 
                 if stderr.strip():
-                    print(f"STDERR: {stderr.strip()}")
                     self.logger.error(f"npm stderr: {stderr.strip()}")
 
                 # Додаткова діагностика
-                print(f"Команда: {' '.join(command_list)}")
-                print(f"Робоча директорія: {frontend_path}")
-                print(
-                    f"Змінні оточення: {list(self.secure_cmd.create_safe_env().keys())}"
+                self.logger.debug(
+                    "npm install diagnostics",
+                    command=" ".join(command_list),
+                    cwd=str(frontend_path),
+                    env_keys=list(self.secure_cmd.create_safe_env().keys()),
                 )
 
                 return False
@@ -744,14 +675,14 @@ class StreamHubLauncher:
 
         # Перевіряємо чи потрібна збірка
         if not force and not self._check_if_frontend_needs_rebuild():
-            print("✅ Frontend вже зібрано, використовуємо існуючу збірку")
+            self.logger.info("✅ Frontend вже зібрано, використовуємо існуючу збірку")
             return self._copy_build_files()
 
         # Встановлюємо залежності якщо потрібно
         if not await self.install_dependencies():
             return False
 
-        print("🔨 Збірка frontend...")
+        self.logger.info("🔨 Збірка frontend...")
         try:
             # Валідуємо шлях
             frontend_path = self.secure_path.validate_path(str(self.frontend_dir))
@@ -773,15 +704,15 @@ class StreamHubLauncher:
             )
 
             if returncode == 0:
-                print("✅ Frontend зібрано успішно")
+                self.logger.info("✅ Frontend зібрано успішно")
                 # Копіюємо файли в static
                 return self._copy_build_files()
             else:
-                print(f"❌ Помилка збірки: {stderr}")
+                self.logger.error(f"❌ Помилка збірки: {stderr}")
                 return False
 
         except Exception as e:
-            print(f"❌ Помилка збірки frontend: {e}")
+            self.logger.error(f"❌ Помилка збірки frontend: {e}")
             return False
 
     async def start_development_server(self):
@@ -792,7 +723,7 @@ class StreamHubLauncher:
         if not await self.install_dependencies():
             return None
 
-        print("🚀 Запуск frontend development server...")
+        self.logger.info("🚀 Запуск frontend development server...")
 
         # Звільняємо порт 3000 для frontend
         await self.free_port(3000)
@@ -825,19 +756,15 @@ class StreamHubLauncher:
                             break
                         line_text = line.decode().strip()
                         if line_text:
-                            self.logger.debug(f"{prefix}: {line_text}")
-                            # Виводимо важливі повідомлення в консоль
-                            if any(
-                                keyword in line_text.lower()
-                                for keyword in [
-                                    "local:",
-                                    "error",
-                                    "warn",
-                                    "ready",
-                                    "compiled",
-                                ]
-                            ):
-                                print(f"[Frontend {prefix}] {line_text}")
+                            lower = line_text.lower()
+                            if "error" in lower:
+                                self.logger.error(f"frontend {prefix}: {line_text}")
+                            elif "warn" in lower:
+                                self.logger.warning(f"frontend {prefix}: {line_text}")
+                            elif any(k in lower for k in ["local:", "ready", "compiled"]):
+                                self.logger.info(f"frontend {prefix}: {line_text}")
+                            else:
+                                self.logger.debug(f"frontend {prefix}: {line_text}")
                 except Exception as e:
                     self.logger.error(f"Помилка читання {prefix}: {e}")
 
@@ -854,7 +781,7 @@ class StreamHubLauncher:
             await asyncio.sleep(3)
 
             if process.returncode is None:
-                print(
+                self.logger.info(
                     "✅ Frontend development server запущено на http://localhost:3000"
                 )
                 return process
@@ -864,11 +791,11 @@ class StreamHubLauncher:
                     if not task.done():
                         task.cancel()
                 stdout, stderr = await process.communicate()
-                print(f"❌ Помилка запуску frontend: {stderr.decode()}")
+                self.logger.error(f"❌ Помилка запуску frontend: {stderr.decode()}")
                 return None
 
         except Exception as e:
-            print(f"❌ Помилка запуску development server: {e}")
+            self.logger.error(f"❌ Помилка запуску development server: {e}")
             return None
 
     def setup_environment(self):
@@ -902,6 +829,8 @@ class StreamHubLauncher:
 
         # Валідація критичних параметрів
         self._validate_environment()
+
+        # Узгодження settings з оточенням виконується у відповідних run_* режимах
 
     def _validate_environment(self):
         """Валідація змінних оточення"""
@@ -1168,21 +1097,21 @@ class StreamHubLauncher:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(backend_url, timeout=5) as response:
                         if response.status in [200, 401, 403]:  # Сервер працює
-                            print(f"✅ Backend готовий після {attempt + 1} спроб")
+                            self.logger.info(f"✅ Backend готовий після {attempt + 1} спроб")
                             return True
                         else:
-                            print(
+                            self.logger.warning(
                                 f"⚠️  Backend відповів {response.status}, спроба {attempt + 1}/{max_attempts}"
                             )
             except Exception as e:
-                print(
+                self.logger.debug(
                     f"⏳ Спроба {attempt + 1}/{max_attempts}: Backend ще не готовий ({str(e)[:50]}...)"
                 )
 
             if attempt < max_attempts - 1:
                 await asyncio.sleep(delay)
 
-        print(f"❌ Backend не став готовим після {max_attempts} спроб")
+        self.logger.error(f"❌ Backend не став готовим після {max_attempts} спроб")
         return False
 
     async def run_backend(
@@ -1358,13 +1287,25 @@ class StreamHubLauncher:
         os.environ["ENVIRONMENT"] = "development"
         os.environ["NODE_ENV"] = "development"  # ← додали, щоб npm ставив devDeps
 
+        # Узгоджуємо глобальні налаштування з dev-оточенням для коректних URL у банері
+        try:
+            from config import update_settings, Environment as _Env
+
+            update_settings(
+                environment=_Env.DEVELOPMENT,
+                port=int(os.environ.get("PORT", "8000")),
+                host=os.environ.get("HOST", "0.0.0.0"),
+            )
+        except Exception:
+            pass
+
         # Виводимо банер
         self.print_banner("dev")
 
         try:
             # Запускаємо backend з hot reload
-            print("\n🔧 Запуск в development режимі...\n")
-            print("🚀 Запускаємо backend сервер спочатку...")
+            self.logger.info("🔧 Запуск в development режимі...")
+            self.logger.info("🚀 Запускаємо backend сервер спочатку...")
 
             # Запускаємо backend як асинхронну задачу
             backend_task = asyncio.create_task(
@@ -1377,27 +1318,27 @@ class StreamHubLauncher:
             )
 
             # Чекаємо поки backend стане готовим
-            print("⏳ Перевіряємо готовність backend сервера...")
+            self.logger.info("⏳ Перевіряємо готовність backend сервера...")
             backend_ready = await self.wait_for_backend_ready(max_attempts=15, delay=1)
 
             if not backend_ready:
-                print("❌ Backend не готовий, але продовжуємо запуск frontend...")
+                self.logger.warning("❌ Backend не готовий, але продовжуємо запуск frontend...")
 
             # Запускаємо frontend dev server
-            print("🎨 Запускаємо frontend dev server...")
+            self.logger.info("🎨 Запускаємо frontend dev server...")
             frontend_process = await self.start_development_server()
             if frontend_process:
                 self.frontend_process = frontend_process
-                print("✅ Frontend dev server запущено на http://localhost:3000")
+                self.logger.info("✅ Frontend dev server запущено на http://localhost:3000")
 
             # Чекаємо завершення backend (він блокує до сигналу)
             try:
                 await backend_task
             except asyncio.CancelledError:
-                print("🛑 Backend task скасовано")
+                self.logger.info("🛑 Backend task скасовано")
 
         except KeyboardInterrupt:
-            print("\n👋 Зупинено користувачем")
+            self.logger.info("👋 Зупинено користувачем")
         finally:
             await self.cleanup()
 
@@ -1418,7 +1359,7 @@ class StreamHubLauncher:
 
         try:
             # Запускаємо тільки backend
-            print("\n⚡ Швидкий запуск backend...\n")
+            self.logger.info("⚡ Швидкий запуск backend...")
             await self.run_backend(
                 host="0.0.0.0",
                 port=int(os.environ.get("PORT", "8000")),
@@ -1444,12 +1385,12 @@ class StreamHubLauncher:
 
         # Збірка frontend
         if not await self.build_frontend(force=force_build):
-            print("❌ Не вдалося зібрати frontend")
+            self.logger.error("❌ Не вдалося зібрати frontend")
             return
 
         try:
             # Запускаємо production сервер
-            print("\n🚀 Запуск production серверу...\n")
+            self.logger.info("🚀 Запуск production серверу...")
             await self.run_backend(
                 host="0.0.0.0",
                 port=int(os.environ.get("PORT", "8000")),
@@ -1469,7 +1410,7 @@ class StreamHubLauncher:
         self.setup_environment()
 
         # Не показуємо банер в main режимі для сумісності
-        print("🚀 Запуск TetraCore StreamHub (main mode)...")
+        self.logger.info("🚀 Запуск TetraCore StreamHub (main mode)...")
 
         try:
             # Запускаємо backend тільки з базовими налаштуваннями
@@ -1500,19 +1441,19 @@ class StreamHubLauncher:
         )
         os.environ["WEBSOCKET_TIMEOUT"] = "60"  # Коротший таймаут для тестування
 
-        print("🧪 Режим тестування неактивності клієнтів")
-        print("=" * 60)
-        print(f"Ping затримка: {ping_delay} секунд")
-        print(f"Симуляція відключення: {'ТАК' if simulate_disconnect else 'НІ'}")
-        print(
+        self.logger.info("🧪 Режим тестування неактивності клієнтів")
+        self.logger.info("=" * 60)
+        self.logger.info(f"Ping затримка: {ping_delay} секунд")
+        self.logger.info(f"Симуляція відключення: {'ТАК' if simulate_disconnect else 'НІ'}")
+        self.logger.info(
             f"Heartbeat інтервал: {os.environ.get('WEBSOCKET_HEARTBEAT_INTERVAL')} секунд"
         )
-        print(f"WebSocket таймаут: {os.environ.get('WEBSOCKET_TIMEOUT')} секунд")
-        print("=" * 60)
+        self.logger.info(f"WebSocket таймаут: {os.environ.get('WEBSOCKET_TIMEOUT')} секунд")
+        self.logger.info("=" * 60)
 
         try:
             # Запускаємо backend в тестовому режимі
-            print("\n🚀 Запуск StreamHub в тестовому режимі...")
+            self.logger.info("🚀 Запуск StreamHub в тестовому режимі...")
 
             # Створюємо задачу для backend
             backend_task = asyncio.create_task(
@@ -1525,11 +1466,11 @@ class StreamHubLauncher:
             )
 
             # Чекаємо поки backend стане готовим
-            print("⏳ Очікування готовності backend...")
+            self.logger.info("⏳ Очікування готовності backend...")
             backend_ready = await self.wait_for_backend_ready(max_attempts=15, delay=1)
 
             if backend_ready:
-                print("✅ Backend готовий!")
+                self.logger.info("✅ Backend готовий!")
 
                 # Запускаємо тестові сценарії
                 test_task = asyncio.create_task(
@@ -1551,122 +1492,119 @@ class StreamHubLauncher:
                             pass
 
                 except asyncio.CancelledError:
-                    print("🛑 Тестування скасовано")
+                    self.logger.info("🛑 Тестування скасовано")
             else:
-                print("❌ Backend не готовий, тестування неможливе")
+                self.logger.error("❌ Backend не готовий, тестування неможливе")
                 backend_task.cancel()
 
         except KeyboardInterrupt:
-            print("\n👋 Тестування зупинено користувачем")
+            self.logger.info("👋 Тестування зупинено користувачем")
         finally:
             await self.cleanup()
 
     async def _run_inactivity_tests(self, ping_delay=0, simulate_disconnect=False):
         """Запуск тестових сценаріїв для перевірки неактивності"""
-        print("\n🧪 Початок тестових сценаріїв...")
+        self.logger.info("🧪 Початок тестових сценаріїв...")
 
         try:
             # Імітуємо клієнта з затримками ping
             if ping_delay > 0:
-                print(f"\n🐌 Тест 1: Клієнт з затримкою ping {ping_delay} секунд")
+                self.logger.info(f"🐌 Тест 1: Клієнт з затримкою ping {ping_delay} секунд")
                 await self._test_slow_ping_client(ping_delay)
 
             # Імітуємо втрату з'єднання
             if simulate_disconnect:
-                print("\n💔 Тест 2: Симуляція втрати з'єднання")
+                self.logger.info("💔 Тест 2: Симуляція втрати з'єднання")
                 await self._test_connection_loss()
 
             # Базовий тест неактивності
-            print("\n⏱️ Тест 3: Клієнт без активності")
+            self.logger.info("⏱️ Тест 3: Клієнт без активності")
             await self._test_inactive_client()
 
-            print("\n✅ Всі тести завершено!")
+            self.logger.info("✅ Всі тести завершено!")
 
         except Exception as e:
-            print(f"\n❌ Помилка під час тестування: {e}")
-            import traceback
-
-            traceback.print_exc()
+            self.logger.exception(f"❌ Помилка під час тестування: {e}")
 
     async def _test_slow_ping_client(self, ping_delay):
         """Тест клієнта з повільним ping"""
-        print(f"   📡 Підключення клієнта з затримкою ping {ping_delay}с...")
+        self.logger.info(f"   📡 Підключення клієнта з затримкою ping {ping_delay}с...")
         # Тут можна додати код для створення тестового WebSocket клієнта
         # з модифікованим ping інтервалом
         await asyncio.sleep(5)  # Імітація тестування
-        print("   ✅ Тест повільного ping завершено")
+        self.logger.info("   ✅ Тест повільного ping завершено")
 
     async def _test_connection_loss(self):
         """Тест втрати з'єднання"""
-        print("   💔 Симуляція втрати мережевого з'єднання...")
+        self.logger.info("   💔 Симуляція втрати мережевого з'єднання...")
         # Тут можна додати код для імітації мережевих проблем
         await asyncio.sleep(5)  # Імітація тестування
-        print("   ✅ Тест втрати з'єднання завершено")
+        self.logger.info("   ✅ Тест втрати з'єднання завершено")
 
     async def _test_inactive_client(self):
         """Тест повністю неактивного клієнта"""
-        print("   😴 Створення неактивного клієнта...")
+        self.logger.info("   😴 Створення неактивного клієнта...")
         # Тут можна додати код для створення клієнта, який не надсилає ping
         await asyncio.sleep(10)  # Імітація тестування
-        print("   ✅ Тест неактивного клієнта завершено")
+        self.logger.info("   ✅ Тест неактивного клієнта завершено")
 
     def diagnose_environment(self):
         """Діагностика середовища виконання"""
         from config import get_settings
 
-        print("🔍 Діагностика середовища TetraCore Hub")
-        print("=" * 60)
+        self.logger.info("🔍 Діагностика середовища TetraCore Hub")
+        self.logger.info("=" * 60)
 
         settings = get_settings()
         info = settings.diagnose_environment()
 
         # Основна інформація
-        print("\n📊 ЗАГАЛЬНА ІНФОРМАЦІЯ")
-        print(f"Дата/час: {info['timestamp']}")
-        print(f"Python: {info['python_version']}")
-        print(f"Платформа: {info['platform']}")
-        print(f"Hostname: {info['hostname']}")
+        self.logger.info("\n📊 ЗАГАЛЬНА ІНФОРМАЦІЯ")
+        self.logger.info(f"Дата/час: {info['timestamp']}")
+        self.logger.info(f"Python: {info['python_version']}")
+        self.logger.info(f"Платформа: {info['platform']}")
+        self.logger.info(f"Hostname: {info['hostname']}")
 
         # Середовище
-        print("\n🌍 СЕРЕДОВИЩЕ")
+        self.logger.info("\n🌍 СЕРЕДОВИЩЕ")
         env = info["environment"]
-        print(f"Heroku: {'ТАК' if env['is_heroku'] else 'НІ'}")
-        print(f"DYNO: {env['dyno'] or '<не встановлено>'}")
-        print(f"PORT: {env['port'] or '<не встановлено>'}")
-        print(f"Environment: {env['environment']}")
-        print(f"Debug: {env['debug']}")
-        print(f"Log Level: {env['log_level']}")
+        self.logger.info(f"Heroku: {'ТАК' if env['is_heroku'] else 'НІ'}")
+        self.logger.info(f"DYNO: {env['dyno'] or '<не встановлено>'}")
+        self.logger.info(f"PORT: {env['port'] or '<не встановлено>'}")
+        self.logger.info(f"Environment: {env['environment']}")
+        self.logger.info(f"Debug: {env['debug']}")
+        self.logger.info(f"Log Level: {env['log_level']}")
 
         # URL конфігурація
-        print("\n🔗 URL КОНФІГУРАЦІЯ")
+        self.logger.info("\n🔗 URL КОНФІГУРАЦІЯ")
         urls = info["urls"]
-        print(f"Backend: {urls['backend']}")
-        print(f"Frontend: {urls['frontend']}")
-        print(f"Dashboard: {urls['dashboard']}")
-        print(f"WebSocket: {urls['websocket']}")
+        self.logger.info(f"Backend: {urls['backend']}")
+        self.logger.info(f"Frontend: {urls['frontend']}")
+        self.logger.info(f"Dashboard: {urls['dashboard']}")
+        self.logger.info(f"WebSocket: {urls['websocket']}")
 
         # Redis
-        print("\n🔴 REDIS")
+        self.logger.info("\n🔴 REDIS")
         redis = info["redis"]
-        print(f"Enabled: {redis['enabled']}")
-        print(f"URL: {redis['url_safe']}")
+        self.logger.info(f"Enabled: {redis['enabled']}")
+        self.logger.info(f"URL: {redis['url_safe']}")
 
         # Автентифікація
-        print("\n🔐 АВТЕНТИФІКАЦІЯ")
+        self.logger.info("\n🔐 АВТЕНТИФІКАЦІЯ")
         auth = info["auth"]
-        print(f"Require Auth: {auth['require_authentication']}")
-        print(f"Admin Configured: {auth['admin_configured']}")
+        self.logger.info(f"Require Auth: {auth['require_authentication']}")
+        self.logger.info(f"Admin Configured: {auth['admin_configured']}")
 
         # Валідація
         auth_errors = settings.validate_auth_config()
         if auth_errors:
-            print("\n⚠️ ПОМИЛКИ КОНФІГУРАЦІЇ:")
+            self.logger.warning("\n⚠️ ПОМИЛКИ КОНФІГУРАЦІЇ:")
             for error in auth_errors:
-                print(f"  • {error}")
+                self.logger.warning(f"  • {error}")
         else:
-            print("\n✅ Конфігурація валідна")
+            self.logger.info("\n✅ Конфігурація валідна")
 
-        print("\n" + "=" * 60)
+        self.logger.info("\n" + "=" * 60)
 
     async def cleanup(self):
         """Очищення ресурсів"""
@@ -1734,18 +1672,18 @@ class StreamHubLauncher:
 
     def _signal_handler(self, signum, frame):
         """Обробка сигналів (застарілий - використовується тільки як fallback)"""
-        print(f"\n🛑 Fallback signal handler: отримано сигнал {signum}")
+        self.logger.warning(f"🛑 Fallback signal handler: отримано сигнал {signum}")
 
         # Просто встановлюємо флаг та виходимо
         if hasattr(self, "_hub_instance") and self._hub_instance:
             self._hub_instance.is_running = False
 
-        print("💥 Примусове завершення")
+        self.logger.error("💥 Примусове завершення")
         sys.exit(1)
 
     def _force_exit_handler(self, signum, frame):
         """Примусове завершення при повторному сігналі"""
-        print(f"\n💥 Примусове завершення (сигнал {signum})")
+        self.logger.error(f"💥 Примусове завершення (сигнал {signum})")
         sys.exit(1)
 
 
@@ -1812,11 +1750,11 @@ def main():
         elif args.mode == "build":
             if not args.no_banner:
                 launcher.print_banner("build")
-            print("🔨 Збірка frontend...")
+            launcher.logger.info("🔨 Збірка frontend...")
             if asyncio.run(launcher.build_frontend(force=True)):
-                print("✅ Збірка завершена успішно")
+                launcher.logger.info("✅ Збірка завершена успішно")
             else:
-                print("❌ Помилка збірки")
+                launcher.logger.error("❌ Помилка збірки")
                 sys.exit(1)
         elif args.mode == "main":
             # Режим main.py для сумісності
@@ -1834,12 +1772,9 @@ def main():
                 )
             )
     except KeyboardInterrupt:
-        print("\n👋 Зупинено користувачем")
+        launcher.logger.info("👋 Зупинено користувачем")
     except Exception as e:
-        print(f"\n❌ Помилка: {e}")
-        import traceback
-
-        traceback.print_exc()
+        launcher.logger.exception(f"❌ Помилка: {e}")
         sys.exit(1)
 
 

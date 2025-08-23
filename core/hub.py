@@ -103,10 +103,21 @@ class StreamHub:
     async def initialize(self):
         """Ініціалізація всіх компонентів"""
         try:
-            # Ініціалізація Redis (завжди увімкнено у конфігурації)
+            # Ініціалізація Redis із безпечним dev/testing fallback
             self.redis_manager = RedisManager(self.settings)
-            await self.redis_manager.initialize()
-            self.logger.info("✅ Redis manager initialized")
+            try:
+                await self.redis_manager.initialize()
+                self.logger.info("✅ Redis manager initialized")
+            except Exception as e:
+                # На продакшені — фейл, в dev/testing продовжуємо без Redis
+                if self.settings.is_development() or self.settings.is_testing():
+                    self.logger.warning(
+                        "Redis init failed in dev/testing, continuing without Redis",
+                        error=str(e),
+                    )
+                    self.redis_manager = None
+                else:
+                    raise
 
             # Ініціалізація асинхронного оптимізатора
             self.async_optimizer = AsyncOptimizer(
