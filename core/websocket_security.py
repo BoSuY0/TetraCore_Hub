@@ -1032,7 +1032,9 @@ class WebSocketSecurityManager:
             if self.redis_client:
                 key = f"ws_nonce:{nonce}"
                 try:
-                    res = await self.redis_client.set(key, "1", ex=self._nonce_ttl_seconds, nx=True)  # type: ignore
+                    res = await self.redis_client.set(
+                        key, "1", ex=self._nonce_ttl_seconds, nx=True
+                    )  # type: ignore
                     if not res:
                         return False
                 except Exception:
@@ -1041,7 +1043,9 @@ class WebSocketSecurityManager:
                         exists = await self.redis_client.get(key)  # type: ignore
                         if exists:
                             return False
-                        await self.redis_client.set(key, "1", ex=self._nonce_ttl_seconds)  # type: ignore
+                        await self.redis_client.set(
+                            key, "1", ex=self._nonce_ttl_seconds
+                        )  # type: ignore
                     except Exception:
                         # перехід на in-memory
                         pass

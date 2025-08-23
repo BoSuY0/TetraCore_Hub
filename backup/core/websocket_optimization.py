@@ -471,7 +471,7 @@ class WebSocketOptimizer:
                     logger.debug(
                         "Heartbeat successful",
                         client_id=client_id,
-                        latency=f"{latency*1000:.1f}ms",
+                        latency=f"{latency * 1000:.1f}ms",
                         interval=interval,
                     )
 

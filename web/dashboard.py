@@ -366,7 +366,6 @@ def register_dashboard_routes(app, streamhub_instance):
 
     # Інтеграція з StreamHub для реальних даних
     if streamhub_instance:
-
         # Реєструємо API ендпоінти з реальними даними
         # Factory for rate limit dependency
         def get_rate_limiter(limit: int, window: int):
@@ -377,14 +376,14 @@ def register_dashboard_routes(app, streamhub_instance):
 
         @app.get("/api/health")
         async def get_api_health_with_hub(
-            rate_limit_info: dict = Depends(get_rate_limiter(limit=30, window=60))
+            rate_limit_info: dict = Depends(get_rate_limiter(limit=30, window=60)),
         ):
             """Health check з реальними даними"""
             return await streamhub_instance.get_health_status()
 
         @app.get("/api/metrics")
         async def get_api_metrics_with_hub(
-            rate_limit_info: dict = Depends(get_rate_limiter(limit=30, window=60))
+            rate_limit_info: dict = Depends(get_rate_limiter(limit=30, window=60)),
         ):
             """Метрики з реальними даними"""
             return await streamhub_instance.get_system_metrics()
@@ -547,7 +546,7 @@ def register_dashboard_routes(app, streamhub_instance):
         async def clear_queue_with_hub(
             priority: str = Query(
                 "all", description="Priority queue to clear (all, high, normal, low)"
-            )
+            ),
         ):
             """Очищення черги завдань"""
             if streamhub_instance.task_router:

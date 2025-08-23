@@ -490,7 +490,7 @@ def main() -> int:
                 )
             )
         else:
-            print(f"Presence report (root={root}{', heroku='+app if app else ''}):")
+            print(f"Presence report (root={root}{', heroku=' + app if app else ''}):")
             for k, pres in items:
                 loc = pres.get("local")
                 her = pres.get("heroku")

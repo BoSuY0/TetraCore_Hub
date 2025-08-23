@@ -6,6 +6,7 @@
 
 Повертає код 0, якщо критичних проблем немає; 1 — якщо є critical.
 """
+
 import json
 import sys
 import os

@@ -245,7 +245,7 @@ def simple_console_renderer(logger, method_name, event_dict):
     if level in ("WARNING", "ERROR", "CRITICAL"):
         bg = BG.get(level, "")
         header = f"{bg}{BRIGHT_WHITE}{BOLD} {timestamp} {level} {RESET}"
-        top = f"{BOLD}{color}{'━'*72}{RESET}"
+        top = f"{BOLD}{color}{'━' * 72}{RESET}"
         lines = [top, header, f"{BOLD}{event}{RESET}"]
         if extras:
             lines.append(f"{GREY}{extras}{RESET}")

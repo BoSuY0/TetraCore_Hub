@@ -270,7 +270,6 @@ class TaskRouter:
                     "ClientManager is not set. Call set_client_manager() first."
                 )
         try:
-
             self.logger.info(
                 "[TASK_ROUTER] Received task submission",
                 task_id=task.task_id,

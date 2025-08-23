@@ -606,10 +606,10 @@ class ClientManager:
         while self.is_running:
             try:
                 # Виконуємо cleanup безпосередньо, без AsyncOptimizer
-                # Це внутрішня службова операція, яка не повинна 
+                # Це внутрішня службова операція, яка не повинна
                 # потрапляти в загальний реєстр тасок
                 await self._cleanup_unhealthy_clients()
-                
+
                 await asyncio.sleep(30)  # Очищення кожні 30 секунд
 
             except asyncio.CancelledError:

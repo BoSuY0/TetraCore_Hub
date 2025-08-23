@@ -50,30 +50,30 @@ async def test_cleanup_loop_direct_execution(client_manager):
     """
     # Mock для _cleanup_unhealthy_clients
     client_manager._cleanup_unhealthy_clients = AsyncMock()
-    
+
     # Створюємо cleanup loop task
     cleanup_task = asyncio.create_task(client_manager._cleanup_loop())
-    
+
     # Даємо час на один цикл
     await asyncio.sleep(0.1)
-    
+
     # Зупиняємо manager
     client_manager.is_running = False
     cleanup_task.cancel()
-    
+
     try:
         await cleanup_task
     except asyncio.CancelledError:
         pass
-    
+
     # Перевіряємо що _cleanup_unhealthy_clients був викликаний
     client_manager._cleanup_unhealthy_clients.assert_called()
-    
+
     # Перевіряємо що AsyncOptimizer НЕ використовувався
     client_manager.async_optimizer.create_background_task.assert_not_called()
 
 
-@pytest.mark.asyncio 
+@pytest.mark.asyncio
 async def test_cleanup_unhealthy_clients(client_manager):
     """Тест видалення неактивних клієнтів"""
     # Створюємо тестових клієнтів
@@ -81,27 +81,27 @@ async def test_cleanup_unhealthy_clients(client_manager):
     active_client.info = ClientInfo(
         client_id="active-1",
         client_type=ClientType.WORKER,
-        stats=ClientStats(last_activity=datetime.utcnow())
+        stats=ClientStats(last_activity=datetime.utcnow()),
     )
-    
+
     inactive_client = Mock()
     inactive_client.info = ClientInfo(
-        client_id="inactive-1", 
+        client_id="inactive-1",
         client_type=ClientType.WORKER,
-        stats=ClientStats(last_activity=datetime.utcnow() - timedelta(minutes=5))
+        stats=ClientStats(last_activity=datetime.utcnow() - timedelta(minutes=5)),
     )
     inactive_client.websocket = Mock()
-    
+
     # Додаємо клієнтів
     client_manager.clients["active-1"] = active_client
     client_manager.clients["inactive-1"] = inactive_client
-    
+
     # Mock для get_unhealthy_clients
     client_manager.get_unhealthy_clients = Mock(return_value=[inactive_client])
-    
+
     # Викликаємо cleanup
     await client_manager._cleanup_unhealthy_clients()
-    
+
     # Перевіряємо що неактивний клієнт був видалений
     assert "active-1" in client_manager.clients
     assert "inactive-1" not in client_manager.clients

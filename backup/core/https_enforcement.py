@@ -210,7 +210,8 @@ class HTTPSEnforcer:
                 client=request.client.host if request.client else "unknown",
             )
             raise HTTPException(
-                status_code=426, detail="HTTPS required"  # Upgrade Required
+                status_code=426,
+                detail="HTTPS required",  # Upgrade Required
             )
 
     def add_security_headers(self, response: Response, is_secure: bool):

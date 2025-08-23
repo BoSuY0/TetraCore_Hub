@@ -23,6 +23,7 @@ import redis
 import structlog
 from fastapi import Depends, HTTPException, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
 # Видаляємо passlib - використовуємо bcrypt напряму
 from pydantic import BaseModel, Field, field_validator
 
@@ -210,8 +211,8 @@ class AuthManager:
         """Хешування пароля з використанням bcrypt"""
         # Використовуємо bcrypt напряму
         salt = bcrypt.gensalt(rounds=BCRYPT_ROUNDS)
-        hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
-        return hashed.decode('utf-8')
+        hashed = bcrypt.hashpw(password.encode("utf-8"), salt)
+        return hashed.decode("utf-8")
 
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:
         """Перевірка пароля"""
@@ -219,27 +220,26 @@ class AuthManager:
             # Перевіряємо що пароль і хеш валідні
             if not plain_password or not hashed_password:
                 return False
-            
+
             # Використовуємо bcrypt напряму
             result = bcrypt.checkpw(
-                plain_password.encode('utf-8'), 
-                hashed_password.encode('utf-8')
+                plain_password.encode("utf-8"), hashed_password.encode("utf-8")
             )
-            
+
             logger.debug(
                 "Password verify executed",
                 method="bcrypt",
                 ok=result,
-                hashed_prefix=hashed_password[:3] if len(hashed_password) >= 3 else None,
+                hashed_prefix=(
+                    hashed_password[:3] if len(hashed_password) >= 3 else None
+                ),
             )
-            
+
             return result
-            
+
         except (ValueError, TypeError, AttributeError) as e:
             logger.error(
-                "Password verification error", 
-                error=str(e),
-                error_type=type(e).__name__
+                "Password verification error", error=str(e), error_type=type(e).__name__
             )
             return False
 

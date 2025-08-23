@@ -321,7 +321,7 @@ class StreamHubLauncher:
 ║                  Unified Secure Launcher                       ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Mode:      {mode.upper():<48}║
-║  Environment: {os.getenv('ENVIRONMENT', 'development'):<46}║
+║  Environment: {os.getenv("ENVIRONMENT", "development"):<46}║
 ╠══════════════════════════════════════════════════════════════╣
 ║  🔧 Backend:    {backend_url:<44}║
 ║  🎨 Frontend:   {frontend_url:<44}║
@@ -329,7 +329,7 @@ class StreamHubLauncher:
 ║  🔌 WebSocket:  {websocket_url:<44}║
 ╠══════════════════════════════════════════════════════════════╣
 ║  📁 Project:    {str(self.project_root):<44}║
-║  ⏰ Started:    {datetime.now().strftime('%Y-%m-%d %H:%M:%S'):<44}║
+║  ⏰ Started:    {datetime.now().strftime("%Y-%m-%d %H:%M:%S"):<44}║
 ╚══════════════════════════════════════════════════════════════╝
         """
         self.logger.info(banner)
@@ -681,7 +681,9 @@ class StreamHubLauncher:
             frontend_path = self.secure_path.validate_path(str(self.frontend_dir))
 
             returncode, stdout, stderr = await self.secure_cmd.run_safe(
-                command_list, cwd=frontend_path, timeout=600  # 10 хвилин
+                command_list,
+                cwd=frontend_path,
+                timeout=600,  # 10 хвилин
             )
 
             if returncode == 0:

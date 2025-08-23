@@ -19,7 +19,7 @@ os.makedirs(audit_dir, exist_ok=True)
 
 # Налаштування файлового хендлера для аудит логів
 audit_handler = logging.FileHandler(
-    filename=f'{audit_dir}/audit_{datetime.now().strftime("%Y%m%d")}.log',
+    filename=f"{audit_dir}/audit_{datetime.now().strftime('%Y%m%d')}.log",
     encoding="utf-8",
 )
 
