@@ -1,7 +1,7 @@
 import logging
 import os
 import time
-from typing import Any, Dict, Tuple
+from typing import Any, Dict
 
 # structlog доступний у проекті
 import structlog
