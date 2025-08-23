@@ -135,9 +135,12 @@ function App() {
       <SettingsProvider>
         <I18nProvider>
           <AuthProvider>
-            <StatusProvider>
-              <AppContent />
-            </StatusProvider>
+            {/* Монтуємо StatusProvider тільки після успішної авторизації */}
+            <ProtectedRoute requiredRole="admin">
+              <StatusProvider>
+                <AppContent />
+              </StatusProvider>
+            </ProtectedRoute>
           </AuthProvider>
         </I18nProvider>
       </SettingsProvider>
