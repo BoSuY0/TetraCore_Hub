@@ -309,12 +309,17 @@ class RedisManager:
 
     async def _create_standalone_clients(self):
         """Створення звичайних Redis клієнтів з покращеним управлінням пулом"""
-        # Підготовка URL з TLS параметрами для Upstash
+        # Підготовка URL з TLS параметрами для хмарних провайдерів
         redis_url = self.settings.redis_url
 
-        # Для Upstash завжди використовуємо TLS
-        if "upstash.io" in redis_url and redis_url.startswith("redis://"):
-            redis_url = redis_url.replace("redis://", "rediss://")
+        # Якщо доступний REDIS_TLS_URL або увімкнуто TLS — форсуємо rediss://
+        try:
+            force_tls = bool(getattr(self.settings, "redis_tls_enabled", True))
+        except Exception:
+            force_tls = True
+
+        if redis_url and force_tls and redis_url.startswith("redis://"):
+            redis_url = redis_url.replace("redis://", "rediss://", 1)
 
         # Покращені параметри з'єднання з пулом
         base_kwargs = {
@@ -328,7 +333,7 @@ class RedisManager:
             "health_check_interval": 30,  # Регулярна перевірка здоров'я
         }
 
-        # Додаткові SSL параметри для Upstash
+        # Додаткові SSL параметри для TLS з'єднань
         if redis_url.startswith("rediss://"):
             # Дозволяємо керувати перевіркою TLS через змінні середовища
             import os
@@ -336,7 +341,10 @@ class RedisManager:
             ssl_check_hostname = os.getenv(
                 "REDIS_SSL_CHECK_HOSTNAME", "true"
             ).lower() in ("1", "true", "yes")
-            ssl_cert_reqs_env = os.getenv("REDIS_SSL_CERT_REQS", "required").lower()
+            ssl_cert_reqs_env = os.getenv(
+                "REDIS_SSL_CERT_REQS",
+                str(getattr(self.settings, "redis_ssl_cert_reqs", "required")),
+            ).lower()
             # Map env to redis-py values
             ssl_cert_reqs_value = (
                 None

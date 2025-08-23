@@ -88,6 +88,8 @@ class Settings:
     )
     redis_retry_on_timeout: bool = True
     redis_health_check_interval: int = 120  # Збільшено до 2 хвилин для Upstash
+    # Дозволити старт без Redis у продакшені (керується через ENV)
+    allow_start_without_redis: bool = False
 
     # Redis Sentinel налаштування
     redis_sentinel_urls: List[str] = field(default_factory=list)
@@ -231,13 +233,24 @@ class Settings:
         # Інші налаштування
         # Ігноруємо REDIS_ENABLED: Redis завжди увімкнений
         self.redis_enabled = True
-        self.redis_url = os.getenv("REDIS_URL", self.redis_url)
+
+        # Підтримка REDIS_TLS_URL (пріоритетніше за REDIS_URL якщо задано)
+        redis_tls_url = os.getenv("REDIS_TLS_URL")
+        if redis_tls_url:
+            self.redis_url = redis_tls_url
+        else:
+            self.redis_url = os.getenv("REDIS_URL", self.redis_url)
         self.redis_tls_enabled = os.getenv(
             "REDIS_TLS_ENABLED", str(self.redis_tls_enabled)
         ).lower() in ("true", "1", "yes")
         self.redis_ssl_cert_reqs = os.getenv(
             "REDIS_SSL_CERT_REQS", self.redis_ssl_cert_reqs
         )
+
+        # Дозвіл на старт без Redis (для підвищення живучості сервісу)
+        self.allow_start_without_redis = os.getenv(
+            "ALLOW_START_WITHOUT_REDIS", str(self.allow_start_without_redis)
+        ).lower() in ("true", "1", "yes")
 
         # Завантаження Sentinel URLs
         sentinel_urls = os.getenv("REDIS_SENTINEL_URLS")

@@ -30,9 +30,9 @@
     "web-vitals": "^2.1.4"
   },
   "scripts": {
-    "dev": "npx vite",
-    "build": "npx -y -p typescript tsc && npx vite build",
-    "preview": "npx vite preview"
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
   },
   "browserslist": {
     "production": [

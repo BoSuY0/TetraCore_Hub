@@ -40,6 +40,15 @@
       "description": "URL для підключення до Redis (встановіть у Heroku Config Vars)",
       "required": true
     },
+    "REDIS_TLS_URL": {
+      "description": "TLS URL для Redis (якщо доступний, має пріоритет над REDIS_URL)",
+      "required": false
+    },
+    "ALLOW_START_WITHOUT_REDIS": {
+      "description": "Дозволити запуск без Redis при тимчасових збоях",
+      "value": "true",
+      "required": false
+    },
     "AUTH_TOKEN": {
       "description": "Токен аутентифікації (опціонально)",
       "required": false
@@ -66,7 +75,7 @@
       "url": "heroku/python"
     }
   ],
-  "stack": "heroku-22",
+  "stack": "heroku-24",
   "scripts": {
     "postdeploy": "echo 'TetraCore StreamHub deployed successfully!'"
   }

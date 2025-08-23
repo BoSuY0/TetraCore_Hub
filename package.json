@@ -4,7 +4,7 @@
   "description": "TetraCore StreamHub - Integrated Backend and Frontend",
   "main": "hub_launcher.py",
   "scripts": {
-    "heroku-prebuild": "echo 'Installing frontend dependencies...' && cd frontend && npm install --legacy-peer-deps",
+    "heroku-prebuild": "echo 'Installing frontend dependencies (including dev)...' && cd frontend && npm ci --include=dev --legacy-peer-deps",
     "heroku-postbuild": "echo 'Building frontend...' && cd frontend && npm run build && echo 'Frontend built successfully'",
     "build": "cd frontend && npm run build",
     "dev": "python hub_launcher.py dev",
