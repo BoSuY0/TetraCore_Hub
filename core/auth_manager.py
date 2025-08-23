@@ -23,15 +23,7 @@ import redis
 import structlog
 from fastapi import Depends, HTTPException, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from passlib.context import CryptContext
-from passlib.exc import (
-    MissingBackendError,
-    InternalBackendError,
-    UnknownHashError,
-    PasswordValueError,
-    PasswordSizeError,
-    PasswordTruncateError,
-)
+# Видаляємо passlib - використовуємо bcrypt напряму
 from pydantic import BaseModel, Field, field_validator
 
 from core.async_optimization import AsyncOptimizer
@@ -72,16 +64,7 @@ STRICT_SESSION_VALIDATION = os.getenv(
 # Це дозволяє інвалідувати всі токени після рестарту
 SERVER_BOOT_ID = str(uuid.uuid4())
 
-# Придушуємо попередження від passlib про bcrypt версію
-# Це відоме некритичне попередження через зміни в структурі bcrypt модуля
-import warnings
-with warnings.catch_warnings():
-    warnings.filterwarnings("ignore", message=".*error reading bcrypt version.*")
-    warnings.filterwarnings("ignore", category=UserWarning, module="passlib")
-    # Конфігурація для паролів
-    pwd_context = CryptContext(
-        schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=BCRYPT_ROUNDS
-    )
+# HTTPBearer для FastAPI
 security = HTTPBearer()
 
 
@@ -225,79 +208,38 @@ class AuthManager:
 
     def hash_password(self, password: str) -> str:
         """Хешування пароля з використанням bcrypt"""
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", message=".*error reading bcrypt version.*")
-            warnings.filterwarnings("ignore", category=UserWarning, module="passlib")
-            return pwd_context.hash(password)
+        # Використовуємо bcrypt напряму
+        salt = bcrypt.gensalt(rounds=BCRYPT_ROUNDS)
+        hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
+        return hashed.decode('utf-8')
 
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:
         """Перевірка пароля"""
-        method_used = None
         try:
-            # Спочатку пробуємо через passlib
-            if (
-                hashed_password
-                and isinstance(hashed_password, str)
-                and hashed_password.startswith("$2")
-            ):
-                try:
-                    method_used = "passlib"
-                    # Придушуємо попередження про bcrypt версію під час верифікації
-                    with warnings.catch_warnings():
-                        warnings.filterwarnings("ignore", message=".*error reading bcrypt version.*")
-                        warnings.filterwarnings("ignore", message=".*detected 'bcrypt' backend.*")
-                        warnings.filterwarnings("ignore", message=".*backend lacks.*")
-                        ok = pwd_context.verify(plain_password, hashed_password)
-                    logger.debug(
-                        "Password verify executed",
-                        method=method_used,
-                        ok=ok,
-                        hashed_prefix=hashed_password[:3],
-                    )
-                    return ok
-                except (
-                    MissingBackendError,
-                    InternalBackendError,
-                    UnknownHashError,
-                    PasswordValueError,
-                    PasswordSizeError,
-                    PasswordTruncateError,
-                    ValueError,
-                    TypeError,
-                ) as e:
-                    logger.debug(
-                        "Passlib verify failed; falling back to bcrypt",
-                        error=str(e),
-                        hashed_prefix=(
-                            hashed_password[:3]
-                            if isinstance(hashed_password, str)
-                            else None
-                        ),
-                    )
-
-            # Fallback: пряма перевірка через bcrypt (на випадок сумісності версій)
-            method_used = "bcrypt_fallback"
-            try:
-                ok = bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
-            except (ValueError, TypeError, AttributeError) as e:
-                logger.debug("bcrypt fallback verify failed", error=str(e))
+            # Перевіряємо що пароль і хеш валідні
+            if not plain_password or not hashed_password:
                 return False
-            logger.debug("Password verify executed", method=method_used, ok=ok)
-            return ok
-        except (
-            MissingBackendError,
-            InternalBackendError,
-            UnknownHashError,
-            PasswordValueError,
-            PasswordSizeError,
-            PasswordTruncateError,
-            ValueError,
-            TypeError,
-            AttributeError,
-            RuntimeError,
-        ) as e:
+            
+            # Використовуємо bcrypt напряму
+            result = bcrypt.checkpw(
+                plain_password.encode('utf-8'), 
+                hashed_password.encode('utf-8')
+            )
+            
+            logger.debug(
+                "Password verify executed",
+                method="bcrypt",
+                ok=result,
+                hashed_prefix=hashed_password[:3] if len(hashed_password) >= 3 else None,
+            )
+            
+            return result
+            
+        except (ValueError, TypeError, AttributeError) as e:
             logger.error(
-                "Password verification error", error=str(e), method=method_used
+                "Password verification error", 
+                error=str(e),
+                error_type=type(e).__name__
             )
             return False
 
