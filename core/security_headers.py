@@ -22,7 +22,7 @@ CSP_DIRECTIVE_SEPARATOR = "; "
 
 class SecurityHeadersManager:
     """Менеджер для управління security headers"""
-    
+
     def __init__(self, environment: str = "production"):
         self.environment = environment
         self.nonce_cache: Set[str] = set()
@@ -160,7 +160,7 @@ class SecurityHeadersManager:
     def build_csp_header(self, nonce: Optional[str] = None) -> str:
         """Побудова CSP header"""
         directives = self.csp_directives.copy()
-        
+
         # Додавання nonce для скриптів якщо потрібно
         if nonce:
             script_src = directives.get("script-src", []).copy()
