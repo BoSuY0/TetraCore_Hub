@@ -605,24 +605,11 @@ class ClientManager:
         """Фонова задача очищення"""
         while self.is_running:
             try:
-                # Використовуємо фонову задачу для очищення
-                task_id = await self.async_optimizer.create_background_task(
-                    name="cleanup_unhealthy_clients",
-                    func=self._cleanup_unhealthy_clients,
-                    priority=TaskPriority.LOW,
-                )
-
-                # Очікуємо результат
-                try:
-                    await self.async_optimizer.get_task_result(task_id, timeout=25)
-                except TimeoutError:
-                    self.logger.warning("Cleanup task timeout")
-                except ValueError as e:
-                    # Таск міг бути видалений або не створений
-                    self.logger.debug(
-                        "Cleanup task not found", task_id=task_id, error=str(e)
-                    )
-
+                # Виконуємо cleanup безпосередньо, без AsyncOptimizer
+                # Це внутрішня службова операція, яка не повинна 
+                # потрапляти в загальний реєстр тасок
+                await self._cleanup_unhealthy_clients()
+                
                 await asyncio.sleep(30)  # Очищення кожні 30 секунд
 
             except asyncio.CancelledError:
