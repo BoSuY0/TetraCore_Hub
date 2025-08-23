@@ -1451,9 +1451,6 @@ class TaskRouter:
                     _get_cached
                 )
                 if cached_result:
-                    self.logger.debug(
-                        "Queue stats retrieved from cache", cache_key=cache_key
-                    )
                     return cached_result
             # Підрахунок завдань в чергах
             queue_sizes = {}

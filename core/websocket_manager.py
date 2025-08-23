@@ -411,12 +411,13 @@ class WebSocketManager:
                         error=str(e),
                     )
 
-            self.logger.info(
-                "Broadcast completed",
-                sent=sent_count,
-                failed=failed_count,
-                total_connections=len(self.connections),
-            )
+            if sent_count or failed_count:
+                self.logger.info(
+                    "Broadcast completed",
+                    sent=sent_count,
+                    failed=failed_count,
+                    total_connections=len(self.connections),
+                )
 
             return sent_count
 

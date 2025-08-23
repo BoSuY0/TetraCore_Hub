@@ -12,7 +12,7 @@ import json
 import aiofiles
 import time
 import functools
-from typing import Dict, List, Any, Optional, Callable, TypeVar, Coroutine, Tuple
+from typing import Dict, List, Any, Optional, Callable, TypeVar, Coroutine, Tuple, Set
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
@@ -97,6 +97,9 @@ class AsyncOptimizer:
             "cache_hits": 0,
             "cache_misses": 0,
         }
+
+        # Для придушення повторних логів cache-hit по одному й тому ж task_id
+        self.cache_hit_logged_ids: Set[str] = set()
 
     async def initialize(self):
         """Ініціалізація оптимізатора"""
@@ -203,7 +206,9 @@ class AsyncOptimizer:
         # Перевірка кешу
         if use_cache and task_id in self.result_cache:
             self.stats["cache_hits"] += 1
-            self.logger.debug("Task result found in cache", task_id=task_id)
+            if task_id not in self.cache_hit_logged_ids:
+                self.logger.debug("Task result found in cache", task_id=task_id)
+                self.cache_hit_logged_ids.add(task_id)
             return task_id
 
         self.stats["cache_misses"] += 1

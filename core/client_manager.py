@@ -557,12 +557,13 @@ class ClientManager:
                         )
                         failed_count += 1
 
-            self.logger.info(
-                "Broadcast completed",
-                sent=sent_count,
-                failed=failed_count,
-                target_types=[t.value for t in (client_types or [])],
-            )
+            if sent_count or failed_count:
+                self.logger.info(
+                    "Broadcast completed",
+                    sent=sent_count,
+                    failed=failed_count,
+                    target_types=[t.value for t in (client_types or [])],
+                )
 
         except Exception as e:
             self.logger.error("Failed to broadcast message", error=str(e))
