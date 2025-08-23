@@ -26,7 +26,8 @@ class RateLimiterProcessor:  # pragma: no cover – простий допомі�
 
     def __init__(self, min_interval: float = 10.0):
         self.min_interval = float(min_interval)
-        self._last: Dict[str, float] = defaultdict(float)
+        # Використовуємо звичайний dict, щоб відсутній ключ трактувався як "ніколи не логувався"
+        self._last: Dict[str, float] = {}
         self._lock = Lock()
 
     # Інтерфейс structlog: processor(logger, method_name, event_dict) -> event_dict
@@ -34,7 +35,7 @@ class RateLimiterProcessor:  # pragma: no cover – простий допомі�
         key = str(event_dict.get("event") or event_dict.get("msg") or "<no_event_key>")
         now = time.time()
         with self._lock:
-            last_time = self._last[key]
+            last_time = self._last.get(key, float("-inf"))
             if now - last_time < self.min_interval:
                 # Пропускаємо подію – занадто часто
                 raise structlog.DropEvent
@@ -76,6 +77,10 @@ class RedactSecretsProcessor:  # pragma: no cover – простий допом�
         for key in list(event_dict.keys()):
             if self._is_sensitive_key(key):
                 event_dict[key] = self._redact(event_dict.get(key))
+            elif key in ("task_data", "data") and isinstance(event_dict[key], dict):
+                # Для кореневих ключів task_data/data робимо превʼю та ховаємо вміст
+                event_dict[key + "_preview"] = list(event_dict[key].keys())[:10]
+                event_dict[key] = "<hidden>"
             else:
                 event_dict[key] = _redact_value(event_dict[key])
 

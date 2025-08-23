@@ -907,18 +907,20 @@ class SecretsManager:
             if is_env_provider and (in_pytest or force_refresh):
                 cached_value = self._secrets_cache.get(name)
                 current_env_value = os.getenv(name)
-                # Форс-оновлення або зміна значення в ENV між тестами
-                if force_refresh or (
-                    current_env_value is not None and current_env_value != cached_value
-                ):
+                # У тестах: не примушувати оновлення, якщо значення в ENV не змінилося
+                if current_env_value == cached_value:
+                    logger.debug(
+                        "Returning cached secret",
+                        secret_name=name,
+                        reason="env_provider_test_mode_unchanged",
+                        cached_present=cached_present,
+                    )
+                    return cached_value if cached_value is not None else default
+                else:
                     logger.debug(
                         "Refreshing secret from Env provider during tests",
                         secret_name=name,
-                        changed=(
-                            (current_env_value != cached_value)
-                            if cached_value is not None
-                            else True
-                        ),
+                        changed=True,
                         force=force_refresh,
                         cached_len=(
                             len(cached_value)
@@ -936,14 +938,6 @@ class SecretsManager:
                         ),
                     )
                     use_cache = False  # Прочитати свіже значення нижче
-                else:
-                    logger.debug(
-                        "Returning cached secret",
-                        secret_name=name,
-                        reason="env_provider_test_mode_unchanged",
-                        cached_present=cached_present,
-                    )
-                    return cached_value
             else:
                 logger.debug(
                     "Returning cached secret",
@@ -951,7 +945,8 @@ class SecretsManager:
                     reason="provider_not_env_or_no_test",
                     cached_present=cached_present,
                 )
-                return self._secrets_cache[name]
+                cached_value = self._secrets_cache[name]
+                return cached_value if cached_value is not None else default
 
         # Якщо немає у кеші або кеш потрібно оновити — читаємо з провайдера
         logger.debug(
@@ -979,12 +974,20 @@ class SecretsManager:
             return value
 
         # Повернути default якщо не знайдено
-        if default:
+        # Негативне кешування, щоб уникати повторних звернень до провайдера
+        self._secrets_cache[name] = None
+        self._secret_metadata[name] = {
+            "loaded_at": datetime.utcnow(),
+            "source": type(self._provider).__name__,
+            "missing": True,
+        }
+
+        if default is not None:
             logger.debug("Secret not found, using default", secret_name=name)
+            return default
         else:
             logger.warning("Secret not found", secret_name=name)
-
-        return default
+            return None
 
     def set_secret(self, name: str, value: str, persist: bool = True):
         """

@@ -1013,6 +1013,36 @@ class AuthManager:
                 self._login_attempts[key] = []
             self._login_attempts[key].append(datetime.now(timezone.utc))
 
+    def check_login_attempts(self, username: str, ip_address: str) -> bool:
+        """Перевіряє, чи не перевищено ліміт спроб входу у встановлене вікно.
+
+        - Нормалізує username та IP, щоб уникнути обходів (регістр, пробіли, формати IP)
+        - Очищає прострочені спроби за вікном `LOGIN_ATTEMPT_WINDOW_MINUTES`
+        - Враховує локальний lockout (in-memory) якщо він активний
+        - Повертає True, якщо спроб менше ніж `MAX_LOGIN_ATTEMPTS`, інакше False
+        """
+        user_norm = self._normalize_username(username)
+        ip_norm = self._normalize_ip_address(ip_address)
+        key = f"{user_norm}:{ip_norm}"
+
+        now = datetime.now(timezone.utc)
+        attempts = self._login_attempts.get(key, [])
+        attempts = [
+            a
+            for a in attempts
+            if now - a < timedelta(minutes=LOGIN_ATTEMPT_WINDOW_MINUTES)
+        ]
+        self._login_attempts[key] = attempts
+
+        # Перевіряємо локальний lockout (in-memory)
+        lock_key = self._lock_key(user_norm, ip_norm)
+        now_ts = now.timestamp()
+        exp_ts = self._locks.get(lock_key)
+        if exp_ts and exp_ts > now_ts:
+            return False
+
+        return len(attempts) < MAX_LOGIN_ATTEMPTS
+
     def _normalize_username(self, username: str) -> str:
         """Normalize username to prevent bypass attempts"""
         if not username:
@@ -1087,6 +1117,109 @@ class AuthManager:
                         sessions.append(data)
 
         return sessions
+
+    def logout(self, session_id: str):
+        """Вихід користувача: видаляє сесію та блокує пов'язані токени.
+
+        Синхронно виконує Redis delete для ключа сесії (для сумісності з sync-викликами)
+        та запускає фонове асинхронне очищення (чорний список JTIs), якщо це можливо.
+
+        Повертає:
+        - asyncio.Task, якщо є активний цикл подій (можна await, але не обов'язково)
+        - None, якщо циклу подій немає (очищення виконується негайно)
+        """
+        session_key = f"session:{session_id}"
+
+        # Спробуємо синхронно видалити ключ сесії в Redis, якщо доступний
+        if self.redis_client:
+            try:
+                del_res = self.redis_client.delete(session_key)
+                # Якщо це awaitable (async Redis), не очікуємо тут
+                if inspect.isawaitable(del_res):
+                    pass
+            except (redis.exceptions.RedisError, ValueError, TypeError) as e:
+                logger.debug("Redis delete during logout failed", error=str(e))
+        else:
+            logger.debug("Logout called without Redis client", session_id=session_id)
+
+        async def _runner():
+            # Детальна чорна листація токенів за JTIs, якщо сесію ще можна зчитати
+            if not self.redis_client:
+                return None
+            try:
+                get_res = self.redis_client.get(session_key)
+                raw = await get_res if inspect.isawaitable(get_res) else get_res
+                if not raw:
+                    return None
+                if isinstance(raw, (bytes, bytearray)):
+                    raw = raw.decode("utf-8", errors="ignore")
+                if isinstance(raw, str):
+                    try:
+                        data = await self.async_optimizer.json_loads(raw)
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug(
+                            "Session JSON parse failed during logout", error=str(e)
+                        )
+                        return None
+                elif isinstance(raw, dict):
+                    data = raw
+                else:
+                    return None
+
+                access_jti = data.get("access_token_jti")
+                refresh_jti = data.get("refresh_token_jti")
+
+                default_ttl = int(
+                    timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS).total_seconds()
+                )
+                for jti in (access_jti, refresh_jti):
+                    if not jti:
+                        continue
+                    # In-memory blacklist
+                    self._blocked_tokens.add(jti)
+                    # Persist у Redis (нефатально при збоях)
+                    try:
+                        setex_res = self.redis_client.setex(
+                            f"blocked_token:{jti}", default_ttl, "1"
+                        )
+                        if inspect.isawaitable(setex_res):
+                            await setex_res
+                    except redis.exceptions.RedisError as e:
+                        logger.debug(
+                            "Redis setex failed during logout blacklist (non-fatal)",
+                            error=str(e),
+                        )
+                return None
+            except (redis.exceptions.RedisError, ValueError, TypeError) as e:
+                logger.debug("Logout runner encountered Redis error", error=str(e))
+                return None
+
+        # Виконуємо або плануємо асинхронне очищення без необхідності await зовні
+        try:
+            loop = asyncio.get_running_loop()
+            task = loop.create_task(_runner())
+            logger.debug(
+                "Logout cleanup scheduled in running event loop", session_id=session_id
+            )
+            return task
+        except RuntimeError:
+            # Немає активного циклу подій — виконуємо до завершення у новому контексті
+            try:
+                asyncio.run(_runner())
+                logger.debug("Logout cleanup executed via asyncio.run", session_id=session_id)
+            except RuntimeError:
+                # Рідкісний випадок — створюємо цикл вручну
+                _loop = asyncio.new_event_loop()
+                try:
+                    asyncio.set_event_loop(_loop)
+                    _loop.run_until_complete(_runner())
+                    logger.debug(
+                        "Logout cleanup executed via manual event loop", session_id=session_id
+                    )
+                finally:
+                    _loop.close()
+                    asyncio.set_event_loop(None)
+        return None
 
     def validate_request_signature(
         self, request_data: str, signature: str, timestamp: str

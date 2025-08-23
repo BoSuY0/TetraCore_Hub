@@ -4,8 +4,13 @@ import os
 from unittest.mock import AsyncMock, MagicMock
 from fastapi.testclient import TestClient
 
+# Speed up bcrypt during tests: set environment early (before importing test modules)
+os.environ.setdefault("ENVIRONMENT", "testing")
+os.environ.setdefault("BCRYPT_ROUNDS", "4")
+
 # Import the hub launcher and settings for tests
 from config import Settings
+
 
 
 @pytest.fixture(scope="session")
