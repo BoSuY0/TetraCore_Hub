@@ -197,8 +197,11 @@ class StreamHub:
             self.logger.info("✅ StreamHub initialized successfully")
 
         except Exception as e:
+            from core.logging.utils import _mask_text_patterns
+
             self.logger.error(
-                "❌ Failed to initialize StreamHub", error=str(e), exc_info=True
+                "❌ Failed to initialize StreamHub",
+                error=_mask_text_patterns(str(e)),
             )
             raise
 

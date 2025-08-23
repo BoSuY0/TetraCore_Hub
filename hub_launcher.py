@@ -1133,7 +1133,7 @@ class StreamHubLauncher:
             # Створюємо FastAPI додаток
             app = self.create_app()
 
-            # Запускаємо StreamHub окремо
+            # Запускаємо StreamHub окремо (фейл-фаст)
             await self._startup_hub()
 
             # Додаємо hub до app state
