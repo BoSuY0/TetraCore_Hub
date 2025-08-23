@@ -453,9 +453,9 @@ class AuthManager:
 
         return TokenPair(access_token=access_token, refresh_token=refresh_token)
 
-    async def decode_token(
+    async def decode_token(  # pylint: disable=too-many-locals, too-many-branches, too-many-statements
         self, token: str, token_type: str = "access"
-    ) -> Dict:  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+    ) -> Dict:
         """Декодування та валідація JWT токена"""
         # Мінімальне діагностичне логування без виводу токена/секретів (придушено у проді)
         if os.getenv("ENVIRONMENT", "development").lower() != "production":
@@ -650,8 +650,11 @@ class AuthManager:
     async def _validate_session_exists(
         self, session_id: str
     ) -> tuple[str, Optional[bool]]:
-        """Перевіряє існування ключа сесії в Redis і застосовує політику STRICT_SESSION_VALIDATION.
-        Повертає (session_key, exists) де exists може бути True або None (якщо тип відповіді невідомий).
+        """Перевіряє існування ключа сесії в Redis і застосовує політику
+        STRICT_SESSION_VALIDATION.
+
+        Повертає (session_key, exists) де exists може бути True або None
+        (якщо тип відповіді невідомий).
         """
         session_key = f"session:{session_id}"
         exists_result = self.redis_client.exists(session_key)
@@ -726,7 +729,10 @@ class AuthManager:
     async def _ensure_session_activity(
         self, session_key: str, data: Dict[str, Any]
     ) -> None:
-        """Гарантує, що сесія не була неактивною занадто довго; інакше видаляє і піднімає помилку."""
+        """Гарантує, що сесія не була неактивною занадто довго.
+
+        Інакше видаляє і піднімає помилку.
+        """
         last_activity = data.get("last_activity")
         if not last_activity:
             return
@@ -1118,7 +1124,7 @@ class AuthManager:
 
         return sessions
 
-    def logout(self, session_id: str):
+    def logout(self, session_id: str):  # pylint: disable=too-many-statements
         """Вихід користувача: видаляє сесію та блокує пов'язані токени.
 
         Синхронно виконує Redis delete для ключа сесії (для сумісності з sync-викликами)
@@ -1156,7 +1162,10 @@ class AuthManager:
                 if isinstance(raw, str):
                     try:
                         data = await self.async_optimizer.json_loads(raw)
-                    except Exception as e:  # noqa: BLE001
+                    except (
+                        ValueError,
+                        TypeError,
+                    ) as e:  # вузьке перехоплення JSON помилок
                         logger.debug(
                             "Session JSON parse failed during logout", error=str(e)
                         )
@@ -1206,7 +1215,9 @@ class AuthManager:
             # Немає активного циклу подій — виконуємо до завершення у новому контексті
             try:
                 asyncio.run(_runner())
-                logger.debug("Logout cleanup executed via asyncio.run", session_id=session_id)
+                logger.debug(
+                    "Logout cleanup executed via asyncio.run", session_id=session_id
+                )
             except RuntimeError:
                 # Рідкісний випадок — створюємо цикл вручну
                 _loop = asyncio.new_event_loop()
@@ -1214,7 +1225,8 @@ class AuthManager:
                     asyncio.set_event_loop(_loop)
                     _loop.run_until_complete(_runner())
                     logger.debug(
-                        "Logout cleanup executed via manual event loop", session_id=session_id
+                        "Logout cleanup executed via manual event loop",
+                        session_id=session_id,
                     )
                 finally:
                     _loop.close()
@@ -1256,9 +1268,7 @@ def get_auth_manager() -> AuthManager:
 
         # Спробуємо встановити Redis клієнт пізніше
         try:
-            from config import (
-                get_settings,
-            )  # pylint: disable=import-outside-toplevel  # noqa: E402
+            from config import get_settings  # pylint: disable=import-outside-toplevel
 
             settings = get_settings()
 
@@ -1279,10 +1289,8 @@ async def initialize_auth_manager_redis():
         try:
             from core.redis_manager import (
                 RedisManager,
-            )  # pylint: disable=import-outside-toplevel  # noqa: E402
-            from config import (
-                get_settings,
-            )  # pylint: disable=import-outside-toplevel  # noqa: E402
+            )  # pylint: disable=import-outside-toplevel
+            from config import get_settings  # pylint: disable=import-outside-toplevel
 
             settings = get_settings()
 

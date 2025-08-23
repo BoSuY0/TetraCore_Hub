@@ -12,7 +12,6 @@ os.environ.setdefault("BCRYPT_ROUNDS", "4")
 from config import Settings
 
 
-
 @pytest.fixture(scope="session")
 def event_loop():
     """Create an instance of the default event loop for the session."""

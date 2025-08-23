@@ -7,15 +7,30 @@
 
 from __future__ import annotations
 
+import os
+import random
 import time
-from collections import defaultdict
 from threading import Lock
 from typing import Any, Dict
 
 import structlog
 
+# Константа чутливих ключів на рівні модуля
+SENSITIVE_KEYS = ("authorization", "auth", "token", "secret", "password")
 
-class RateLimiterProcessor:  # pragma: no cover – простий допоміжний клас
+
+def _is_sensitive_key(key: str) -> bool:
+    k = key.lower()
+    return any(s in k for s in SENSITIVE_KEYS)
+
+
+def _redact(value: Any) -> str:
+    if isinstance(value, str) and value.lower().startswith("bearer "):
+        return "Bearer <redacted>"
+    return "<redacted>"
+
+
+class RateLimiterProcessor:  # pragma: no cover – простий допоміжний клас  # pylint: disable=too-few-public-methods
     """Процесор structlog, що відкидає повторювані події.
 
     Подія визначається ключем *key*
@@ -44,7 +59,7 @@ class RateLimiterProcessor:  # pragma: no cover – простий допомі�
         return event_dict
 
 
-class RedactSecretsProcessor:  # pragma: no cover – простий допоміжний клас
+class RedactSecretsProcessor:  # pragma: no cover – простий допоміжний клас  # pylint: disable=too-few-public-methods
     """Процесор structlog, що маскує секретні поля в логах.
 
     Маскує:
@@ -52,15 +67,13 @@ class RedactSecretsProcessor:  # pragma: no cover – простий допом�
     - Поля з ключами на кшталт: auth, token, secret, password (регістр неважливий)
     """
 
-    SENSITIVE_KEYS = ("authorization", "auth", "token", "secret", "password")
-
     def __call__(self, _: Any, __: str, event_dict: Dict[str, Any]):  # type: ignore[override]
         def _redact_value(value: Any) -> Any:
             if isinstance(value, dict):
                 out = {}
                 for k, v in value.items():
-                    if self._is_sensitive_key(k):
-                        out[k] = self._redact(v)
+                    if _is_sensitive_key(k):
+                        out[k] = _redact(v)
                     elif k in ("task_data", "data") and isinstance(v, dict):
                         # Робимо превʼю ключів замість повного дампу
                         out[k + "_preview"] = list(v.keys())[:10]
@@ -75,8 +88,8 @@ class RedactSecretsProcessor:  # pragma: no cover – простий допом�
 
         # Маскуємо Authorization та інші чутливі ключі у корені event_dict
         for key in list(event_dict.keys()):
-            if self._is_sensitive_key(key):
-                event_dict[key] = self._redact(event_dict.get(key))
+            if _is_sensitive_key(key):
+                event_dict[key] = _redact(event_dict.get(key))
             elif key in ("task_data", "data") and isinstance(event_dict[key], dict):
                 # Для кореневих ключів task_data/data робимо превʼю та ховаємо вміст
                 event_dict[key + "_preview"] = list(event_dict[key].keys())[:10]
@@ -86,33 +99,18 @@ class RedactSecretsProcessor:  # pragma: no cover – простий допом�
 
         return event_dict
 
-    def _is_sensitive_key(self, key: str) -> bool:
-        k = key.lower()
-        return any(s in k for s in self.SENSITIVE_KEYS)
 
-    def _redact(self, value: Any) -> str:
-        try:
-            if isinstance(value, str) and value.lower().startswith("bearer "):
-                return "Bearer <redacted>"
-            return "<redacted>"
-        except Exception:
-            return "<redacted>"
-
-
-class SampleInfoProcessor:  # pragma: no cover – простий допоміжний клас
+class SampleInfoProcessor:  # pragma: no cover – простий допоміжний клас  # pylint: disable=too-few-public-methods
     """Відкидає частину INFO логів за семпл-рейтом для зменшення шуму.
 
     Увімкнення: LOG_INFO_SAMPLE_RATE (0.0-1.0, за замовчуванням 1.0 – не відкидати)
     """
 
     def __init__(self):
-        import os
-        import random
-
         self.random = random
         try:
             self.rate = float(os.getenv("LOG_INFO_SAMPLE_RATE", "1.0"))
-        except Exception:
+        except ValueError:
             self.rate = 1.0
 
     def __call__(self, logger, method_name, event_dict):  # type: ignore[override]
