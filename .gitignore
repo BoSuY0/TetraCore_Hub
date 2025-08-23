@@ -49,6 +49,9 @@ logs/
 htmlcov/
 .pytest_cache/
 
+# Security scan artifacts
+.secret_scan_report.json
+
 # Environment
 .env.*
 !.env.example

@@ -508,7 +508,12 @@ def main() -> int:
             },
         }
         out = json.dumps(payload, ensure_ascii=False, indent=2)
-        print(out)
+        try:
+            print(out)
+        except UnicodeEncodeError:
+            # Fallback for Windows terminals with limited code pages
+            safe_out = json.dumps(payload, ensure_ascii=True, indent=2)
+            sys.stdout.write(safe_out + "\n")
         if args.report:
             Path(args.report).write_text(out, encoding="utf-8")
     else:
