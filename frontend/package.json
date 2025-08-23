@@ -31,7 +31,7 @@
   },
   "scripts": {
     "dev": "npx vite",
-    "build": "npx tsc && npx vite build",
+    "build": "npx -y -p typescript tsc && npx vite build",
     "preview": "npx vite preview"
   },
   "browserslist": {
