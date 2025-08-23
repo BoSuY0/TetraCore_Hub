@@ -2,11 +2,14 @@ name: security-ci
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - '**'
   pull_request:
-    branches: [ main ]
+    branches:
+      - '**'
   schedule:
     - cron: '0 3 * * 1'
+  workflow_dispatch:
 
 jobs:
   security:

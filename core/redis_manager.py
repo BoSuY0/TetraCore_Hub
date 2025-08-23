@@ -275,9 +275,8 @@ class RedisManager:
                     await self._create_sentinel_clients()
                 except Exception as e:
                     # У dev/testing надаємо безпечний fallback
-                    if (
-                        hasattr(self.settings, "is_development")
-                        and (self.settings.is_development() or self.settings.is_testing())
+                    if hasattr(self.settings, "is_development") and (
+                        self.settings.is_development() or self.settings.is_testing()
                     ):
                         self.logger.warning(
                             "Sentinel setup failed in dev/testing, applying fallback",
@@ -290,7 +289,9 @@ class RedisManager:
                             self.redis_mode = "disabled"
                             self.redis_client = None
                             self.pubsub_client = None
-                            self.logger.info("Redis disabled due to missing fallback URL")
+                            self.logger.info(
+                                "Redis disabled due to missing fallback URL"
+                            )
                     else:
                         raise
             elif self.redis_mode == "cluster":
@@ -438,9 +439,8 @@ class RedisManager:
             self.logger.error("❌ Redis connection test failed", error=str(e))
 
             # Якщо ми в режимі sentinel і є REDIS_URL — пробуємо fallback на standalone
-            if (
-                getattr(self, "redis_mode", "") == "sentinel"
-                and getattr(self.settings, "redis_url", "")
+            if getattr(self, "redis_mode", "") == "sentinel" and getattr(
+                self.settings, "redis_url", ""
             ):
                 try:
                     self.logger.warning(
@@ -459,9 +459,8 @@ class RedisManager:
 
             # У dev/testing не валимо ініціалізацію — працюємо без Redis
             try:
-                is_dev = (
-                    hasattr(self.settings, "is_development")
-                    and (self.settings.is_development() or self.settings.is_testing())
+                is_dev = hasattr(self.settings, "is_development") and (
+                    self.settings.is_development() or self.settings.is_testing()
                 )
             except Exception:
                 is_dev = os.getenv("ENVIRONMENT", "development").lower() in (

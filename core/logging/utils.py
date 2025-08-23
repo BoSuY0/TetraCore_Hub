@@ -61,14 +61,22 @@ def _mask_text_patterns(text: str) -> str:
     s = re.sub(r"(?i)Bearer\s+[A-Za-z0-9._\-]+", "Bearer ***", s)
 
     # Mask common API key/token prefixes
-    s = re.sub(r"(?i)(sk_(live|test)_[A-Za-z0-9]+)", lambda m: m.group(0)[:5] + "***", s)
+    s = re.sub(
+        r"(?i)(sk_(live|test)_[A-Za-z0-9]+)", lambda m: m.group(0)[:5] + "***", s
+    )
     s = re.sub(r"\bAKIA[0-9A-Z]{12,}\b", lambda m: m.group(0)[:4] + "***", s)
 
     # Mask JWT-like tokens (base64url header.payload.signature)
-    s = re.sub(r"eyJ[a-zA-Z0-9_-]{5,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{5,}", "***.***.***", s)
+    s = re.sub(
+        r"eyJ[a-zA-Z0-9_-]{5,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{5,}", "***.***.***", s
+    )
 
     # Mask query params like token=, access_token=, api_key=, password=
-    s = re.sub(r"(?i)([?&])(access_token|token|auth_token|api_key|apikey|password|secret)=([^&#]+)", r"\1\2=***", s)
+    s = re.sub(
+        r"(?i)([?&])(access_token|token|auth_token|api_key|apikey|password|secret)=([^&#]+)",
+        r"\1\2=***",
+        s,
+    )
 
     # Mask inline key=value tokens in free text (expected by tests)
     # token=abcdef -> ***=abcdef (key masked, value kept)
@@ -96,7 +104,17 @@ def mask_event_dict(event_dict: Dict[str, Any]) -> Dict[str, Any]:
                     else:
                         masked_headers[hk] = hv
                 masked[k] = masked_headers
-            elif key_lower in {"url", "path", "path_qs", "query", "body", "message", "event", "detail", "error"} and isinstance(v, str):
+            elif key_lower in {
+                "url",
+                "path",
+                "path_qs",
+                "query",
+                "body",
+                "message",
+                "event",
+                "detail",
+                "error",
+            } and isinstance(v, str):
                 masked[k] = _mask_text_patterns(v)
             else:
                 masked[k] = _mask_nested(v)
@@ -119,11 +137,27 @@ def simple_console_renderer(logger, method_name, event_dict):
     event = event_dict.pop("event", "")
 
     excluded_keys = {
-        "logger", "timestamp", "level", "event",
-        "exc_info", "exception", "stack_info", "positional_args",
-        "name", "pathname", "filename", "lineno", "module",
-        "funcName", "process", "processName", "thread", "threadName",
-        "_record", "from_structlog", "_from_structlog",
+        "logger",
+        "timestamp",
+        "level",
+        "event",
+        "exc_info",
+        "exception",
+        "stack_info",
+        "positional_args",
+        "name",
+        "pathname",
+        "filename",
+        "lineno",
+        "module",
+        "funcName",
+        "process",
+        "processName",
+        "thread",
+        "threadName",
+        "_record",
+        "from_structlog",
+        "_from_structlog",
     }
 
     filtered_items = []
@@ -152,15 +186,15 @@ def simple_console_renderer(logger, method_name, event_dict):
     RESET = "\x1b[0m"
     BOLD = "\x1b[1m"
     COLORS = {
-        "DEBUG": "\x1b[36m",     # Cyan
-        "INFO": "\x1b[32m",      # Green
-        "WARNING": "\x1b[33m",   # Yellow
-        "ERROR": "\x1b[31m",     # Red
+        "DEBUG": "\x1b[36m",  # Cyan
+        "INFO": "\x1b[32m",  # Green
+        "WARNING": "\x1b[33m",  # Yellow
+        "ERROR": "\x1b[31m",  # Red
         "CRITICAL": "\x1b[35m",  # Magenta
     }
     BG = {
-        "WARNING": "\x1b[43m",   # Yellow background
-        "ERROR": "\x1b[41m",     # Red background
+        "WARNING": "\x1b[43m",  # Yellow background
+        "ERROR": "\x1b[41m",  # Red background
         "CRITICAL": "\x1b[45m",  # Magenta background
     }
     BRIGHT_WHITE = "\x1b[97m"
@@ -255,7 +289,8 @@ def configure_unified_logging() -> None:
 
     # Конфіг structlog: відправляємо події у stdlib logging через ProcessorFormatter
     structlog.configure(
-        processors=shared_processors + [
+        processors=shared_processors
+        + [
             ProcessorFormatter.wrap_for_formatter,
         ],
         logger_factory=LoggerFactory(),

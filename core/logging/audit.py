@@ -9,23 +9,23 @@ from typing import Any, Dict, Optional
 import os
 
 # Створюємо окремий логер для аудиту
-audit_logger = logging.getLogger('audit')
+audit_logger = logging.getLogger("audit")
 # Рівень логування аудиту успадковується з root/LOG_LEVEL; не примушуємо локально
 
 # Створюємо директорію для аудит логів якщо не існує
-audit_dir = 'logs/audit'
+audit_dir = "logs/audit"
 os.makedirs(audit_dir, exist_ok=True)
 
 # Налаштування файлового хендлера для аудит логів
 audit_handler = logging.FileHandler(
     filename=f'{audit_dir}/audit_{datetime.now().strftime("%Y%m%d")}.log',
-    encoding='utf-8'
+    encoding="utf-8",
 )
 
 # Формат для аудит логів
 audit_formatter = logging.Formatter(
-    '%(asctime)s | %(levelname)s | %(message)s | %(extra_data)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    "%(asctime)s | %(levelname)s | %(message)s | %(extra_data)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
 )
 
 
@@ -34,10 +34,10 @@ class AuditFilter(logging.Filter):
 
     def filter(self, record):
         # Додаємо extra_data якщо є
-        if hasattr(record, 'extra_data'):
+        if hasattr(record, "extra_data"):
             record.extra_data = json.dumps(record.extra_data, ensure_ascii=False)
         else:
-            record.extra_data = '{}'
+            record.extra_data = "{}"
         return True
 
 
@@ -66,7 +66,7 @@ class AuditLogger:
         user_id: Optional[int] = None,
         details: Optional[Dict[str, Any]] = None,
         success: bool = True,
-        error: Optional[str] = None
+        error: Optional[str] = None,
     ):
         """
         Логує дію для аудиту.
@@ -81,19 +81,19 @@ class AuditLogger:
             error: Повідомлення про помилку якщо є
         """
         log_data = {
-            'action': action,
-            'entity_type': entity_type,
-            'entity_id': entity_id,
-            'user_id': user_id,
-            'timestamp': datetime.now().isoformat(),
-            'success': success
+            "action": action,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "user_id": user_id,
+            "timestamp": datetime.now().isoformat(),
+            "success": success,
         }
 
         if details:
-            log_data['details'] = details
+            log_data["details"] = details
 
         if error:
-            log_data['error'] = error
+            log_data["error"] = error
 
         message = f"AUDIT | {action.upper()} | {entity_type} | {entity_id}"
 
@@ -101,9 +101,11 @@ class AuditLogger:
             message += f" | by user {user_id}"
 
         if success:
-            audit_logger.info(message, extra={'extra_data': log_data})
+            audit_logger.info(message, extra={"extra_data": log_data})
         else:
-            audit_logger.warning(message + f" | FAILED: {error}", extra={'extra_data': log_data})
+            audit_logger.warning(
+                message + f" | FAILED: {error}", extra={"extra_data": log_data}
+            )
 
     @staticmethod
     def log_security_event(
@@ -112,7 +114,7 @@ class AuditLogger:
         description: str,
         user_id: Optional[int] = None,
         ip_address: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None
+        details: Optional[Dict[str, Any]] = None,
     ):
         """
         Логує події безпеки.
@@ -126,25 +128,25 @@ class AuditLogger:
             details: Додаткові деталі
         """
         log_data = {
-            'event_type': event_type,
-            'severity': severity,
-            'description': description,
-            'user_id': user_id,
-            'ip_address': ip_address,
-            'timestamp': datetime.now().isoformat()
+            "event_type": event_type,
+            "severity": severity,
+            "description": description,
+            "user_id": user_id,
+            "ip_address": ip_address,
+            "timestamp": datetime.now().isoformat(),
         }
 
         if details:
-            log_data['details'] = details
+            log_data["details"] = details
 
         message = f"SECURITY | {severity.upper()} | {event_type} | {description}"
 
-        if severity in ['high', 'critical']:
-            audit_logger.error(message, extra={'extra_data': log_data})
-        elif severity == 'medium':
-            audit_logger.warning(message, extra={'extra_data': log_data})
+        if severity in ["high", "critical"]:
+            audit_logger.error(message, extra={"extra_data": log_data})
+        elif severity == "medium":
+            audit_logger.warning(message, extra={"extra_data": log_data})
         else:
-            audit_logger.info(message, extra={'extra_data': log_data})
+            audit_logger.info(message, extra={"extra_data": log_data})
 
     @staticmethod
     def log_data_access(
@@ -154,7 +156,7 @@ class AuditLogger:
         user_id: Optional[int] = None,
         fields: Optional[list] = None,
         old_values: Optional[Dict] = None,
-        new_values: Optional[Dict] = None
+        new_values: Optional[Dict] = None,
     ):
         """
         Логує доступ до даних.
@@ -169,29 +171,29 @@ class AuditLogger:
             new_values: Нові значення (для insert/update)
         """
         log_data = {
-            'operation': operation,
-            'table': table,
-            'record_id': record_id,
-            'user_id': user_id,
-            'timestamp': datetime.now().isoformat()
+            "operation": operation,
+            "table": table,
+            "record_id": record_id,
+            "user_id": user_id,
+            "timestamp": datetime.now().isoformat(),
         }
 
         if fields:
-            log_data['fields'] = fields
+            log_data["fields"] = fields
 
         if old_values:
-            log_data['old_values'] = old_values
+            log_data["old_values"] = old_values
 
         if new_values:
-            log_data['new_values'] = new_values
+            log_data["new_values"] = new_values
 
         message = f"DATA | {operation.upper()} | {table} | {record_id}"
 
         if user_id:
             message += f" | by user {user_id}"
 
-        audit_logger.info(message, extra={'extra_data': log_data})
+        audit_logger.info(message, extra={"extra_data": log_data})
 
 
 # Експортуємо для зручного використання
-__all__ = ['AuditLogger', 'audit_logger']
+__all__ = ["AuditLogger", "audit_logger"]

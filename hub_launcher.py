@@ -761,7 +761,9 @@ class StreamHubLauncher:
                                 self.logger.error(f"frontend {prefix}: {line_text}")
                             elif "warn" in lower:
                                 self.logger.warning(f"frontend {prefix}: {line_text}")
-                            elif any(k in lower for k in ["local:", "ready", "compiled"]):
+                            elif any(
+                                k in lower for k in ["local:", "ready", "compiled"]
+                            ):
                                 self.logger.info(f"frontend {prefix}: {line_text}")
                             else:
                                 self.logger.debug(f"frontend {prefix}: {line_text}")
@@ -1097,7 +1099,9 @@ class StreamHubLauncher:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(backend_url, timeout=5) as response:
                         if response.status in [200, 401, 403]:  # Сервер працює
-                            self.logger.info(f"✅ Backend готовий після {attempt + 1} спроб")
+                            self.logger.info(
+                                f"✅ Backend готовий після {attempt + 1} спроб"
+                            )
                             return True
                         else:
                             self.logger.warning(
@@ -1322,14 +1326,18 @@ class StreamHubLauncher:
             backend_ready = await self.wait_for_backend_ready(max_attempts=15, delay=1)
 
             if not backend_ready:
-                self.logger.warning("❌ Backend не готовий, але продовжуємо запуск frontend...")
+                self.logger.warning(
+                    "❌ Backend не готовий, але продовжуємо запуск frontend..."
+                )
 
             # Запускаємо frontend dev server
             self.logger.info("🎨 Запускаємо frontend dev server...")
             frontend_process = await self.start_development_server()
             if frontend_process:
                 self.frontend_process = frontend_process
-                self.logger.info("✅ Frontend dev server запущено на http://localhost:3000")
+                self.logger.info(
+                    "✅ Frontend dev server запущено на http://localhost:3000"
+                )
 
             # Чекаємо завершення backend (він блокує до сигналу)
             try:
@@ -1444,11 +1452,15 @@ class StreamHubLauncher:
         self.logger.info("🧪 Режим тестування неактивності клієнтів")
         self.logger.info("=" * 60)
         self.logger.info(f"Ping затримка: {ping_delay} секунд")
-        self.logger.info(f"Симуляція відключення: {'ТАК' if simulate_disconnect else 'НІ'}")
+        self.logger.info(
+            f"Симуляція відключення: {'ТАК' if simulate_disconnect else 'НІ'}"
+        )
         self.logger.info(
             f"Heartbeat інтервал: {os.environ.get('WEBSOCKET_HEARTBEAT_INTERVAL')} секунд"
         )
-        self.logger.info(f"WebSocket таймаут: {os.environ.get('WEBSOCKET_TIMEOUT')} секунд")
+        self.logger.info(
+            f"WebSocket таймаут: {os.environ.get('WEBSOCKET_TIMEOUT')} секунд"
+        )
         self.logger.info("=" * 60)
 
         try:
@@ -1509,7 +1521,9 @@ class StreamHubLauncher:
         try:
             # Імітуємо клієнта з затримками ping
             if ping_delay > 0:
-                self.logger.info(f"🐌 Тест 1: Клієнт з затримкою ping {ping_delay} секунд")
+                self.logger.info(
+                    f"🐌 Тест 1: Клієнт з затримкою ping {ping_delay} секунд"
+                )
                 await self._test_slow_ping_client(ping_delay)
 
             # Імітуємо втрату з'єднання
