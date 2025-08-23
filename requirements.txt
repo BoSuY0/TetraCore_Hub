@@ -27,7 +27,7 @@ python-json-logger==2.0.7
 
 # Utilities
 python-dotenv==1.0.0
-click==8.1.7
+click==8.2.1
 
 # Security
 PyJWT==2.10.1
