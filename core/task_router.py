@@ -1686,9 +1686,17 @@ class TaskRouter:
 
                 ttl = await self.redis_error_handler.execute_with_retry(_save_to_cache)
                 if ttl:
-                    self.logger.debug(
-                        "Queue stats cached", cache_key=cache_key, ttl=ttl
-                    )
+                    # Логуємо кешування лише в non-production, щоб не засмічувати логи
+                    try:
+                        if (
+                            hasattr(self.settings, "is_production")
+                            and not self.settings.is_production()
+                        ):
+                            self.logger.debug(
+                                "Queue stats cached", cache_key=cache_key, ttl=ttl
+                            )
+                    except Exception:
+                        pass
                 else:
                     self.logger.warning("Failed to cache queue stats after retries")
 

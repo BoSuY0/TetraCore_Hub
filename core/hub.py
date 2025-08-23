@@ -2319,9 +2319,21 @@ class StreamHub:
 
                         # Надсилаємо всім monitor клієнтам (dashboard)
                         try:
-                            await self.broadcast_message(
-                                message, target_clients=[ClientType.MONITOR]
-                            )
+                            # Пропускаємо розсилку, якщо немає підписників MONITOR
+                            if self.client_manager:
+                                monitors = self.client_manager.get_clients_by_type(
+                                    [ClientType.MONITOR]
+                                )
+                                if not any(
+                                    m.websocket and m.info.is_connected()
+                                    for m in monitors
+                                ):
+                                    # Немає активних моніторинг-клієнтів — пропускаємо
+                                    pass
+                                else:
+                                    await self.broadcast_message(
+                                        message, target_clients=[ClientType.MONITOR]
+                                    )
                         except Exception as broadcast_error:
                             self.logger.debug(
                                 "Failed to broadcast task stats",
@@ -2366,12 +2378,16 @@ class StreamHub:
                         "data": metrics,
                     }
 
-                    # Розсилаємо тільки моніторинг-клієнтам (дашборд)
+                    # Розсилаємо тільки моніторинг-клієнтам (дашборд), якщо вони є
                     if self.client_manager:
-                        await self.client_manager.broadcast_to_clients(
-                            ws_message,
-                            client_types=[ClientType.MONITOR],
+                        monitors = self.client_manager.get_clients_by_type(
+                            [ClientType.MONITOR]
                         )
+                        if any(m.websocket and m.info.is_connected() for m in monitors):
+                            await self.client_manager.broadcast_to_clients(
+                                ws_message,
+                                client_types=[ClientType.MONITOR],
+                            )
                 except Exception as e:
                     # Тримаємо логування мʼяким, щоб не засмічувати логи при тимчасових збоях
                     self.logger.debug("Failed to broadcast metrics", error=str(e))
