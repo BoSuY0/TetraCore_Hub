@@ -44,9 +44,9 @@ jobs:
           black --version
           black --check core web utils tools hub_launcher.py config.py
 
-      - name: Run unit tests (safe subset)
+      - name: Run tests (all)
         env:
           PYTHONPATH: .
           ENVIRONMENT: testing
         run: |
-          pytest -q -m "not integration" -k "not endpoints and not websocket_proxy and not websocket_direct and not connections_2Hub" --maxfail=1
+          pytest -q
