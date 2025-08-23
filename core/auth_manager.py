@@ -208,23 +208,39 @@ class AuthManager:
 
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:
         """Перевірка пароля"""
+        method_used = None
         try:
             # Спочатку пробуємо через passlib
-            if hashed_password and hashed_password.startswith("$2"):
+            if hashed_password and isinstance(hashed_password, str) and hashed_password.startswith("$2"):
                 try:
-                    return pwd_context.verify(plain_password, hashed_password)
-                except Exception:
-                    pass
+                    method_used = "passlib"
+                    ok = pwd_context.verify(plain_password, hashed_password)
+                    logger.debug(
+                        "Password verify executed",
+                        method=method_used,
+                        ok=ok,
+                        hashed_prefix=hashed_password[:3],
+                    )
+                    return ok
+                except Exception as e:
+                    logger.debug(
+                        "Passlib verify failed; falling back to bcrypt",
+                        error=str(e),
+                        hashed_prefix=(hashed_password[:3] if isinstance(hashed_password, str) else None),
+                    )
             # Fallback: пряма перевірка через bcrypt (на випадок сумісності версій)
             try:
                 import bcrypt  # type: ignore
 
-                return bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
+                method_used = "bcrypt_fallback"
+                ok = bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
+                logger.debug("Password verify executed", method=method_used, ok=ok)
+                return ok
             except Exception as e:
                 logger.debug("bcrypt fallback verify failed", error=str(e))
                 return False
         except Exception as e:
-            logger.error("Password verification error", error=str(e))
+            logger.error("Password verification error", error=str(e), method=method_used)
             return False
 
     def generate_session_id(self) -> str:

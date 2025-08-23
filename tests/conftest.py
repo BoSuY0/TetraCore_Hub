@@ -1,5 +1,6 @@
 import pytest
 import asyncio
+import os
 from unittest.mock import AsyncMock, MagicMock
 from fastapi.testclient import TestClient
 
@@ -13,6 +14,27 @@ def event_loop():
     loop = asyncio.get_event_loop_policy().new_event_loop()
     yield loop
     loop.close()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def enable_debug_logging_for_pytest():
+    """Enable DEBUG logging and safe diagnostics for the whole pytest session.
+
+    - Configures structlog/logging via StreamHubLauncher.setup_logging(verbose=True)
+    - Forces secrets refresh during tests to avoid stale cache issues
+    """
+    # Ensure test-friendly diagnostics
+    os.environ.setdefault("LOG_LEVEL", "DEBUG")
+    os.environ.setdefault("SECRETS_FORCE_ENV_REFRESH", "1")
+
+    try:
+        from hub_launcher import StreamHubLauncher
+
+        launcher = StreamHubLauncher()
+        launcher.setup_logging(verbose=True)
+    except Exception:
+        # Do not break tests if logging setup fails in some environments
+        pass
 
 
 @pytest.fixture

@@ -882,6 +882,12 @@ class SecretsManager:
         """
         # Якщо значення вже у кеші, визначимо чи можна його використати
         cached_present = name in self._secrets_cache
+        logger.debug(
+            "get_secret called",
+            secret_name=name,
+            use_cache=use_cache,
+            cached_present=cached_present,
+        )
         if use_cache and cached_present:
             is_env_provider = isinstance(self._provider, EnvSecretProvider)
             in_pytest = bool(os.getenv("PYTEST_CURRENT_TEST"))
@@ -889,6 +895,13 @@ class SecretsManager:
                 "1",
                 "true",
                 "yes",
+            )
+            logger.debug(
+                "get_secret context",
+                secret_name=name,
+                is_env_provider=is_env_provider,
+                in_pytest=in_pytest,
+                force_refresh=force_refresh,
             )
 
             if is_env_provider and (in_pytest or force_refresh):
@@ -905,14 +918,35 @@ class SecretsManager:
                         if cached_value is not None
                         else True,
                         force=force_refresh,
+                        cached_len=(len(cached_value) if isinstance(cached_value, str) else (len(cached_value) if cached_value is not None else 0)),
+                        env_len=(len(current_env_value) if isinstance(current_env_value, str) else (len(current_env_value) if current_env_value is not None else 0)),
                     )
                     use_cache = False  # Прочитати свіже значення нижче
                 else:
+                    logger.debug(
+                        "Returning cached secret",
+                        secret_name=name,
+                        reason="env_provider_test_mode_unchanged",
+                        cached_present=cached_present,
+                    )
                     return cached_value
             else:
+                logger.debug(
+                    "Returning cached secret",
+                    secret_name=name,
+                    reason="provider_not_env_or_no_test",
+                    cached_present=cached_present,
+                )
                 return self._secrets_cache[name]
 
         # Якщо немає у кеші або кеш потрібно оновити — читаємо з провайдера
+        logger.debug(
+            "Reading secret from provider",
+            secret_name=name,
+            provider=type(self._provider).__name__,
+            had_cache=cached_present,
+            use_cache=use_cache,
+        )
         value = self._provider.get(name)
 
         if value:
@@ -922,7 +956,12 @@ class SecretsManager:
                 "loaded_at": datetime.utcnow(),
                 "source": type(self._provider).__name__,
             }
-            logger.debug("Secret loaded from provider", secret_name=name)
+            logger.debug(
+                "Secret loaded from provider",
+                secret_name=name,
+                provider=type(self._provider).__name__,
+                had_cache=cached_present,
+            )
             return value
 
         # Повернути default якщо не знайдено

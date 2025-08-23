@@ -136,6 +136,13 @@ async def login(request: Request, credentials: LoginRequest):
         ip=client_ip,
         server_boot_id=SERVER_BOOT_ID[:8] + "...",
     )
+    # Додатковий DEBUG-контекст (без секретів)
+    logger.debug(
+        "Auth debug context",
+        environment=os.getenv("ENVIRONMENT", "development").lower(),
+        pytest=bool(os.getenv("PYTEST_CURRENT_TEST")),
+        secrets_force_refresh=os.getenv("SECRETS_FORCE_ENV_REFRESH", "0"),
+    )
 
     # Отримання credentials через secrets manager
     secrets_mgr = get_secrets_manager()
@@ -165,11 +172,20 @@ async def login(request: Request, credentials: LoginRequest):
             "$2"
         )
         environment = os.getenv("ENVIRONMENT", "development").lower()
+        logger.debug(
+            "Password verification path decision",
+            is_bcrypt_hash=is_bcrypt_hash,
+            environment=environment,
+        )
 
         if is_bcrypt_hash:
             # Безпечна перевірка через bcrypt
+            logger.debug("Using bcrypt verification method")
             login_successful = auth_mgr.verify_password(
                 credentials.password, admin_password
+            )
+            logger.debug(
+                "Password verification result", method="bcrypt", success=bool(login_successful)
             )
         else:
             # У продакшені вимагаємо хешований пароль
@@ -180,6 +196,7 @@ async def login(request: Request, credentials: LoginRequest):
                 login_successful = False
             else:
                 # Dev режим: дозволяємо просте порівняння без логування секретів
+                logger.debug("Using plain-text comparison (dev only)")
                 login_successful = credentials.password == admin_password
 
     # Записуємо спробу входу
