@@ -205,6 +205,9 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
   const connectionTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
   const { auth: authState } = useAuth();
 
+  // Login page guard
+  const isLoginRoute = typeof window !== "undefined" && window.location.pathname === "/login";
+
   // Додаємо рефи для відстеження стану підключення
   const isConnectingRef = useRef(false);
   const mountedRef = useRef(true);
@@ -793,6 +796,12 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
   };
 
   const connectWebSocket = useCallback(async () => {
+    // Guard: skip on login route
+    if (isLoginRoute) {
+      console.log("🚫 On /login route, skipping WebSocket connection");
+      return;
+    }
+
     // Перевіряємо чи компонент все ще змонтований
     if (!mountedRef.current) {
       console.log("🚫 Component unmounted, skipping WebSocket connection");
@@ -1667,6 +1676,11 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
   // Auto-refresh data - покращена логіка з затримкою
   useEffect(() => {
+    // Do not run auto-refresh on login route
+    if (isLoginRoute) {
+      return;
+    }
+
     // Очищаємо попередній інтервал
     if (dataRefreshIntervalRef.current) {
       clearInterval(dataRefreshIntervalRef.current);
@@ -1734,6 +1748,14 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
   // Connect WebSocket when authenticated - покращена логіка
   useEffect(() => {
+    // Guard on login route
+    if (isLoginRoute) {
+      if (socket || isConnectingRef.current) {
+        disconnectWebSocket();
+      }
+      return;
+    }
+
     const authChanged = lastAuthStateRef.current !== authState.isAuthenticated;
     lastAuthStateRef.current = authState.isAuthenticated;
 
