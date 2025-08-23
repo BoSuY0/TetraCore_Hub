@@ -13,7 +13,7 @@ import structlog
 
 from config import Settings
 from models.client import Client, ClientType
-from core.async_optimization import AsyncOptimizer, TaskPriority
+from core.async_optimization import AsyncOptimizer
 
 
 class ClientManager:
