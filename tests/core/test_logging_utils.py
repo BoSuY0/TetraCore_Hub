@@ -53,7 +53,9 @@ def test_redact_secrets_processor_masks_sensitive_keys_and_previews():
 
 def test_rate_limiter_processor_drops_and_allows_after_interval(monkeypatch):
     # Control time progression deterministically
-    times = iter([0.0, 0.1, 0.6])  # 2nd call within 0.5s -> drop, 3rd at boundary -> allow
+    times = iter(
+        [0.0, 0.1, 0.6]
+    )  # 2nd call within 0.5s -> drop, 3rd at boundary -> allow
 
     def fake_time():
         try:

@@ -2,6 +2,7 @@
 Authentication Manager for TetraCore Hub
 Безпечне управління автентифікацією з JWT токенами
 """
+
 # pylint: disable=too-many-lines, global-statement
 
 import asyncio
@@ -134,6 +135,7 @@ class TokenData(BaseModel):
 
 class AuthManager:
     """Менеджер автентифікації з підтримкою JWT токенів"""
+
     # pylint: disable=too-many-instance-attributes
 
     def __init__(self, redis_client: Optional[redis.Redis] = None):
@@ -288,7 +290,9 @@ class AuthManager:
             AttributeError,
             RuntimeError,
         ) as e:
-            logger.error("Password verification error", error=str(e), method=method_used)
+            logger.error(
+                "Password verification error", error=str(e), method=method_used
+            )
             return False
 
     def generate_session_id(self) -> str:
@@ -449,7 +453,9 @@ class AuthManager:
 
         return TokenPair(access_token=access_token, refresh_token=refresh_token)
 
-    async def decode_token(self, token: str, token_type: str = "access") -> Dict:  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+    async def decode_token(
+        self, token: str, token_type: str = "access"
+    ) -> Dict:  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         """Декодування та валідація JWT токена"""
         # Мінімальне діагностичне логування без виводу токена/секретів (придушено у проді)
         if os.getenv("ENVIRONMENT", "development").lower() != "production":
@@ -582,7 +588,11 @@ class AuthManager:
                         # Оновлюємо час останньої активності якщо сесія існує
                         try:
                             await self.update_session_activity(payload["session_id"])
-                        except (redis.exceptions.RedisError, ValueError, TypeError) as _e:
+                        except (
+                            redis.exceptions.RedisError,
+                            ValueError,
+                            TypeError,
+                        ) as _e:
                             logger.debug(
                                 "Session activity update skipped", error=str(_e)
                             )
@@ -624,7 +634,12 @@ class AuthManager:
                 logger.warning("❌ Invalid token", error=str(exc))
             # Для тестів очікується чіткіше повідомлення для деяких кейсів
             raise HTTPException(status_code=401, detail="Invalid token") from exc
-        except (jwt.PyJWTError, ValueError, TypeError, redis.exceptions.RedisError) as exc:
+        except (
+            jwt.PyJWTError,
+            ValueError,
+            TypeError,
+            redis.exceptions.RedisError,
+        ) as exc:
             logger.error(
                 "❌ Token decode error", error=str(exc), error_type=type(exc).__name__
             )
@@ -632,7 +647,9 @@ class AuthManager:
                 status_code=401, detail="Could not validate credentials"
             ) from exc
 
-    async def _validate_session_exists(self, session_id: str) -> tuple[str, Optional[bool]]:
+    async def _validate_session_exists(
+        self, session_id: str
+    ) -> tuple[str, Optional[bool]]:
         """Перевіряє існування ключа сесії в Redis і застосовує політику STRICT_SESSION_VALIDATION.
         Повертає (session_key, exists) де exists може бути True або None (якщо тип відповіді невідомий).
         """
@@ -664,7 +681,9 @@ class AuthManager:
             raise HTTPException(status_code=401, detail="Session expired")
         return session_key, exists
 
-    async def _load_session_data(self, session_key: str, session_id: str) -> Optional[Dict[str, Any]]:
+    async def _load_session_data(
+        self, session_key: str, session_id: str
+    ) -> Optional[Dict[str, Any]]:
         """Зчитує та парсить дані сесії з Redis. Повертає dict або None."""
         get_result = self.redis_client.get(session_key)
         session_data = (
@@ -688,7 +707,9 @@ class AuthManager:
             return None
         return await self.async_optimizer.json_loads(raw)
 
-    def _enforce_fingerprint(self, payload: Dict[str, Any], data: Dict[str, Any]) -> None:
+    def _enforce_fingerprint(
+        self, payload: Dict[str, Any], data: Dict[str, Any]
+    ) -> None:
         """Перевіряє відповідність fingerprint (IP+UA hash) між токеном і сесією."""
         try:
             token_fp = payload.get("fp")
@@ -702,7 +723,9 @@ class AuthManager:
                 detail="Session fingerprint mismatch",
             )
 
-    async def _ensure_session_activity(self, session_key: str, data: Dict[str, Any]) -> None:
+    async def _ensure_session_activity(
+        self, session_key: str, data: Dict[str, Any]
+    ) -> None:
         """Гарантує, що сесія не була неактивною занадто довго; інакше видаляє і піднімає помилку."""
         last_activity = data.get("last_activity")
         if not last_activity:
@@ -717,13 +740,13 @@ class AuthManager:
                 detail="Session expired due to inactivity",
             )
 
-    async def _check_refresh_reuse(self, refresh_jti: str, session_id: Optional[str]) -> None:
+    async def _check_refresh_reuse(
+        self, refresh_jti: str, session_id: Optional[str]
+    ) -> None:
         """Перевіряє, чи не використовувався refresh токен повторно."""
         used_key = f"refresh_used:{refresh_jti}"
         exists_res = self.redis_client.exists(used_key)
-        exists_val = (
-            await exists_res if inspect.isawaitable(exists_res) else exists_res
-        )
+        exists_val = await exists_res if inspect.isawaitable(exists_res) else exists_res
         used_exists = bool(exists_val) if isinstance(exists_val, (bool, int)) else False
         if used_exists:
             if session_id:
@@ -732,7 +755,9 @@ class AuthManager:
                     await del_res
             raise HTTPException(status_code=401, detail="Refresh token reuse detected")
 
-    async def _mark_refresh_used_if_rotating(self, refresh_jti: str, payload: Dict[str, Any], rotate_refresh: bool) -> None:
+    async def _mark_refresh_used_if_rotating(
+        self, refresh_jti: str, payload: Dict[str, Any], rotate_refresh: bool
+    ) -> None:
         """Позначає refresh як використаний, якщо увімкнена ротація."""
         if not rotate_refresh:
             return
@@ -744,18 +769,22 @@ class AuthManager:
             exp_ts = now_ts + 3600
             logger.debug("Error calculating expiration time", error=str(e))
         ttl = max(60, exp_ts - now_ts)
-        setex_res = self.redis_client.setex(f"refresh_used:{refresh_jti}", int(ttl), "1")
+        setex_res = self.redis_client.setex(
+            f"refresh_used:{refresh_jti}", int(ttl), "1"
+        )
         if inspect.isawaitable(setex_res):
             await setex_res
 
-    async def _maybe_rotate_refresh(self, rotate_refresh: bool, refresh_token: str, token_data: Dict[str, Any]) -> str:
+    async def _maybe_rotate_refresh(
+        self, rotate_refresh: bool, refresh_token: str, token_data: Dict[str, Any]
+    ) -> str:
         """За потреби відкликає старий refresh і повертає новий токен."""
         if rotate_refresh:
             await self._revoke_token(refresh_token)
             return self.create_refresh_token(token_data)
         return refresh_token
 
-    async def refresh_access_token(self, refresh_token: str) -> TokenPair:  
+    async def refresh_access_token(self, refresh_token: str) -> TokenPair:
         """Оновлення access токена за допомогою refresh токена"""
         # Валідуємо refresh токен (включаючи перевірку boot_id)
         payload = await self.decode_token(refresh_token, token_type="refresh")
@@ -884,14 +913,10 @@ class AuthManager:
                 )
             except (ValueError, TypeError):
                 exp_ts = now_ts + 3600
-                logger.debug(
-                    "Error calculating expiration time during revoke", jti=jti
-                )
+                logger.debug("Error calculating expiration time during revoke", jti=jti)
             ttl = max(60, exp_ts - now_ts)
 
-            setex_res = self.redis_client.setex(
-                f"blocked_token:{jti}", int(ttl), "1"
-            )
+            setex_res = self.redis_client.setex(f"blocked_token:{jti}", int(ttl), "1")
             if inspect.isawaitable(setex_res):
                 await setex_res
             return None
@@ -970,7 +995,7 @@ class AuthManager:
                 datetime.now(timezone.utc).timestamp() + LOGIN_LOCKOUT_SECONDS
             )
 
-# ... (rest of the code remains the same)
+    # ... (rest of the code remains the same)
     def record_login_attempt(self, username: str, ip_address: str, success: bool):
         """Запис спроби входу"""
         # Normalize inputs
@@ -1010,9 +1035,7 @@ class AuthManager:
 
     def _lock_key(self, username: str, ip_address: str) -> str:
         """Формує ключ блокування для Redis/In-memory lockout."""
-        return (
-            f"lock:{self._normalize_username(username)}:{self._normalize_ip_address(ip_address)}"
-        )
+        return f"lock:{self._normalize_username(username)}:{self._normalize_ip_address(ip_address)}"
 
     async def update_session_activity(self, session_id: str):
         """Оновлення часу останньої активності сесії"""
@@ -1100,7 +1123,9 @@ def get_auth_manager() -> AuthManager:
 
         # Спробуємо встановити Redis клієнт пізніше
         try:
-            from config import get_settings  # pylint: disable=import-outside-toplevel  # noqa: E402
+            from config import (
+                get_settings,
+            )  # pylint: disable=import-outside-toplevel  # noqa: E402
 
             settings = get_settings()
 
@@ -1119,8 +1144,12 @@ async def initialize_auth_manager_redis():
 
     if auth_mgr.redis_client is None:
         try:
-            from core.redis_manager import RedisManager  # pylint: disable=import-outside-toplevel  # noqa: E402
-            from config import get_settings  # pylint: disable=import-outside-toplevel  # noqa: E402
+            from core.redis_manager import (
+                RedisManager,
+            )  # pylint: disable=import-outside-toplevel  # noqa: E402
+            from config import (
+                get_settings,
+            )  # pylint: disable=import-outside-toplevel  # noqa: E402
 
             settings = get_settings()
 
@@ -1139,7 +1168,9 @@ async def initialize_auth_manager_redis():
 
 
 # For backward compatibility
-auth_manager = None  # Will be set by imports that need it  # pylint: disable=invalid-name
+auth_manager = (
+    None  # Will be set by imports that need it  # pylint: disable=invalid-name
+)
 
 
 # Dependency для FastAPI
