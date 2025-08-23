@@ -392,12 +392,34 @@ class StreamHubLauncher:
         # Підключення статичних файлів тільки в non-dev режимах
         if os.environ.get("ENVIRONMENT") != "development" and self.static_dir.exists():
             from fastapi.staticfiles import StaticFiles
-            from fastapi.responses import HTMLResponse
+            from fastapi.responses import HTMLResponse, JSONResponse
             from fastapi import HTTPException
 
             app.mount(
                 "/static", StaticFiles(directory=str(self.static_dir)), name="static"
             )
+
+            # Web App Manifest
+            @app.get("/manifest.json")
+            async def manifest():
+                return JSONResponse(
+                    {
+                        "name": "TetraCore StreamHub Dashboard",
+                        "short_name": "StreamHub",
+                        "start_url": "/",
+                        "display": "standalone",
+                        "background_color": "#ffffff",
+                        "theme_color": "#3b82f6",
+                        "icons": [
+                            {
+                                "src": "/favicon.ico",
+                                "sizes": "16x16",
+                                "type": "image/x-icon",
+                            }
+                        ],
+                    },
+                    media_type="application/manifest+json",
+                )
 
             # SPA підтримка - сервування index.html на корені та fallback для роутингу
             @app.get("/", response_class=HTMLResponse)
