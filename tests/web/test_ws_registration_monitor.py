@@ -18,7 +18,11 @@ def app_client(monkeypatch):
     # Allow TestClient host
     monkeypatch.setenv("DISABLE_TRUSTED_HOST_MW", "1")
     monkeypatch.setenv("ADMIN_USERNAME", "admin")
-    monkeypatch.setenv("ADMIN_PASSWORD", "admin")
+    # bcrypt hash for password: TetraCore@Admin123!
+    monkeypatch.setenv(
+        "ADMIN_PASSWORD",
+        "$2b$12$Q7prO4MIkkDY3CW5WY66aODL68ePW1VVFwYzBSb9Hk8hxc8n.baP.",
+    )
 
     launcher = StreamHubLauncher()
     app = launcher.create_app()
@@ -28,8 +32,10 @@ def app_client(monkeypatch):
 def test_monitor_registration_ack_flow(app_client: TestClient):
     # Login to obtain JWT
     login = app_client.post(
-        "/api/auth/login", json={"username": "admin", "password": "admin"}
+        "/api/auth/login",
+        json={"username": "admin", "password": "TetraCore@Admin123!"},
     )
+
     assert login.status_code == 200, login.text
     access_token = login.json()["tokens"]["access_token"]
 
@@ -53,4 +59,8 @@ def test_monitor_registration_ack_flow(app_client: TestClient):
         msg = ws.receive_json()
         assert isinstance(msg, dict)
         # Очікуємо або миттєвий ack, або системні оновлення, але ack має з’явитися першими
-        assert msg.get("type") in ("registration_ack", "stats_update", "system_notification")
+        assert msg.get("type") in (
+            "registration_ack",
+            "stats_update",
+            "system_notification",
+        )

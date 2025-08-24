@@ -17,7 +17,11 @@ def app_client(monkeypatch):
     # Allow TestClient host
     monkeypatch.setenv("DISABLE_TRUSTED_HOST_MW", "1")
     monkeypatch.setenv("ADMIN_USERNAME", "admin")
-    monkeypatch.setenv("ADMIN_PASSWORD", "admin")
+    # bcrypt hash for password: TetraCore@Admin123!
+    monkeypatch.setenv(
+        "ADMIN_PASSWORD",
+        "$2b$12$Q7prO4MIkkDY3CW5WY66aODL68ePW1VVFwYzBSb9Hk8hxc8n.baP.",
+    )
 
     launcher = StreamHubLauncher()
     app = launcher.create_app()
@@ -31,8 +35,10 @@ def test_api_health_metrics_clients(app_client: TestClient):
 
     # Логін
     login = app_client.post(
-        "/api/auth/login", json={"username": "admin", "password": "admin"}
+        "/api/auth/login",
+        json={"username": "admin", "password": "TetraCore@Admin123!"},
     )
+
     assert login.status_code == 200
 
     # Після логіну endpoints мають відповідати 200

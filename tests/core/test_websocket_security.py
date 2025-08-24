@@ -66,7 +66,11 @@ def app_client_prod(monkeypatch):
     # Allow TestClient host
     monkeypatch.setenv("DISABLE_TRUSTED_HOST_MW", "1")
     monkeypatch.setenv("ADMIN_USERNAME", "admin")
-    monkeypatch.setenv("ADMIN_PASSWORD", "admin")
+    # bcrypt hash for password: TetraCore@Admin123!
+    monkeypatch.setenv(
+        "ADMIN_PASSWORD",
+        "$2b$12$Q7prO4MIkkDY3CW5WY66aODL68ePW1VVFwYzBSb9Hk8hxc8n.baP.",
+    )
 
     launcher = StreamHubLauncher()
     app = launcher.create_app()
@@ -98,7 +102,8 @@ async def test_hmac_authentication_succeeds_with_static_token():
 def test_ws_subprotocol_jwt_authentication(app_client_prod: TestClient):
     # Отримати токен
     login = app_client_prod.post(
-        "/api/auth/login", json={"username": "admin", "password": "admin"}
+        "/api/auth/login",
+        json={"username": "admin", "password": "TetraCore@Admin123!"},
     )
     assert login.status_code == 200
     access_token = login.json()["tokens"]["access_token"]
@@ -110,7 +115,12 @@ def test_ws_subprotocol_jwt_authentication(app_client_prod: TestClient):
         # очікуємо перше повідомлення
         data = ws.receive_json()
         assert isinstance(data, dict)
-        assert data.get("type") in ("registration_ack", "stats_update", "system_notification", "error")
+        assert data.get("type") in (
+            "registration_ack",
+            "stats_update",
+            "system_notification",
+            "error",
+        )
 
 
 def test_ws_query_token_is_denied_in_production(app_client_prod: TestClient):

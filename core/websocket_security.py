@@ -293,12 +293,20 @@ class WebSocketSecurityManager:
         # Спроба отримати токен з WebSocket subprotocols (наприклад: ["bearer", "<JWT>"])
         subprotocol_token = None
         try:
-            # Starlette/FastAPI: клієнтські протоколи приходять у заголовку 'Sec-WebSocket-Protocol'
-            proto_hdr = self._get_header_ci(headers, "sec-websocket-protocol")
-            if proto_hdr:
-                parts = [p.strip() for p in str(proto_hdr).split(",") if p.strip()]
-                if len(parts) >= 2 and parts[0].lower() == "bearer":
-                    subprotocol_token = parts[1]
+            # Спершу дивимось у ASGI scope, який надає Starlette/FastAPI
+            scope = getattr(websocket, "scope", {}) or {}
+            offered = scope.get("subprotocols")
+            if isinstance(offered, (list, tuple)) and len(offered) >= 2:
+                first = str(offered[0]).lower()
+                if first == "bearer":
+                    subprotocol_token = str(offered[1])
+            # Якщо у scope немає — пробуємо заголовок 'Sec-WebSocket-Protocol'
+            if not subprotocol_token:
+                proto_hdr = self._get_header_ci(headers, "sec-websocket-protocol")
+                if proto_hdr:
+                    parts = [p.strip() for p in str(proto_hdr).split(",") if p.strip()]
+                    if len(parts) >= 2 and parts[0].lower() == "bearer":
+                        subprotocol_token = parts[1]
         except Exception:
             subprotocol_token = None
 
@@ -412,10 +420,16 @@ class WebSocketSecurityManager:
             # Валідація JWT токена для Dashboard/Monitor клієнтів
             auth_mgr = get_auth_manager()
 
-            # Ініціалізуємо Redis якщо потрібно
+            # Ініціалізуємо Redis якщо потрібно ТА явно дозволено конфігом
             if auth_mgr.redis_client is None:
                 try:
-                    await initialize_auth_manager_redis()
+                    redis_enabled_env = os.getenv("REDIS_ENABLED", "true").lower() in (
+                        "1",
+                        "true",
+                        "yes",
+                    )
+                    if redis_enabled_env:
+                        await initialize_auth_manager_redis()
                 except (redis.exceptions.RedisError, RuntimeError) as e:
                     logger.warning(
                         "Could not initialize Redis for WebSocket auth", error=str(e)
@@ -758,6 +772,19 @@ class WebSocketSecurityManager:
                 datetime.now(timezone.utc) - conn_info.connected_at
             ).total_seconds(),
         )
+
+        # Якщо більше немає підключень — акуратно зупиняємо фоновий cleanup
+        if (
+            not self.connections
+            and self._cleanup_task
+            and not self._cleanup_task.done()
+        ):
+            try:
+                self._cleanup_task.cancel()
+            except Exception:
+                pass
+            finally:
+                self._cleanup_task = None
 
     def _check_connection_limit(self, user_id: str) -> bool:
         """Перевірка ліміту з'єднань для користувача"""

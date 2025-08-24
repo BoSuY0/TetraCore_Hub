@@ -177,8 +177,12 @@ class AuthManager:
             server_boot_id=self.server_boot_id[:8] + "...",
         )
 
-        # Логування стану Redis
-        if self.redis_client:
+        # Логування стану Redis (виключно якщо явно дозволено REDIS_ENABLED)
+        if self.redis_client and os.getenv("REDIS_ENABLED", "true").lower() in (
+            "1",
+            "true",
+            "yes",
+        ):
             try:
                 self.redis_client.ping()
                 logger.info("Redis connection established successfully")

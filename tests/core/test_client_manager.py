@@ -55,13 +55,13 @@ async def test_available_workers_filter_by_type_and_capability(manager: ClientMa
     await manager.add_client(w1)
     await manager.add_client(w2)
 
-    # Only workers, capability 'b' => both connected and available
+    # Only workers, capability 'b' => only workers that are available (not at full capacity)
     available = manager.get_available_workers(task_type="b", executor_type="worker")
-    assert [c.info.client_id for c in available] == ["w1", "w2"]
+    assert [c.info.client_id for c in available] == ["w1"]
 
-    # Capability 'c' => only w2
+    # Capability 'c' => w2 matches capability but is at full capacity => not available
     available_c = manager.get_available_workers(task_type="c", executor_type="worker")
-    assert [c.info.client_id for c in available_c] == ["w2"]
+    assert [c.info.client_id for c in available_c] == []
 
 
 @pytest.mark.anyio
@@ -84,6 +84,8 @@ async def test_get_best_worker_with_requirements_and_fallbacks(manager: ClientMa
     await manager.add_client(w2)
 
     # Strict requirements that none matches => fallback to any executor_type
-    best = manager.get_best_worker(task_type="x", worker_requirements=["z"], executor_type="worker")
+    best = manager.get_best_worker(
+        task_type="x", worker_requirements=["z"], executor_type="worker"
+    )
     assert best is not None
     assert best.info.client_id in ("w1", "w2")

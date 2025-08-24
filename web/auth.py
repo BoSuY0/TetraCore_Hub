@@ -250,7 +250,11 @@ async def login(request: Request, credentials: LoginRequest):
         )
 
         # Виставляємо httpOnly cookie з refresh токеном і CSRF cookie для double-submit
-        secure_cookie = os.getenv("ENVIRONMENT", "development").lower() == "production"
+        # Secure cookie виставляємо лише коли схема запиту HTTPS або за X-Forwarded-Proto=https
+        # Це уникає ситуації, коли в non-TLS середовищах (локальні/тести) cookie не відправляється
+        forwarded_proto = request.headers.get("X-Forwarded-Proto", "").lower()
+        request_scheme = (request.url.scheme or "").lower()
+        secure_cookie = forwarded_proto == "https" or request_scheme == "https"
         csrf_token = uuid.uuid4().hex
 
         response = JSONResponse(

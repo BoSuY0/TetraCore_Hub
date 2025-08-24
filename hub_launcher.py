@@ -966,6 +966,32 @@ class StreamHubLauncher:
         # Зберігаємо посилання на app для пізнішої реєстрації
         self._app = app
 
+        #
+        # Embedded режим (універсальний, не тестовий):
+        # Створюємо мінімальний StreamHub, щоб додаток був самодостатнім у вбудованих сценаріях
+        # (наприклад, інтеграційні тести, вбудування в інші процеси), навіть без повного run_backend().
+        # Керується прапорцем AUTO_BOOTSTRAP_HUB_FOR_APP (за замовчуванням увімкнено).
+        if os.getenv("AUTO_BOOTSTRAP_HUB_FOR_APP", "true").lower() in (
+            "1",
+            "true",
+            "yes",
+        ):
+            try:
+                from core.hub import StreamHub
+
+                hub = StreamHub()
+                # Прив'язуємо поточний FastAPI app до hub та реєструємо маршрути (включно з /ws)
+                hub.app = app
+                hub._register_routes()  # реєструє @app.websocket("/ws") та інші необхідні ендпойнти
+
+                # Робимо hub доступним для ендпойнтів через app.state
+                app.state.hub = hub
+                # Зберігаємо інстанс, щоб уникнути GC у середовищі embed/тестів
+                self._hub_instance = hub
+            except Exception:
+                # Повний хаб буде ініціалізований у run_backend(); ця секція не критична.
+                pass
+
         return app
 
     async def _startup_hub(self):

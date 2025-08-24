@@ -9,6 +9,9 @@ from typing import Optional
 from datetime import datetime
 
 from fastapi import APIRouter, Request, HTTPException, Query, Depends
+from core.security_integration import (
+    get_authenticated_user,
+)
 from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 import structlog
@@ -182,7 +185,10 @@ async def get_frontend_health():
 
 
 @frontend_api_router.get("/real-time-metrics")
-async def get_real_time_metrics():
+async def get_real_time_metrics(
+    _rate_limit_info: dict = Depends(rate_limit_dependency),
+    _user: dict = Depends(get_authenticated_user),
+):
     """Метрики реального часу для frontend (реальні з хабу)"""
     # Поточний FastAPI app недоступний тут напряму.
     # Ендпоінт використовується як standalone; реальні дані перевизначаються у register_dashboard_routes.
@@ -383,7 +389,9 @@ def register_dashboard_routes(
             return await streamhub_instance.get_system_metrics()
 
         @app.get("/api/clients")
-        async def get_api_clients_with_hub():
+        async def get_api_clients_with_hub(
+            user: dict = Depends(get_authenticated_user),
+        ):
             """Клієнти з реальними даними"""
             if streamhub_instance.client_manager:
                 clients = streamhub_instance.client_manager.get_all_clients()
@@ -725,7 +733,10 @@ def register_dashboard_routes(
             return Response(content=SIMPLE_FAVICON, media_type="image/x-icon")
 
         @app.get("/api/frontend/real-time-metrics")
-        async def get_real_time_metrics_with_hub():
+        async def get_real_time_metrics_with_hub(
+            _rate_limit_info: dict = Depends(make_rate_limit_dep(limit=100, window=60)),
+            _user: dict = Depends(get_authenticated_user),
+        ):
             """Метрики реального часу для frontend (живі з StreamHub)"""
             try:
                 # Отримаємо системні та hub метрики одним викликом

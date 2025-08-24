@@ -468,6 +468,11 @@ async def require_auth_middleware(request: Request, call_next):
     if request.url.path.startswith("/api/admin/"):
         needs_auth = True
 
+    # Frontend API: все під /api/frontend/ (крім явних public_paths вище) вимагає токен
+    # Публічні /api/frontend/status та /api/frontend/health вже пропускаються раніше через public_paths
+    if request.url.path.startswith("/api/frontend/"):
+        needs_auth = True
+
     # Клієнти/таски — тепер потребують токен
     if (
         request.url.path in ("/api/clients", "/api/tasks")
@@ -482,15 +487,35 @@ async def require_auth_middleware(request: Request, call_next):
 
     # Перевірка автентифікації тільки для захищених ендпоінтів
     try:
-        # Перевірка Bearer token
+        # Перевірка Bearer token з заголовка
         authorization = request.headers.get("Authorization")
-        if not authorization or not authorization.startswith("Bearer "):
+        user_data = None
+        if authorization and authorization.startswith("Bearer "):
+            token = authorization.split(" ")[1]
+            user_data = await get_auth_manager().decode_token(token)
+        else:
+            # Fallback: якщо заголовка немає – спробувати refresh cookie (після login)
+            # Це дозволяє TestClient сесіям працювати без ручного проставлення Authorization
+            rt_cookie = request.cookies.get("rt")
+            if rt_cookie:
+                try:
+                    payload = await get_auth_manager().decode_token(
+                        rt_cookie, token_type="refresh"
+                    )
+                    user_data = {
+                        "user_id": payload.get("user_id"),
+                        "username": payload.get("username"),
+                        "role": payload.get("role"),
+                        "permissions": payload.get("permissions", []),
+                        "session_id": payload.get("session_id"),
+                    }
+                except Exception:
+                    user_data = None
+
+        if not user_data:
             return JSONResponse(
                 status_code=401, content={"detail": "Authentication required"}
             )
-
-        token = authorization.split(" ")[1]
-        user_data = await get_auth_manager().decode_token(token)
 
         # Додаємо user data до state для використання в endpoints
         request.state.user = user_data

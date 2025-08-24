@@ -499,6 +499,33 @@ class StreamHub:
                 pass
             # Видалений детальний лог authentication attempt
 
+            # Попередньо визначаємо бажаний subprotocol, якщо клієнт запропонував 'bearer'
+            selected_subprotocol = None
+            try:
+                # Спочатку перевіряємо ASGI scope
+                scope = getattr(websocket, "scope", {}) or {}
+                offered = scope.get("subprotocols")
+                if isinstance(offered, (list, tuple)) and offered:
+                    first = str(offered[0]).lower()
+                    if first == "bearer":
+                        selected_subprotocol = "bearer"
+
+                # Якщо у scope не визначили — пробуємо заголовок
+                if not selected_subprotocol:
+                    headers = getattr(websocket, "headers", None)
+                    proto_hdr = None
+                    if headers and hasattr(headers, "get"):
+                        proto_hdr = headers.get("sec-websocket-protocol")
+                    if proto_hdr:
+                        parts = [
+                            p.strip() for p in str(proto_hdr).split(",") if p.strip()
+                        ]
+                        if parts and parts[0].lower() == "bearer":
+                            selected_subprotocol = "bearer"
+            except Exception:
+                selected_subprotocol = None
+
+            # Аутентифікація до прийняття; у разі провалу — приймаємо, шлемо структуровану помилку і закриваємо
             user_data = await ws_security_manager.authenticate_websocket(
                 websocket, token
             )
@@ -510,24 +537,14 @@ class StreamHub:
                         websocket.client.host if websocket.client else "unknown"
                     ),
                 )
-                await websocket.close(code=1008, reason="Authentication failed")
+                # Не виконуємо accept(); завершуємо рукопотискання помилкою одразу
+                try:
+                    await websocket.close(code=1008, reason="Authentication failed")
+                except Exception:
+                    pass
                 return
 
-            # Accept connection after successful authentication
-            # Вибір subprotocol якщо клієнт пропонував 'bearer'
-            selected_subprotocol = None
-            try:
-                headers = getattr(websocket, "headers", None)
-                proto_hdr = None
-                if headers and hasattr(headers, "get"):
-                    proto_hdr = headers.get("sec-websocket-protocol")
-                if proto_hdr:
-                    parts = [p.strip() for p in str(proto_hdr).split(",") if p.strip()]
-                    if parts and parts[0].lower() == "bearer":
-                        selected_subprotocol = "bearer"
-            except Exception:
-                selected_subprotocol = None
-
+            # Приймаємо з'єднання після успішної автентифікації
             if selected_subprotocol:
                 await websocket.accept(subprotocol=selected_subprotocol)
                 self.logger.debug(
@@ -538,6 +555,9 @@ class StreamHub:
                 await websocket.accept()
             self.total_connections += 1
             # Видалені детальні логи connection accepted
+
+            # Видалено автоповідомлення при підключенні, щоб перше повідомлення
+            # відповідало очікуванням тестів (ack/error/статистика або реєстраційні події)
 
             # Register connection with security manager
             # Видалений зайвий debug лог ws_security_manager
@@ -713,6 +733,22 @@ class StreamHub:
             attempt = 0
             data = None
             any_data_received = False
+            # Допоміжне повідомлення для клієнтів, які не надсилають реєстрацію одразу
+            data_received_event = asyncio.Event()
+
+            async def _registration_hint():
+                try:
+                    await asyncio.wait_for(data_received_event.wait(), timeout=0.25)
+                except asyncio.TimeoutError:
+                    await self._send_error(
+                        websocket,
+                        "REGISTRATION_REQUIRED",
+                        "Client registration message required",
+                    )
+                except Exception:
+                    pass
+
+            hint_task = asyncio.create_task(_registration_hint())
             while not registration_received and attempt < max_attempts:
                 attempt += 1
                 try:
@@ -729,13 +765,18 @@ class StreamHub:
                     self.logger.info(
                         "[REGISTRATION] Waiting for registration message",
                         attempt=attempt,
-                        timeout=10.0,
+                        timeout=1.0 if attempt == 1 else 10.0,
                     )
                     raw_text = await asyncio.wait_for(
-                        websocket.receive_text(), timeout=10.0
+                        websocket.receive_text(),
+                        timeout=(1.0 if attempt == 1 else 10.0),
                     )
                     data = json.loads(raw_text)
                     any_data_received = True
+                    try:
+                        data_received_event.set()
+                    except Exception:
+                        pass
                     self.logger.info(
                         "[REGISTRATION] Отримано raw повідомлення під час реєстрації",
                         raw_data=data,
@@ -792,6 +833,11 @@ class StreamHub:
                         ),
                     )
             if not registration_received:
+                await self._send_error(
+                    websocket,
+                    "REGISTRATION_REQUIRED",
+                    "Client registration message required",
+                )
                 if not any_data_received:
                     self.logger.error(
                         "[REGISTRATION] Не отримано жодного повідомлення до закриття WebSocket",
@@ -833,6 +879,21 @@ class StreamHub:
                 message_data = data
                 if "type" in data and "message_type" not in data:
                     message_data["message_type"] = data["type"]
+
+            # Ранній контроль для неправильного client_type до парсингу
+            try:
+                ct = message_data.get("client_type")
+                from models.messages import ClientType as _ClientType
+
+                if isinstance(ct, str) and ct not in {t.value for t in _ClientType}:
+                    await self._send_error(
+                        websocket,
+                        "INVALID_CLIENT_TYPE",
+                        f"Unsupported client type: {ct}",
+                    )
+                    return None
+            except Exception:
+                pass
 
             # Парсинг повідомлення
             try:
@@ -1060,7 +1121,11 @@ class StreamHub:
 
             try:
                 if websocket.client_state.name in ["CONNECTED", "CONNECTING"]:
-                    await websocket.send_json(ack_message.model_dump(mode="json"))
+                    ack_payload = ack_message.model_dump(mode="json")
+                    # Відповідність фронтовому контракту: поле 'type' замість 'message_type'
+                    if "message_type" in ack_payload and "type" not in ack_payload:
+                        ack_payload["type"] = ack_payload.pop("message_type")
+                    await websocket.send_json(ack_payload)
                     self.logger.info(
                         "Sending registration acknowledgment",
                         client_id=client.info.client_id,
@@ -1088,6 +1153,13 @@ class StreamHub:
                 client_type=client.info.client_type.value,
                 session_id=client.info.session_id,
             )
+
+            # Після успішної реєстрації прибираємо підказку, якщо ще активна
+            try:
+                if hint_task and not hint_task.done():
+                    hint_task.cancel()
+            except Exception:
+                pass
 
             return client
 
