@@ -275,7 +275,7 @@ async def login(request: Request, credentials: LoginRequest):
             secure=secure_cookie,
             samesite="lax",
             max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
-            path="/api/auth",
+            path="/",  # Доступний для всього сайту
         )
 
         # CSRF токен у доступній cookie (не httpOnly)
@@ -286,7 +286,7 @@ async def login(request: Request, credentials: LoginRequest):
             secure=secure_cookie,
             samesite="lax",
             max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
-            path="/api/auth",
+            path="/",  # Доступний для всього сайту
         )
 
         return response
@@ -445,8 +445,9 @@ async def logout(
 
         # Очищуємо refresh та csrf cookie
         response = JSONResponse({"success": True, "message": "Logged out successfully"})
-        response.set_cookie("rt", "", max_age=0, path="/api/auth")
-        response.set_cookie("csrf_token", "", max_age=0, path="/api/auth")
+        # Очищаємо cookie на кореневому шляху, щоб гарантовано видалити їх для всіх маршрутів
+        response.set_cookie("rt", "", max_age=0, path="/")
+        response.set_cookie("csrf_token", "", max_age=0, path="/")
         return response
 
     except Exception as e:  # pylint: disable=broad-exception-caught
