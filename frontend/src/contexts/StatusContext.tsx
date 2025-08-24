@@ -903,16 +903,26 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       return;
     }
 
-    // Будуємо URL з токеном
-    const wsUrl = `${buildWsUrl("/ws")}?token=${encodeURIComponent(sessionId || "")}`;
+    // Будуємо URL та протоколи для WebSocket
+    const isProduction = process.env.NODE_ENV === "production";
+    const baseUrl = buildWsUrl("/ws");
+    // У продакшені не використовуємо query-параметр для токена
+    const wsUrl = isProduction
+      ? baseUrl
+      : `${baseUrl}?token=${encodeURIComponent(sessionId || "")}`;
+    // У продакшені передаємо токен через subprotocol (наприклад: "bearer", "<JWT>")
+    const wsProtocols: string[] | undefined =
+      isProduction && sessionId ? ["bearer", sessionId] : undefined;
+
     console.log(
       "🔌 Connecting to WebSocket:",
-      wsUrl.replace(/token=[^&]+/, "token=***"),
+      isProduction ? wsUrl : wsUrl.replace(/token=[^&]+/, "token=***"),
     );
     console.log("🔍 WebSocket URL details:", {
-      baseWsUrl: buildWsUrl("/ws"),
+      baseWsUrl: baseUrl,
       hasToken: !!sessionId,
       environment: process.env.NODE_ENV,
+      usingSubprotocol: !!wsProtocols,
     });
 
     // Встановлюємо таймаут з'єднання
@@ -924,7 +934,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       payload: { lastAttemptAt: new Date() },
     });
 
-    const ws = new WebSocket(wsUrl);
+    const ws = wsProtocols ? new WebSocket(wsUrl, wsProtocols) : new WebSocket(wsUrl);
 
     ws.onopen = () => {
       if (!mountedRef.current) {

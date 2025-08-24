@@ -287,9 +287,20 @@ class WebSocketSecurityManager:
             await self._incr_metric("ip_rate_limited")
             return None
 
-        # 1) Отримуємо токени з query і заголовка (case-insensitive для сумісності)
+        # 1) Отримуємо токени з query, заголовка та subprotocol (case-insensitive для сумісності)
         headers = getattr(websocket, "headers", None)
         auth_header = self._get_header_ci(headers, "authorization")
+        # Спроба отримати токен з WebSocket subprotocols (наприклад: ["bearer", "<JWT>"])
+        subprotocol_token = None
+        try:
+            # Starlette/FastAPI: клієнтські протоколи приходять у заголовку 'Sec-WebSocket-Protocol'
+            proto_hdr = self._get_header_ci(headers, "sec-websocket-protocol")
+            if proto_hdr:
+                parts = [p.strip() for p in str(proto_hdr).split(",") if p.strip()]
+                if len(parts) >= 2 and parts[0].lower() == "bearer":
+                    subprotocol_token = parts[1]
+        except Exception:
+            subprotocol_token = None
 
         query_token_present = bool(token)
         header_token = None
@@ -323,7 +334,7 @@ class WebSocketSecurityManager:
             await self._incr_metric("query_token_rejected")
             return None
 
-        token = header_token or token
+        token = subprotocol_token or header_token or token
 
         # 2) Якщо досі немає токена — у development/testing дозволяємо гостьовий доступ
         if not token:

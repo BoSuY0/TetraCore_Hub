@@ -32,11 +32,14 @@ export const LoginPage: React.FC = () => {
     setLoginAttempts((prev) => prev + 1);
     const ok = await login(username, password);
     if (ok && typeof window !== 'undefined') {
-      // Після успішного логіну виходимо зі шляху /login, щоб розблокувати ініціалізацію StatusProvider/WebSocket
-      try {
-        window.location.replace('/');
-      } catch {
-        window.location.href = '/';
+      // Якщо ми справді знаходимося на окремому маршруті /login — виконаємо редірект.
+      // Інакше (рендер через ProtectedRoute) просто даємо React перемалювати UI без перезавантаження.
+      if (window.location.pathname === '/login') {
+        try {
+          window.location.replace('/');
+        } catch {
+          window.location.href = '/';
+        }
       }
     }
   };
