@@ -2,6 +2,12 @@ import types
 import time
 import os
 import pytest
+import secrets
+import pytest
+from cryptography.fernet import Fernet
+from fastapi.testclient import TestClient
+
+from hub_launcher import StreamHubLauncher
 
 
 class FakeClient:
@@ -49,6 +55,24 @@ def env_setup(monkeypatch):
     monkeypatch.setenv("AUTH_TOKEN", "super-secret-token-1234567890")
 
 
+@pytest.fixture()
+def app_client_prod(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("REQUIRE_AUTHENTICATION", "true")
+    monkeypatch.setenv("REDIS_ENABLED", "false")
+    monkeypatch.setenv("ENCRYPTION_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("JWT_SECRET_KEY", secrets.token_urlsafe(48))
+    monkeypatch.setenv("JWT_REFRESH_SECRET", secrets.token_urlsafe(48))
+    # Allow TestClient host
+    monkeypatch.setenv("DISABLE_TRUSTED_HOST_MW", "1")
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "admin")
+
+    launcher = StreamHubLauncher()
+    app = launcher.create_app()
+    return TestClient(app)
+
+
 @pytest.mark.anyio
 async def test_guest_access_in_dev():
     from core import websocket_security as ws_mod
@@ -69,3 +93,30 @@ async def test_hmac_authentication_succeeds_with_static_token():
     ws = FakeWebSocket(headers=headers)
     res = await ws_mod.ws_security_manager.authenticate_websocket(ws, token=None)
     assert res is not None and res["role"] == "service"
+
+
+def test_ws_subprotocol_jwt_authentication(app_client_prod: TestClient):
+    # Отримати токен
+    login = app_client_prod.post(
+        "/api/auth/login", json={"username": "admin", "password": "admin"}
+    )
+    assert login.status_code == 200
+    access_token = login.json()["tokens"]["access_token"]
+
+    # Підключитися з subprotocols = ["bearer", token]
+    with app_client_prod.websocket_connect(
+        "/ws", subprotocols=["bearer", access_token]
+    ) as ws:
+        # очікуємо перше повідомлення
+        data = ws.receive_json()
+        assert isinstance(data, dict)
+        assert data.get("type") in ("registration_ack", "stats_update", "system_notification", "error")
+
+
+def test_ws_query_token_is_denied_in_production(app_client_prod: TestClient):
+    import pytest
+    from starlette.websockets import WebSocketDisconnect
+
+    with pytest.raises(WebSocketDisconnect):
+        with app_client_prod.websocket_connect("/ws?token=abc"):
+            pass

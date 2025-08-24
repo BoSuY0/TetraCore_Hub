@@ -514,7 +514,28 @@ class StreamHub:
                 return
 
             # Accept connection after successful authentication
-            await websocket.accept()
+            # Вибір subprotocol якщо клієнт пропонував 'bearer'
+            selected_subprotocol = None
+            try:
+                headers = getattr(websocket, "headers", None)
+                proto_hdr = None
+                if headers and hasattr(headers, "get"):
+                    proto_hdr = headers.get("sec-websocket-protocol")
+                if proto_hdr:
+                    parts = [p.strip() for p in str(proto_hdr).split(",") if p.strip()]
+                    if parts and parts[0].lower() == "bearer":
+                        selected_subprotocol = "bearer"
+            except Exception:
+                selected_subprotocol = None
+
+            if selected_subprotocol:
+                await websocket.accept(subprotocol=selected_subprotocol)
+                self.logger.debug(
+                    "WebSocket accepted with subprotocol",
+                    subprotocol=selected_subprotocol,
+                )
+            else:
+                await websocket.accept()
             self.total_connections += 1
             # Видалені детальні логи connection accepted
 
