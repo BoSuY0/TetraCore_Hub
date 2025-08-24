@@ -9,16 +9,17 @@ TetraCore StreamHub Async Optimization Module
 import asyncio
 import os
 import json
-import aiofiles
 import time
 import functools
 from typing import Dict, List, Any, Optional, Callable, TypeVar, Coroutine, Tuple, Set
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
-import structlog
 from collections import deque
 import hashlib
+
+import aiofiles
+import structlog
 
 # Type definitions
 T = TypeVar("T")
@@ -35,7 +36,7 @@ class TaskPriority(Enum):
 
 
 @dataclass
-class BackgroundTask:
+class BackgroundTask:  # pylint: disable=too-many-instance-attributes
     """Модель фонової задачі"""
 
     id: str
@@ -53,7 +54,7 @@ class BackgroundTask:
     max_retries: int = 3
 
 
-class AsyncOptimizer:
+class AsyncOptimizer:  # pylint: disable=too-many-instance-attributes
     """Головний клас для асинхронних оптимізацій"""
 
     def __init__(self, max_workers: int = 10, max_tasks: int = 1000):
@@ -100,6 +101,10 @@ class AsyncOptimizer:
 
         # Для придушення повторних логів cache-hit по одному й тому ж task_id
         self.cache_hit_logged_ids: Set[str] = set()
+
+        # Плейсхолдери для фонових задач, щоб уникнути атрибутів поза __init__
+        self.worker_task: Optional[asyncio.Task] = None
+        self.cache_cleanup_task: Optional[asyncio.Task] = None
 
     async def initialize(self):
         """Ініціалізація оптимізатора"""
@@ -239,7 +244,12 @@ class AsyncOptimizer:
                     "Background task executed inline (config mode)", task_id=task_id
                 )
                 return task_id
-            except Exception as e:
+            except (
+                Exception
+            ) as e:  # noqa: BLE001  pylint: disable=broad-exception-caught
+                # Не ковтаємо відміну задачі
+                if isinstance(e, asyncio.CancelledError):
+                    raise
                 bt = BackgroundTask(
                     id=task_id,
                     name=name,
@@ -296,8 +306,8 @@ class AsyncOptimizer:
         if task_id in self.active_tasks:
             try:
                 await asyncio.wait_for(self.active_tasks[task_id], timeout=timeout)
-            except asyncio.TimeoutError:
-                raise TimeoutError(f"Task {task_id} timeout")
+            except asyncio.TimeoutError as exc:
+                raise TimeoutError(f"Task {task_id} timeout") from exc
 
             # Повторна перевірка результату
             if task_id in self.completed_tasks:
@@ -400,7 +410,9 @@ class AsyncOptimizer:
 
             except asyncio.CancelledError:
                 break
-            except Exception as e:
+            except (
+                Exception
+            ) as e:  # noqa: BLE001  pylint: disable=broad-exception-caught
                 self.logger.error("Error in worker loop", error=str(e))
 
     async def _execute_task(self, task: BackgroundTask):
@@ -435,8 +447,15 @@ class AsyncOptimizer:
                 task_id=task.id,
                 duration=task.completed_at - task.started_at,
             )
-
-        except Exception as e:
+        except asyncio.CancelledError:
+            # Не трактуємо відміну як помилку задачі
+            task.completed_at = time.time()
+            self.completed_tasks[task.id] = task
+            self.logger.info("Task cancelled", task_id=task.id)
+        except Exception as e:  # noqa: BLE001  pylint: disable=broad-exception-caught
+            # Не ковтаємо відміну задачі
+            if isinstance(e, asyncio.CancelledError):
+                raise
             task.error = e
             task.completed_at = time.time()
             self.completed_tasks[task.id] = task
@@ -482,7 +501,9 @@ class AsyncOptimizer:
 
             except asyncio.CancelledError:
                 break
-            except Exception as e:
+            except (
+                Exception
+            ) as e:  # noqa: BLE001  pylint: disable=broad-exception-caught
                 self.logger.error("Error in cache cleanup", error=str(e))
 
     def _generate_task_id(self, name: str, args: tuple, kwargs: dict) -> str:
@@ -547,12 +568,18 @@ def async_retry(max_attempts: int = 3, delay: float = 1.0):
             for attempt in range(max_attempts):
                 try:
                     return await func(*args, **kwargs)
-                except Exception as e:
+                except (
+                    Exception
+                ) as e:  # noqa: BLE001  pylint: disable=broad-exception-caught
+                    # Не перехоплюємо відміну задачі
+                    if isinstance(e, asyncio.CancelledError):
+                        raise
                     last_exception = e
                     if attempt < max_attempts - 1:
                         await asyncio.sleep(delay * (attempt + 1))
 
-            raise last_exception
+            if last_exception is not None:
+                raise last_exception
 
         return wrapper
 
@@ -592,11 +619,11 @@ class AsyncContextManager:
 
     async def acquire(self):
         """Отримання ресурсу"""
-        pass
+        raise NotImplementedError("AsyncContextManager.acquire() must be implemented")
 
     async def release(self):
         """Звільнення ресурсу"""
-        pass
+        raise NotImplementedError("AsyncContextManager.release() must be implemented")
 
 
 class AsyncBatcher:
@@ -649,13 +676,8 @@ class AsyncBatcher:
         await self.flush()
 
 
-# Глобальний екземпляр оптимізатора
-_global_optimizer: Optional[AsyncOptimizer] = None
-
-
+# Глобальний екземпляр оптимізатора без використання global
+@functools.lru_cache(maxsize=1)
 def get_async_optimizer() -> AsyncOptimizer:
-    """Отримання глобального екземпляру оптимізатора"""
-    global _global_optimizer
-    if _global_optimizer is None:
-        _global_optimizer = AsyncOptimizer()
-    return _global_optimizer
+    """Отримання (кешованого) глобального екземпляру оптимізатора"""
+    return AsyncOptimizer()

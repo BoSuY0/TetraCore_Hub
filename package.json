@@ -1,6 +1,7 @@
 {
   "name": "tetra-core-hub",
   "version": "1.0.0",
+  "$schema": "https://json.schemastore.org/package",
   "description": "TetraCore StreamHub - Integrated Backend and Frontend",
   "main": "hub_launcher.py",
   "scripts": {

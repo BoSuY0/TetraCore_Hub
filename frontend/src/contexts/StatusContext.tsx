@@ -203,10 +203,8 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
   // the latest timeout ID inside asynchronous WebSocket callbacks without relying
   // on React's asynchronous state updates.
   const connectionTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
-  const { auth: authState } = useAuth();
+  const { auth: authState, logout, refreshToken } = useAuth();
 
-  // Login page guard
-  const isLoginRoute = typeof window !== "undefined" && window.location.pathname === "/login";
 
   // Додаємо рефи для відстеження стану підключення
   const isConnectingRef = useRef(false);
@@ -573,9 +571,8 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
         console.log(`📥 API Response: ${response.status} ${url}`);
 
         if (response.status === 401) {
-          console.log(`🔒 Authentication failed for ${url} - redirecting to login`);
-          // Перенаправляємо без маніпуляції localStorage (токени не зберігаються у storage)
-          window.location.href = "/login";
+          console.log(`🔒 Authentication failed for ${url} - logging out`);
+          await logout();
           throw new Error("Authentication required");
         } else if (response.status === 429) {
           // Rate limit - не робимо retries, тільки логуємо
@@ -796,12 +793,6 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
   };
 
   const connectWebSocket = useCallback(async () => {
-    // Guard: skip on login route
-    if (isLoginRoute) {
-      console.log("🚫 On /login route, skipping WebSocket connection");
-      return;
-    }
-
     // Перевіряємо чи компонент все ще змонтований
     if (!mountedRef.current) {
       console.log("🚫 Component unmounted, skipping WebSocket connection");
@@ -865,9 +856,8 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
           isRetryable: false,
         },
       });
-      // Очищаємо токени та перенаправляємо на логін
-      // Токени не зберігаються у localStorage, просто редіректимо на логін
-      window.location.href = "/login";
+      // Завершуємо сесію; роутінг вирішить навігацію через ProtectedRoute
+      await logout();
       return;
     }
 
@@ -1269,54 +1259,24 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
         // Спробуємо оновити токен перед реконнектом
         const attemptTokenRefreshAndReconnect = async () => {
           try {
-            // Отримуємо refresh token
-            const refreshToken = localStorage.getItem("refreshToken");
-            if (!refreshToken) {
-              console.warn("🔒 No refresh token available for timeout recovery");
-              handleWebSocketAuthError();
-              return;
-            }
-            
-            // Спробуємо оновити токени
-            const response = await fetch(buildUrl("/api/auth/refresh"), {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ refresh_token: refreshToken }),
-            });
-            
-            if (response.ok) {
-              const data = await response.json();
-              
-              // Оновлюємо токени в localStorage
-              localStorage.setItem("sessionId", data.access_token);
-              localStorage.setItem("refreshToken", data.refresh_token);
-              
-              console.log("✅ Token refreshed successfully - attempting reconnect");
-              
+            const newToken = await refreshToken();
+            if (newToken) {
+              console.log("✅ Token refreshed successfully via cookie - attempting reconnect");
               // Скидаємо лічильник реконнектів для свіжого старту
               dispatch({ type: "RESET_RECONNECT_INFO" });
-              
               // Спробуємо реконнект через коротку затримку
               setTimeout(() => {
                 if (mountedRef.current && authState.isAuthenticated) {
                   connectWebSocket();
                 }
               }, 1000);
-              
               return; // Не продовжуємо стандартну обробку
-              
             } else {
               console.warn("⚠️ Token refresh failed during timeout recovery");
-              // Продовжуємо зі стандартною обробкою timeout
             }
-            
           } catch (error) {
             console.error("❌ Error during token refresh for timeout recovery:", error);
-            // Продовжуємо зі стандартною обробкою timeout
           }
-          
           // Якщо token refresh не вдався, обробляємо як звичайний timeout
           handleStandardTimeoutReconnect();
         };
@@ -1342,7 +1302,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
           // Швидкий реконнект для timeout
           if (mountedRef.current && 
               authState.isAuthenticated && 
-              localStorage.getItem("sessionId") &&
+              authState.sessionId &&
               state.reconnectInfo.attempts < 3) { // Обмежуємо кількість спроб для timeout
             
             const nextAttempt = state.reconnectInfo.attempts + 1;
@@ -1363,7 +1323,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
                   !socket && 
                   !isConnectingRef.current && 
                   authState.isAuthenticated &&
-                  localStorage.getItem("sessionId")) {
+                  authState.sessionId) {
                 
                 console.log(`🔄 Attempting timeout reconnection (${nextAttempt}/3)`);
                 connectWebSocket();
@@ -1400,7 +1360,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
         Reason: ${error.reason}
         Message: ${error.message}
         Retryable: ${error.isRetryable}
-        Connection State: connected=${authState.isAuthenticated}, sessionId=${!!localStorage.getItem("sessionId")}
+        Connection State: connected=${authState.isAuthenticated}, sessionId=${!!authState.sessionId}
         Attempts: ${state.reconnectInfo.attempts}/${state.reconnectInfo.maxAttempts}
       `);
 
@@ -1507,7 +1467,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
             {
               authenticated: authState.isAuthenticated,
               mounted: mountedRef.current,
-              hasSession: !!localStorage.getItem("sessionId")
+              hasSession: !!authState.sessionId
             }
           );
         }
@@ -1676,15 +1636,11 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
   // Auto-refresh data - покращена логіка з затримкою
   useEffect(() => {
-    // Do not run auto-refresh on login route
-    if (isLoginRoute) {
+    // Prevent running if not authenticated
+    if (!authState.isAuthenticated) {
+      dispatch({ type: "SET_CONNECTION_STATUS", payload: "disconnected" });
+      dispatch({ type: "RESET_RECONNECT_INFO" });
       return;
-    }
-
-    // Очищаємо попередній інтервал
-    if (dataRefreshIntervalRef.current) {
-      clearInterval(dataRefreshIntervalRef.current);
-      dataRefreshIntervalRef.current = null;
     }
 
     if (
@@ -1718,7 +1674,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       };
 
       // Додаємо невелику затримку щоб дати час сесії встановитися та уникнути race conditions
-      const sessionId = localStorage.getItem("sessionId");
+      const sessionId = authState.sessionId;
       const delay = sessionId ? 500 : 1500; // Менша затримка якщо сесія вже є
       
       setTimeout(() => {
@@ -1748,8 +1704,10 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
 
   // Connect WebSocket when authenticated - покращена логіка
   useEffect(() => {
-    // Guard on login route
-    if (isLoginRoute) {
+    if (!mountedRef.current) return;
+
+    // Якщо неавтентифікований — відключаємо WS та очищаємо стани
+    if (!authState.isAuthenticated) {
       if (socket || isConnectingRef.current) {
         disconnectWebSocket();
       }
@@ -1760,13 +1718,11 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
     lastAuthStateRef.current = authState.isAuthenticated;
 
     if (authState.isAuthenticated && authState.sessionId) {
-      if (authChanged || !socket) {
+      // Підключаємось лише якщо немає активного сокета і не йде підключення
+      if ((authChanged || !socket) && !isConnectingRef.current) {
         connectWebSocket();
       }
-    } else {
-      if (socket || isConnectingRef.current) {
-        disconnectWebSocket();
-      }
+      // Не відключаємо активне з'єднання без причини — це викликало миттєвий 1006
     }
   }, [
     authState.isAuthenticated,
@@ -1786,11 +1742,6 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
   const handleWebSocketAuthError = useCallback(async () => {
     console.warn("🔒 WebSocket authentication failed - logging out");
     
-    // Очищаємо всі токени
-    localStorage.removeItem("sessionId");
-    localStorage.removeItem("accessToken");
-    localStorage.removeItem("refreshToken");
-    
     dispatch({ type: "SET_CONNECTION_STATUS", payload: "error" });
     dispatch({
       type: "SET_WEBSOCKET_ERROR",
@@ -1804,9 +1755,9 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       },
     });
     
-    // Перенаправляємо на логін
-    window.location.href = "/login";
-  }, [dispatch]);
+    // Виконуємо logout; навігацію обробляє роутінг через стан авторизації
+    await logout();
+  }, [dispatch, logout]);
 
   const value: StatusContextType = {
     state,

@@ -14,7 +14,7 @@ import os
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
-from functools import wraps
+from functools import wraps, lru_cache
 from typing import Annotated, Any, Dict, List, Optional
 
 import bcrypt
@@ -23,11 +23,11 @@ import redis
 import structlog
 from fastapi import Depends, HTTPException, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-
-# Видаляємо passlib - використовуємо bcrypt напряму
 from pydantic import BaseModel, Field, field_validator
 
+from config import get_settings
 from core.async_optimization import AsyncOptimizer
+from core.redis_manager import RedisManager
 from core.secrets_manager import get_secrets_manager
 
 logger = structlog.get_logger()
@@ -1203,30 +1203,10 @@ class AuthManager:
         return hmac.compare_digest(signature, expected_signature)
 
 
-# Глобальний екземпляр менеджера - lazy initialization
-_auth_manager = None  # pylint: disable=invalid-name
-
-
+@lru_cache(maxsize=1)
 def get_auth_manager() -> AuthManager:
-    """Get or create the global auth manager instance"""
-    global _auth_manager  # noqa: PLW0603
-    if _auth_manager is None:
-        # Створюємо AuthManager без Redis спочатку
-        _auth_manager = AuthManager(redis_client=None)
-
-        # Спробуємо встановити Redis клієнт пізніше
-        try:
-            from config import get_settings  # pylint: disable=import-outside-toplevel
-
-            settings = get_settings()
-
-            if settings.redis_url:
-                # Redis клієнт буде ініціалізований пізніше через set_redis_client
-                pass
-        except ImportError as e:
-            logger.warning("⚠️ Could not check Redis settings", error=str(e))
-
-    return _auth_manager
+    """Повертає кешований екземпляр AuthManager (lazy init, без глобальних змінних)."""
+    return AuthManager(redis_client=None)
 
 
 async def initialize_auth_manager_redis():
@@ -1235,31 +1215,19 @@ async def initialize_auth_manager_redis():
 
     if auth_mgr.redis_client is None:
         try:
-            from core.redis_manager import (
-                RedisManager,
-            )  # pylint: disable=import-outside-toplevel
-            from config import get_settings  # pylint: disable=import-outside-toplevel
-
             settings = get_settings()
 
             if settings.redis_url:
                 redis_manager = RedisManager(settings)
                 await redis_manager.initialize()
                 auth_mgr.redis_client = redis_manager.redis_client
-        except ImportError as e:
-            logger.warning(
-                "⚠️ Could not initialize Redis client for AuthManager", error=str(e)
-            )
         except (redis.exceptions.RedisError, OSError, ValueError) as e:
             logger.warning(
                 "⚠️ Could not initialize Redis client for AuthManager", error=str(e)
             )
 
 
-# For backward compatibility
-auth_manager = (
-    None  # Will be set by imports that need it  # pylint: disable=invalid-name
-)
+# Примітка: глобальна змінна `auth_manager` видалена. Використовуйте get_auth_manager().
 
 
 # Dependency для FastAPI

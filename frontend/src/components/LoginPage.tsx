@@ -12,13 +12,33 @@ export const LoginPage: React.FC = () => {
   useEffect(() => {
     setIsMounted(true);
   }, []);
+
+  // Якщо вже авторизовані і знаходимося на /login — перенаправляємо на корінь
+  useEffect(() => {
+    if (auth.isAuthenticated && typeof window !== 'undefined' && window.location.pathname === '/login') {
+      try {
+        window.location.replace('/');
+      } catch {
+        window.location.href = '/';
+      }
+    }
+  }, [auth.isAuthenticated]);
+
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
   // Обробка входу з логіном та паролем
   const handleLogin = async () => {
     setLoginAttempts((prev) => prev + 1);
-    await login(username, password);
+    const ok = await login(username, password);
+    if (ok && typeof window !== 'undefined') {
+      // Після успішного логіну виходимо зі шляху /login, щоб розблокувати ініціалізацію StatusProvider/WebSocket
+      try {
+        window.location.replace('/');
+      } catch {
+        window.location.href = '/';
+      }
+    }
   };
 
   // Submit форми

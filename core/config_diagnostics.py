@@ -12,6 +12,15 @@ from typing import Dict, Any, List
 
 
 def _bool(env: str, default: bool = False) -> bool:
+    """Повертає булеве значення з прапора в змінній середовища.
+
+    Args:
+        env: Назва змінної середовища.
+        default: Значення за замовчуванням, якщо змінна відсутня.
+
+    Returns:
+        True, якщо значення схоже на '1/true/yes/on', інакше False.
+    """
     val = os.getenv(env)
     if val is None:
         return default
@@ -25,6 +34,15 @@ def _add(
     message: str,
     remedy: str | None = None,
 ):
+    """Додає запис у список діагностик.
+
+    Args:
+        issues: Мутабельний список, куди додається запис.
+        severity: Рівень серйозності: critical|warning|info.
+        code: Короткий код проблеми.
+        message: Людинозрозумілий опис.
+        remedy: Підказка щодо виправлення або None.
+    """
     issues.append(
         {
             "severity": severity,
@@ -35,13 +53,8 @@ def _add(
     )
 
 
-def run_security_config_diagnostics(settings) -> Dict[str, Any]:
-    env = os.getenv("ENVIRONMENT", "development").lower()
-    prod = env == "production"
-
-    issues: List[Dict[str, Any]] = []
-
-    # JWT / tokens
+def _check_jwt(issues: List[Dict[str, Any]], prod: bool) -> None:
+    """Перевірки JWT/токенів."""
     jwt_alg = os.getenv("JWT_ALGORITHM", "HS256").upper()
     enforce_claims = _bool("ENFORCE_JWT_CLAIMS", prod)
     rotate_refresh = _bool("ROTATE_REFRESH_TOKENS", False)
@@ -94,7 +107,9 @@ def run_security_config_diagnostics(settings) -> Dict[str, Any]:
                 "ROTATE_REFRESH_TOKENS=true",
             )
 
-    # Proxy / client IP
+
+def _check_proxy(issues: List[Dict[str, Any]], prod: bool) -> None:
+    """Перевірки довірених проксі/IP клієнта."""
     trusted = [
         ip.strip() for ip in os.getenv("TRUSTED_PROXY_IPS", "").split(",") if ip.strip()
     ]
@@ -120,14 +135,25 @@ def run_security_config_diagnostics(settings) -> Dict[str, Any]:
                         "Вказати коректні IP-адреси",
                     )
 
-    # CORS/Hosts
+
+def _read_cors_hosts(settings) -> tuple[list[str], list[str]]:
+    """Збирає списки ALLOWED_ORIGINS та ALLOWED_HOSTS."""
     allowed_origins = os.getenv(
         "ALLOWED_ORIGINS", ",".join(settings.allowed_origins or [])
     ).split(",")
     allowed_origins = [o.strip() for o in allowed_origins if o.strip()]
     allowed_hosts = os.getenv("ALLOWED_HOSTS", "").split(",")
     allowed_hosts = [h.strip() for h in allowed_hosts if h.strip()]
+    return allowed_origins, allowed_hosts
 
+
+def _check_cors_hosts(
+    issues: List[Dict[str, Any]],
+    prod: bool,
+    allowed_origins: list[str],
+    allowed_hosts: list[str],
+) -> None:
+    """Перевірки CORS/Hosts."""
     if prod:
         if not allowed_origins:
             _add(
@@ -162,7 +188,9 @@ def run_security_config_diagnostics(settings) -> Dict[str, Any]:
                 "Прибрати wildcard у ALLOWED_HOSTS",
             )
 
-    # Redis (REDIS_ENABLED deprecated; Redis завжди увімкнений, контролюється REDIS_URL)
+
+def _check_redis(issues: List[Dict[str, Any]]) -> None:
+    """Перевірки Redis/TLS (REDIS_ENABLED використовується як тригер)."""
     if os.getenv("REDIS_ENABLED") is not None:
         url = os.getenv("REDIS_URL", "")
         tls_cert_reqs = os.getenv("REDIS_SSL_CERT_REQS", "required").lower()
@@ -197,7 +225,9 @@ def run_security_config_diagnostics(settings) -> Dict[str, Any]:
                 "Використати TLS (rediss://)",
             )
 
-    # Secret provider
+
+def _check_secret_provider(issues: List[Dict[str, Any]], prod: bool) -> None:
+    """Перевірка джерела секретів."""
     secret_provider = os.getenv("SECRET_PROVIDER", "env").lower()
     if prod and secret_provider == "env":
         _add(
@@ -208,7 +238,9 @@ def run_security_config_diagnostics(settings) -> Dict[str, Any]:
             "Використати AWS/Vault секрети",
         )
 
-    # Auth & admin
+
+def _check_auth_admin(issues: List[Dict[str, Any]], prod: bool) -> None:
+    """Перевірка автентифікації та адмін-паролю."""
     require_auth = _bool("REQUIRE_AUTHENTICATION", True)
     if prod and not require_auth:
         _add(
@@ -228,7 +260,9 @@ def run_security_config_diagnostics(settings) -> Dict[str, Any]:
             "Встановити bcrypt-хеш у ADMIN_PASSWORD",
         )
 
-    # Docs/OpenAPI
+
+def _check_docs_endpoints(issues: List[Dict[str, Any]], prod: bool, env: str) -> None:
+    """Перевірка безпечності службових ендпоінтів."""
     enable_sec_endpoints = _bool("ENABLE_SECURITY_ENDPOINTS", env == "development")
     if prod and enable_sec_endpoints:
         _add(
@@ -239,7 +273,9 @@ def run_security_config_diagnostics(settings) -> Dict[str, Any]:
             "Вимкнути ENABLE_SECURITY_ENDPOINTS",
         )
 
-    # HTTPS/HSTS
+
+def _check_https(issues: List[Dict[str, Any]], prod: bool) -> None:
+    """Перевірка форсування HTTPS."""
     force_https = _bool("FORCE_HTTPS", prod)
     if prod and not force_https:
         _add(
@@ -250,7 +286,9 @@ def run_security_config_diagnostics(settings) -> Dict[str, Any]:
             "FORCE_HTTPS=true",
         )
 
-    # Logging
+
+def _check_logging(issues: List[Dict[str, Any]], prod: bool) -> None:
+    """Перевірка рівня логування."""
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
     if prod and log_level == "DEBUG":
         _add(
@@ -261,7 +299,9 @@ def run_security_config_diagnostics(settings) -> Dict[str, Any]:
             "Змінити на INFO або вище",
         )
 
-    # TrustedHost middleware override
+
+def _check_trusted_host_middleware(issues: List[Dict[str, Any]], prod: bool) -> None:
+    """Перевірка TrustedHostMiddleware."""
     if prod and os.getenv("DISABLE_TRUSTED_HOST_MW", "").lower() in (
         "1",
         "true",
@@ -275,7 +315,9 @@ def run_security_config_diagnostics(settings) -> Dict[str, Any]:
             "Прибрати DISABLE_TRUSTED_HOST_MW",
         )
 
-    # WS
+
+def _check_ws(issues: List[Dict[str, Any]], prod: bool) -> None:
+    """Перевірка статичного AUTH_TOKEN для WS."""
     auth_token = os.getenv("AUTH_TOKEN")
     if prod and auth_token:
         _add(
@@ -285,6 +327,34 @@ def run_security_config_diagnostics(settings) -> Dict[str, Any]:
             "Встановлено статичний AUTH_TOKEN для WS (переконайтесь у його мінімальному доступі)",
             "Розглянути перехід на JWT тільки",
         )
+
+
+def run_security_config_diagnostics(settings) -> Dict[str, Any]:
+    """Виконує діагностику налаштувань безпеки.
+
+    Приймає об'єкт `settings` (очікується, що має властивості на кшталт
+    `allowed_origins`, `redis_url` тощо) і повертає словник зі структурованим
+    звітом: список `issues` з полями `severity`, `code`, `message`, `remedy`,
+    а також допоміжні метадані за потреби.
+    """
+    env = os.getenv("ENVIRONMENT", "development").lower()
+    prod = env == "production"
+
+    issues: List[Dict[str, Any]] = []
+
+    # Перевірки
+    _check_jwt(issues, prod)
+    _check_proxy(issues, prod)
+    allowed_origins, allowed_hosts = _read_cors_hosts(settings)
+    _check_cors_hosts(issues, prod, allowed_origins, allowed_hosts)
+    _check_redis(issues)
+    _check_secret_provider(issues, prod)
+    _check_auth_admin(issues, prod)
+    _check_docs_endpoints(issues, prod, env)
+    _check_https(issues, prod)
+    _check_logging(issues, prod)
+    _check_trusted_host_middleware(issues, prod)
+    _check_ws(issues, prod)
 
     status = (
         "ok" if not any(i["severity"] == "critical" for i in issues) else "attention"

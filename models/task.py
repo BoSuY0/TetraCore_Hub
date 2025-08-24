@@ -649,3 +649,15 @@ class TaskQueue(BaseModel):
     def is_empty(self) -> bool:
         """Перевірка чи черга порожня"""
         return len(self.tasks) == 0
+
+    def clear(self) -> int:
+        """Повне очищення черги завдань.
+
+        Очищає як карту `tasks`, так і всі деки в `priority_queues`.
+        Повертає кількість видалених елементів.
+        """
+        cleared = len(self.tasks)
+        self.tasks.clear()
+        for pq in self.priority_queues.values():
+            pq.clear()
+        return cleared

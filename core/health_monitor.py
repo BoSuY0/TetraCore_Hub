@@ -7,8 +7,9 @@ TetraCore StreamHub Health Monitor
 """
 
 import asyncio
+import os
 from datetime import datetime
-from typing import Dict, List, Optional, Callable, Any
+from typing import Dict, List, Optional, Callable, Any, Awaitable
 import structlog
 import psutil
 
@@ -16,7 +17,7 @@ from config import Settings
 from models.client import Client, WorkerStatus
 
 
-class HealthStatus:
+class HealthStatus:  # pylint: disable=too-many-instance-attributes
     """Статус здоров'я компонента"""
 
     def __init__(self, component: str):
@@ -61,7 +62,7 @@ class HealthStatus:
         }
 
 
-class HealthMonitor:
+class HealthMonitor:  # pylint: disable=too-many-instance-attributes
     """Монітор здоров'я StreamHub"""
 
     def __init__(self, settings: Settings, client_manager=None):
@@ -94,10 +95,10 @@ class HealthMonitor:
         }
 
         # Event handlers
-        self.on_component_unhealthy: Optional[Callable] = None
-        self.on_component_recovered: Optional[Callable] = None
-        self.on_system_alert: Optional[Callable] = None
-        self.on_client_unhealthy: Optional[Callable] = None
+        self.on_component_unhealthy: Optional[Callable[..., Awaitable[None]]] = None
+        self.on_component_recovered: Optional[Callable[..., Awaitable[None]]] = None
+        self.on_system_alert: Optional[Callable[..., Awaitable[None]]] = None
+        self.on_client_unhealthy: Optional[Callable[..., Awaitable[None]]] = None
 
         # Стан монітора
         self.is_running = False
@@ -114,6 +115,11 @@ class HealthMonitor:
         self.failed_checks = 0
         self.alerts_sent = 0
 
+        # Інтервал системного моніторингу (fallback, якщо немає в Settings)
+        self.system_health_check_interval = getattr(
+            self.settings, "system_health_check_interval", 60
+        )
+
     async def initialize(self):
         """Ініціалізація монітора"""
         try:
@@ -123,15 +129,15 @@ class HealthMonitor:
             self._initialize_component_statuses()
 
             # Запуск моніторингу
+            self.is_running = True
             self.monitoring_task = asyncio.create_task(self._monitoring_loop())
             self.system_monitor_task = asyncio.create_task(
                 self._system_monitoring_loop()
             )
 
-            self.is_running = True
             self.logger.info("Health Monitor initialized successfully")
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             self.logger.error("Failed to initialize Health Monitor", error=str(e))
             raise
 
@@ -193,7 +199,7 @@ class HealthMonitor:
                         response_time=response_time,
                     )
 
-                    if self.on_component_recovered:
+                    if callable(self.on_component_recovered):
                         await self.on_component_recovered(component)
 
                 status.mark_healthy(
@@ -212,7 +218,7 @@ class HealthMonitor:
                         response_time=response_time,
                     )
 
-                    if self.on_component_unhealthy:
+                    if callable(self.on_component_unhealthy):
                         await self.on_component_unhealthy(component, error_msg)
 
                 status.mark_unhealthy(
@@ -240,7 +246,8 @@ class HealthMonitor:
 
             return result
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            # Annotate broad exception
             self.logger.error(
                 "Error checking component health", component=component, error=str(e)
             )
@@ -251,7 +258,9 @@ class HealthMonitor:
             self.failed_checks += 1
             return False
 
-    async def check_client_health(self, client: Client) -> bool:
+    async def check_client_health(
+        self, client: Client
+    ) -> bool:  # pylint: disable=too-many-return-statements
         """Перевірка здоров'я клієнта"""
         try:
             # Перевірка базового стану
@@ -270,7 +279,7 @@ class HealthMonitor:
                         inactive_time=inactive_time,
                     )
 
-                    if self.on_client_unhealthy:
+                    if callable(self.on_client_unhealthy):
                         await self.on_client_unhealthy(client.info.client_id)
 
                     return False
@@ -306,7 +315,7 @@ class HealthMonitor:
 
             return True
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             self.logger.error(
                 "Error checking client health",
                 client_id=client.info.client_id,
@@ -325,7 +334,7 @@ class HealthMonitor:
 
             return (failed_tasks / total_tasks) * 100
 
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             return 0.0
 
     async def check_system_health(self) -> Dict[str, Any]:
@@ -339,7 +348,6 @@ class HealthMonitor:
             memory_usage = memory.percent
 
             # Диск (Windows-сумісний шлях)
-            import os
 
             disk_path = (
                 os.path.splitdrive(os.getcwd())[0] + os.sep
@@ -350,11 +358,12 @@ class HealthMonitor:
             # Мережа (з обробкою помилок для Windows)
             try:
                 network = psutil.net_io_counters()
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 # Якщо виникає помилка PdhAddEnglishCounterW або інша, використовуємо значення за замовчуванням
                 if "PdhAddEnglishCounterW" in str(e):
                     self.logger.info(
-                        "[health_monitor.py] Performance counters disabled, using default network values",
+                        "[health_monitor.py] Performance counters disabled; "
+                        "using default network values",
                         error=str(e),
                         source="health_monitor.py",
                     )
@@ -407,7 +416,7 @@ class HealthMonitor:
 
             # Відправка сповіщень
             for alert in alerts:
-                if self.on_system_alert:
+                if callable(self.on_system_alert):
                     await self.on_system_alert(alert)
                 self.alerts_sent += 1
 
@@ -417,11 +426,12 @@ class HealthMonitor:
                 "stats": self.system_stats,
             }
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             error_msg = str(e)
             if "PdhAddEnglishCounterW" in error_msg:
                 self.logger.info(
-                    "[health_monitor.py] Performance counters may be disabled. System health check continues with limited metrics.",
+                    "[health_monitor.py] Performance counters may be disabled. "
+                    "System health check continues with limited metrics.",
                     error=error_msg,
                     source="health_monitor.py",
                 )
@@ -430,17 +440,16 @@ class HealthMonitor:
                     "alerts": [],
                     "stats": self.system_stats,
                 }
-            else:
-                self.logger.error(
-                    "[health_monitor.py] Error checking system health",
-                    error=error_msg,
-                    source="health_monitor.py",
-                )
-                return {
-                    "is_healthy": False,
-                    "alerts": [f"System health check failed: {error_msg}"],
-                    "stats": self.system_stats,
-                }
+            self.logger.error(
+                "[health_monitor.py] Error checking system health",
+                error=error_msg,
+                source="health_monitor.py",
+            )
+            return {
+                "is_healthy": False,
+                "alerts": [f"System health check failed: {error_msg}"],
+                "stats": self.system_stats,
+            }
 
     async def get_overall_health(self) -> Dict[str, Any]:
         """Отримання загального стану здоров'я"""
@@ -524,7 +533,7 @@ class HealthMonitor:
                 },
             }
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             self.logger.error("Error getting overall health", error=str(e))
             return {"overall_status": "error", "overall_score": 0, "error": str(e)}
 
@@ -565,31 +574,31 @@ class HealthMonitor:
 
                 if self.client_manager:
                     await self.check_component_health(
-                        "client_manager", lambda: self.client_manager.is_healthy()
+                        "client_manager", self.client_manager.is_healthy
                     )
 
                 # Перевірка WebSocket менеджера
                 if hub and hasattr(hub, "websocket_manager") and hub.websocket_manager:
                     await self.check_component_health(
-                        "websocket_manager", lambda: hub.websocket_manager.is_healthy()
+                        "websocket_manager", hub.websocket_manager.is_healthy
                     )
 
                 # Перевірка Task Router
                 if hub and hasattr(hub, "task_router") and hub.task_router:
                     await self.check_component_health(
-                        "task_router", lambda: hub.task_router.is_healthy()
+                        "task_router", hub.task_router.is_healthy
                     )
 
                 # Перевірка Redis менеджера
                 if hub and hasattr(hub, "redis_manager") and hub.redis_manager:
                     await self.check_component_health(
-                        "redis_manager", lambda: hub.redis_manager.is_healthy()
+                        "redis_manager", hub.redis_manager.is_healthy
                     )
 
                 # Перевірка Metrics Collector
                 if hub and hasattr(hub, "metrics_collector") and hub.metrics_collector:
                     await self.check_component_health(
-                        "metrics_collector", lambda: hub.metrics_collector.is_healthy()
+                        "metrics_collector", hub.metrics_collector.is_healthy
                     )
 
                 # Перевірка клієнтів
@@ -602,7 +611,7 @@ class HealthMonitor:
 
             except asyncio.CancelledError:
                 break
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 self.logger.error("Error in monitoring loop", error=str(e))
                 await asyncio.sleep(10)
 
@@ -612,92 +621,32 @@ class HealthMonitor:
         while self.is_running:
             try:
                 await self.check_system_health()
-                await asyncio.sleep(self.settings.system_health_check_interval)
+                await asyncio.sleep(self.system_health_check_interval)
             except psutil.Error as e:
                 error_msg = str(e)
                 if "PdhAddEnglishCounterW" in error_msg:
                     self.logger.info(
-                        "[health_monitor.py] Performance counters disabled. Using default system health metrics.",
+                        "[health_monitor.py] Performance counters disabled. "
+                        "Using default system health metrics.",
                         error=error_msg,
                         source="health_monitor.py",
                     )
                 else:
                     self.logger.warning(
-                        "[health_monitor.py] Could not collect system health metrics. Performance counters might be disabled on Windows.",
+                        "[health_monitor.py] Could not collect system health metrics. "
+                        "Performance counters might be disabled on Windows.",
                         error=error_msg,
                         source="health_monitor.py",
                     )
                 # Продовжуємо роботу, але з більшою затримкою
-                await asyncio.sleep(self.settings.system_health_check_interval * 5)
+                await asyncio.sleep(self.system_health_check_interval * 5)
+
             except asyncio.CancelledError:
                 break
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 self.logger.error("Error in system monitoring loop", error=str(e))
-                await asyncio.sleep(self.settings.system_health_check_interval)
+                await asyncio.sleep(self.system_health_check_interval)
         self.logger.info("System monitoring loop stopped")
-
-    async def _monitoring_loop(self):
-        """Основний цикл моніторингу компонентів"""
-        while self.is_running:
-            try:
-                # Перевірка компонентів - додаємо посилання на StreamHub
-                hub = getattr(self, "hub", None)
-
-                if self.client_manager:
-                    await self.check_component_health(
-                        "client_manager", lambda: self.client_manager.is_healthy()
-                    )
-
-                # Перевірка WebSocket менеджера
-                if hub and hasattr(hub, "websocket_manager") and hub.websocket_manager:
-                    await self.check_component_health(
-                        "websocket_manager", lambda: hub.websocket_manager.is_healthy()
-                    )
-
-                # Перевірка Task Router
-                if hub and hasattr(hub, "task_router") and hub.task_router:
-                    await self.check_component_health(
-                        "task_router", lambda: hub.task_router.is_healthy()
-                    )
-
-                # Перевірка Redis менеджера
-                if hub and hasattr(hub, "redis_manager") and hub.redis_manager:
-                    await self.check_component_health(
-                        "redis_manager", lambda: hub.redis_manager.is_healthy()
-                    )
-
-                # Перевірка Metrics Collector
-                if hub and hasattr(hub, "metrics_collector") and hub.metrics_collector:
-                    await self.check_component_health(
-                        "metrics_collector", lambda: hub.metrics_collector.is_healthy()
-                    )
-
-                # Перевірка клієнтів
-                if self.client_manager:
-                    clients = self.client_manager.get_all_clients()
-                    for client in clients:
-                        await self.check_client_health(client)
-
-                await asyncio.sleep(30)  # Перевірка кожні 30 секунд
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                self.logger.error("Error in monitoring loop", error=str(e))
-                await asyncio.sleep(10)
-
-    async def _system_monitoring_loop(self):
-        """Цикл моніторингу системи"""
-        while self.is_running:
-            try:
-                await self.check_system_health()
-                await asyncio.sleep(60)  # Перевірка кожну хвилину
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                self.logger.error("Error in system monitoring loop", error=str(e))
-                await asyncio.sleep(30)
 
     def update_threshold(self, metric: str, value: float):
         """Оновлення порогу метрики"""
@@ -720,18 +669,18 @@ class HealthMonitor:
             results = {}
 
             # Перевірка всіх компонентів
-            for component in self.component_statuses.keys():
+            for component in self.component_statuses:
                 try:
                     if component == "client_manager" and self.client_manager:
                         result = await self.check_component_health(
-                            component, lambda: self.client_manager.is_healthy()
+                            component, self.client_manager.is_healthy
                         )
                     else:
                         # Заглушка для інших компонентів
                         result = True
 
                     results[component] = result
-                except Exception as e:
+                except Exception as e:  # pylint: disable=broad-exception-caught
                     results[component] = False
                     self.logger.error(
                         "Error in forced check", component=component, error=str(e)
@@ -747,6 +696,6 @@ class HealthMonitor:
                 "overall": await self.get_overall_health(),
             }
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             self.logger.error("Error in forced health check", error=str(e))
             return {"timestamp": datetime.utcnow().isoformat(), "error": str(e)}

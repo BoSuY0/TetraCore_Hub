@@ -16,11 +16,12 @@ import hmac
 from collections import defaultdict, deque
 import os
 
-from fastapi import WebSocket, Query
+from fastapi import WebSocket, Query, HTTPException
 from fastapi.websockets import WebSocketState
 import structlog
 import redis
-from pydantic import BaseModel, Field, validator
+import jwt
+from pydantic import BaseModel, Field, validator, ValidationError
 
 from core.auth_manager import get_auth_manager, initialize_auth_manager_redis
 
@@ -77,6 +78,8 @@ class WebSocketMessage(BaseModel):
 
 
 class ClientRegistrationMessage(WebSocketMessage):
+    """Повідомлення реєстрації клієнта (WebSocket)."""
+
     type: str = "client_registration"
     data: Dict[str, Any]
 
@@ -92,6 +95,8 @@ class ClientRegistrationMessage(WebSocketMessage):
 
 
 class TaskResultMessage(WebSocketMessage):
+    """Повідомлення з результатом виконання задачі."""
+
     type: str = "task_result"
     data: Dict[str, Any]
 
@@ -111,7 +116,7 @@ class TaskResultMessage(WebSocketMessage):
         try:
             payload = orjson.dumps(v)
             size = len(payload)
-        except Exception:
+        except (orjson.JSONEncodeError, TypeError):
             data_str = json.dumps(v)
             size = len(data_str.encode("utf-8"))
         if size > MAX_MESSAGE_SIZE:
@@ -120,6 +125,8 @@ class TaskResultMessage(WebSocketMessage):
 
 
 class TaskSubmitMessage(WebSocketMessage):
+    """Повідомлення на подання задачі до виконання."""
+
     type: str = "task_submit"
     data: Dict[str, Any]
 
@@ -145,6 +152,8 @@ class TaskSubmitMessage(WebSocketMessage):
 
 
 class SubscriptionMessage(WebSocketMessage):
+    """Повідомлення керування підпискою (subscribe/unsubscribe)."""
+
     type: str
     data: Dict[str, Any]
 
@@ -254,9 +263,9 @@ class WebSocketSecurityManager:
                     try:
                         if str(k).lower() == target:
                             return v
-                    except Exception:
+                    except (ValueError, TypeError, AttributeError):
                         continue
-        except Exception:
+        except (AttributeError, TypeError):
             return default
         return default
 
@@ -292,24 +301,21 @@ class WebSocketSecurityManager:
                 header_token = auth_header_str.strip()
 
         # Перевірка Origin лише для браузерів у продакшні
-        try:
-            if environment.lower() == "production":
-                origin = self._get_header_ci(headers, "origin")
-                ua = (self._get_header_ci(headers, "user-agent") or "").lower()
-                is_browser = bool(origin) and (
-                    "mozilla" in ua
-                    or self._get_header_ci(headers, "sec-fetch-site") is not None
-                )
-                if origin and is_browser:
-                    from config import get_settings
+        if environment.lower() == "production":
+            origin = self._get_header_ci(headers, "origin")
+            ua = (self._get_header_ci(headers, "user-agent") or "").lower()
+            is_browser = bool(origin) and (
+                "mozilla" in ua
+                or self._get_header_ci(headers, "sec-fetch-site") is not None
+            )
+            if origin and is_browser:
+                from config import get_settings
 
-                    allowed = get_settings().allowed_origins or []
-                    if allowed and "*" not in allowed and origin not in allowed:
-                        logger.warning("WebSocket Origin not allowed", origin=origin)
-                        await self._incr_metric("ws_origin_blocked")
-                        return None
-        except Exception:
-            pass
+                allowed = get_settings().allowed_origins or []
+                if allowed and "*" not in allowed and origin not in allowed:
+                    logger.warning("WebSocket Origin not allowed", origin=origin)
+                    await self._incr_metric("ws_origin_blocked")
+                    return None
 
         # У production забороняємо ?token=
         if environment.lower() == "production" and query_token_present:
@@ -399,7 +405,7 @@ class WebSocketSecurityManager:
             if auth_mgr.redis_client is None:
                 try:
                     await initialize_auth_manager_redis()
-                except Exception as e:
+                except (redis.exceptions.RedisError, RuntimeError) as e:
                     logger.warning(
                         "Could not initialize Redis for WebSocket auth", error=str(e)
                     )
@@ -420,7 +426,7 @@ class WebSocketSecurityManager:
                 "session_id": payload.get("session_id"),
             }
 
-        except Exception as e:
+        except (jwt.InvalidTokenError, ValueError, TypeError, HTTPException) as e:
             logger.warning("WebSocket authentication failed", error=str(e))
             return None
 
@@ -513,13 +519,13 @@ class WebSocketSecurityManager:
                     if isinstance(raw_message, (bytes, bytearray))
                     else raw_message.encode("utf-8")
                 )
-            except Exception:
+            except (orjson.JSONDecodeError, TypeError):
                 message_data = json.loads(raw_message)
 
             base = WebSocketMessage(**message_data)
 
-            # Строгі схеми для критичних типів з підтримкою плоского формату для task_submit
             if base.type in ("task_submit",):
+                # Підтримка плоского формату: загортаємо поля у data при потребі
                 if "data" not in message_data or not isinstance(
                     message_data.get("data"), dict
                 ):
@@ -585,7 +591,7 @@ class WebSocketSecurityManager:
         except json.JSONDecodeError:
             await self._send_error(conn_info.websocket, "Invalid JSON")
             return None
-        except Exception as e:
+        except (ValidationError, ValueError, TypeError) as e:
             logger.warning(
                 "Message validation failed", error=str(e), client_id=client_id
             )
@@ -648,7 +654,7 @@ class WebSocketSecurityManager:
         # Обмеження на розсилку у великий канал
         max_broadcast = int(os.getenv("WS_MAX_BROADCAST", "1000"))
         if len(self.connections) > max_broadcast:
-            self.logger.warning(
+            logger.warning(
                 "Broadcast suppressed due to size limit",
                 connections=len(self.connections),
             )

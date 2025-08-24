@@ -1388,9 +1388,6 @@ class StreamHubLauncher:
             frontend_process = await self.start_development_server()
             if frontend_process:
                 self.frontend_process = frontend_process
-                self.logger.info(
-                    "✅ Frontend dev server запущено на http://localhost:3000"
-                )
 
             # Чекаємо завершення backend (він блокує до сигналу)
             try:

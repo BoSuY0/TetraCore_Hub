@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, memo, useCallback } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { useStatus } from "../contexts/StatusContext";
+import { useAuth } from "../contexts/AuthContext";
 import { Client } from "../types/api";
-import { API_BASE_URL, buildUrl } from "../config";
+import { buildUrl } from "../config";
 import "../animations.css";
 import {
   CpuIcon,
@@ -43,30 +44,31 @@ interface WorkerMetricsProps {
 // API функції для отримання реальних даних
 // API_BASE_URL імпортується з config.ts
 
-const fetchHubMetrics = async (): Promise<any> => {
+const fetchHubMetrics = async (
+  sessionId: string | null,
+  onAuthFail: () => Promise<void>,
+): Promise<any> => {
   try {
-    const sessionId = localStorage.getItem('sessionId');
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
     };
-    
+
     if (sessionId) {
       headers.Authorization = `Bearer ${sessionId}`;
     }
-    
+
     const response = await fetch(buildUrl("/api/metrics"), {
       headers,
     });
-    
+
     if (!response.ok) {
       if (response.status === 401) {
-        // Redirect to login on authentication failure
-        window.location.href = '/';
+        await onAuthFail();
         return null;
       }
       throw new Error("Failed to fetch hub metrics");
     }
-    
+
     return await response.json();
   } catch (error) {
     console.error("Error fetching hub metrics:", error);
@@ -76,48 +78,48 @@ const fetchHubMetrics = async (): Promise<any> => {
 
 const fetchClientMetrics = async (
   clientId: string,
+  sessionId: string | null,
+  onAuthFail: () => Promise<void>,
 ): Promise<WorkerMetricsData[]> => {
   try {
-    const sessionId = localStorage.getItem('sessionId');
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
     };
-    
+
     if (sessionId) {
       headers.Authorization = `Bearer ${sessionId}`;
     }
-    
+
     const response = await fetch(
-      `${API_BASE_URL}/api/clients/${clientId}/metrics`,
+      buildUrl(`/api/clients/${clientId}/metrics`),
       {
         headers,
       }
     );
-    
+
     if (!response.ok) {
       if (response.status === 401) {
-        // Redirect to login on authentication failure
-        window.location.href = '/';
+        await onAuthFail();
         return [];
       }
-      
+
       if (response.status === 404) {
         // Клієнт не має метрик - це нормально, не логуємо як помилку
         console.debug(`📊 No metrics available for client ${clientId} (404)`);
         return [];
       }
-      
+
       if (response.status === 429) {
         // Rate limiting - логуємо один раз
         console.warn(`⚠️ Rate limited when fetching metrics for client ${clientId}`);
         return [];
       }
-      
+
       // Тільки для інших помилок логуємо як error
       console.error(`❌ HTTP ${response.status} when fetching metrics for client ${clientId}`);
       return [];
     }
-    
+
     const data = await response.json();
 
     // Перетворюємо дані з API у формат WorkerMetricsData
@@ -146,33 +148,34 @@ const fetchClientMetrics = async (
   }
 };
 
-const fetchRealTimeMetrics = async (): Promise<any> => {
+const fetchRealTimeMetrics = async (
+  sessionId: string | null,
+  onAuthFail: () => Promise<void>,
+): Promise<any> => {
   try {
-    const sessionId = localStorage.getItem('sessionId');
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
     };
-    
+
     if (sessionId) {
       headers.Authorization = `Bearer ${sessionId}`;
     }
-    
+
     const response = await fetch(
-      `${API_BASE_URL}/api/frontend/real-time-metrics`,
+      buildUrl(`/api/frontend/real-time-metrics`),
       {
         headers,
       }
     );
-    
+
     if (!response.ok) {
       if (response.status === 401) {
-        // Redirect to login on authentication failure
-        window.location.href = '/';
+        await onAuthFail();
         return null;
       }
       throw new Error("Failed to fetch real-time metrics");
     }
-    
+
     return await response.json();
   } catch (error) {
     console.error("Error fetching real-time metrics:", error);
@@ -188,6 +191,7 @@ const SystemResourceMonitor: React.FC<{
   const { t } = useI18n();
   const { state } = useStatus();
   const [realTimeData, setRealTimeData] = useState<any>(null);
+  const { auth, logout } = useAuth();
 
   // Отримуємо реальні дані з API
   useEffect(() => {
@@ -195,8 +199,8 @@ const SystemResourceMonitor: React.FC<{
     // підтримуємо тільки одноразове завантаження як стартовий fallback.
     let cancelled = false;
     const primeData = async () => {
-      const hubMetrics = await fetchHubMetrics();
-      const rtMetrics = await fetchRealTimeMetrics();
+      const hubMetrics = await fetchHubMetrics(auth.sessionId, logout);
+      const rtMetrics = await fetchRealTimeMetrics(auth.sessionId, logout);
       if (!cancelled && (hubMetrics || rtMetrics)) {
         setRealTimeData({ hub: hubMetrics, realTime: rtMetrics });
       }
@@ -851,6 +855,7 @@ const WorkerCard: React.FC<{
 
 const WorkerMetrics: React.FC<WorkerMetricsProps> = ({ clients }) => {
   const { t } = useI18n();
+  const { auth, logout } = useAuth();
   const [selectedWorker, setSelectedWorker] = useState<string | null>(null);
   const [metricsData, setMetricsData] = useState<
     Record<string, WorkerMetricsData[]>
@@ -928,7 +933,7 @@ const WorkerMetrics: React.FC<WorkerMetricsProps> = ({ clients }) => {
   const fetchMetricsForClient = useCallback(
     async (clientId: string): Promise<WorkerMetricsData[]> => {
       try {
-        const metrics = await fetchClientMetrics(clientId);
+        const metrics = await fetchClientMetrics(clientId, auth.sessionId, logout);
         if (metrics.length === 0) {
           // Якщо API не повертає дані, логуємо як debug замість warning
           console.debug(`📊 No metrics data available for client ${clientId} - це нормально для деяких типів клієнтів`);
@@ -940,7 +945,7 @@ const WorkerMetrics: React.FC<WorkerMetricsProps> = ({ clients }) => {
         return [];
       }
     },
-    [],
+    [auth.sessionId, logout],
   );
 
   // Ініціалізуємо стан анімацій при зміні selectedWorker

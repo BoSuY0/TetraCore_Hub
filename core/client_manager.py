@@ -9,6 +9,8 @@ import asyncio
 from datetime import datetime
 from typing import Dict, List, Optional, Set, Callable, Any
 from collections import defaultdict
+import os
+import random
 import structlog
 
 from config import Settings
@@ -16,7 +18,7 @@ from models.client import Client, ClientType
 from core.async_optimization import AsyncOptimizer
 
 
-class ClientManager:
+class ClientManager:  # pylint: disable=too-many-instance-attributes
     """Менеджер клієнтів StreamHub"""
 
     def __init__(self, settings: Settings):
@@ -47,17 +49,35 @@ class ClientManager:
         self.is_running = False
         self.cleanup_task: Optional[asyncio.Task] = None
 
+    async def _emit_event(self, handler: Optional[Callable], *args, **kwargs):
+        """Безпечний виклик подій: підтримка sync/async та перевірка callable."""
+        if handler is None:
+            return
+        if not callable(handler):
+            self.logger.warning(
+                "Event handler is set but not callable", handler=str(handler)
+            )
+            return
+        try:
+            result = handler(*args, **kwargs)
+            if asyncio.iscoroutine(result):
+                await result
+        except (RuntimeError, TypeError, ValueError) as e:
+            self.logger.error("Error in event handler", error=str(e))
+
     async def initialize(self):
         """Ініціалізація менеджера клієнтів"""
         try:
             self.logger.info("Initializing ClientManager")
 
-            # Ініціалізація асинхронного оптимізатора
-            await self.async_optimizer.initialize()
+            # Ініціалізація асинхронного оптимізатора (опціонально, якщо метод існує)
+            init_method = getattr(self.async_optimizer, "initialize", None)
+            if callable(init_method):
+                res = init_method()
+                if asyncio.iscoroutine(res):
+                    await res
 
             # Запуск задачі очищення (керується лише змінною DISABLE_BACKGROUND_TASKS)
-            import os
-
             if os.getenv("DISABLE_BACKGROUND_TASKS", "").lower() in (
                 "1",
                 "true",
@@ -71,7 +91,7 @@ class ClientManager:
             self.is_running = True
             self.logger.info("ClientManager initialized successfully")
 
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError) as e:
             self.logger.error("Failed to initialize ClientManager", error=str(e))
             raise
 
@@ -93,11 +113,23 @@ class ClientManager:
         for client in list(self.clients.values()):
             await self.remove_client(client.info.client_id)
 
-        # Зупинка асинхронного оптимізатора
+        # Зупинка асинхронного оптимізатора (опціонально, якщо метод існує)
         if self.async_optimizer:
-            await self.async_optimizer.shutdown()
+            shutdown_method = getattr(self.async_optimizer, "shutdown", None)
+            if callable(shutdown_method):
+                res = shutdown_method()
+                if asyncio.iscoroutine(res):
+                    await res
 
         self.logger.info("ClientManager shutdown complete")
+
+    async def start(self):
+        """Запуск менеджера (аліас для initialize)."""
+        await self.initialize()
+
+    async def stop(self):
+        """Зупинка менеджера (аліас для shutdown)."""
+        await self.shutdown()
 
     async def add_client(self, client: Client) -> bool:
         """Додавання нового клієнта"""
@@ -170,10 +202,6 @@ class ClientManager:
                 clients_of_this_type=len(self.clients_by_type[client.info.client_type]),
             )
 
-            # Event handler
-            if self.on_client_connected:
-                await self.on_client_connected(client)
-
             # Зменшуємо рівень логування для зменшення шуму в продакшн
             self.logger.debug(
                 "Client added successfully",
@@ -184,7 +212,7 @@ class ClientManager:
 
             return True
 
-        except Exception as e:
+        except (AttributeError, KeyError, TypeError, ValueError) as e:
             self.logger.error(
                 "Failed to add client", client_id=client.info.client_id, error=str(e)
             )
@@ -198,8 +226,17 @@ class ClientManager:
 
             client = self.clients[client_id]
 
-            # Відключення WebSocket
-            client.disconnect()
+            # Відключення WebSocket (якщо підтримується)
+            disconnect_method = getattr(client, "disconnect", None)
+            if callable(disconnect_method):
+                try:
+                    disconnect_method()
+                except (OSError, RuntimeError, ConnectionError) as e:
+                    self.logger.debug(
+                        "Client disconnect() failed",
+                        client_id=client_id,
+                        error=str(e),
+                    )
 
             # Видалення з індексів
             self.clients_by_type[client.info.client_type].discard(client_id)
@@ -215,8 +252,7 @@ class ClientManager:
             self.total_disconnections += 1
 
             # Виклик callback
-            if self.on_client_disconnected:
-                await self.on_client_disconnected(client)
+            await self._emit_event(self.on_client_disconnected, client)
 
             # Зменшуємо рівень логування для зменшення шуму в продакшн
             self.logger.debug(
@@ -228,7 +264,7 @@ class ClientManager:
 
             return True
 
-        except Exception as e:
+        except (AttributeError, KeyError, RuntimeError, ValueError) as e:
             self.logger.error(
                 "Failed to remove client", client_id=client_id, error=str(e)
             )
@@ -256,6 +292,7 @@ class ClientManager:
 
         return result
 
+    # pylint: disable=too-many-locals
     def get_available_workers(
         self, task_type: str = None, executor_type: str = None
     ) -> List[Client]:
@@ -269,30 +306,31 @@ class ClientManager:
             None: "executors (all types)",
         }
 
+        desc = executor_desc.get(executor_type, "executors")
         self.logger.info(
-            f"[CLIENT_MANAGER] Looking for available {executor_desc.get(executor_type, 'executors')}",
+            f"[CLIENT_MANAGER] Looking for available {desc}",
             task_type=task_type,
             executor_type=executor_type,
             total_clients=len(self.clients),
         )
 
-        # Визначаємо типи клієнтів на основі executor_type
-        if executor_type == "bot":
-            client_types = [ClientType.BOT]
-        elif executor_type == "worker":
-            client_types = [ClientType.WORKER]
-        elif executor_type == "worker_api":
-            client_types = [ClientType.WORKER_API]
-        elif executor_type == "stream_hub":
-            client_types = [ClientType.STREAM_HUB]
-        else:
-            # За замовчуванням включаємо всі типи виконавців (крім MONITOR та ADMIN)
-            client_types = [
+        # Визначаємо типи клієнтів на основі executor_type (без гілок if/elif)
+        type_map = {
+            "bot": [ClientType.BOT],
+            "worker": [ClientType.WORKER],
+            "worker_api": [ClientType.WORKER_API],
+            "stream_hub": [ClientType.STREAM_HUB],
+        }
+        # За замовчуванням включаємо всі типи виконавців (крім MONITOR та ADMIN)
+        client_types = type_map.get(
+            executor_type,
+            [
                 ClientType.WORKER,
                 ClientType.WORKER_API,
                 ClientType.BOT,
                 ClientType.STREAM_HUB,
-            ]
+            ],
+        )
 
         self.logger.debug(
             "[CLIENT_MANAGER] Client types to search",
@@ -364,6 +402,7 @@ class ClientManager:
 
         return workers
 
+    # pylint: disable=too-many-return-statements
     def get_best_worker(
         self,
         task_type: str = None,
@@ -387,11 +426,13 @@ class ClientManager:
                 "worker_api": "API workers",
                 None: "executors",
             }
+            desc2 = executor_desc.get(executor_type, "executors")
             self.logger.debug(
-                f"[CLIENT_MANAGER] No available {executor_desc.get(executor_type, 'executors')} found",
+                f"[CLIENT_MANAGER] No available {desc2} found",
                 task_type=task_type,
                 executor_type=executor_type,
             )
+
             # Fallback: якщо є хоч один клієнт відповідного типу, повертаємо його
             # навіть якщо capability не збігається
             any_workers = self.get_available_workers(None, executor_type)
@@ -401,6 +442,7 @@ class ClientManager:
                     selected=any_workers[0].info.client_id,
                 )
                 return any_workers[0]
+
             return None
 
         # Фільтрація по вимогам
@@ -438,15 +480,14 @@ class ClientManager:
                     return fallback_workers[0]
 
                 # Fallback 2: Будь-який доступний воркер відповідного типу
-                import random
-
                 all_type_workers = self.get_available_workers(
                     task_type=None, executor_type=executor_type
                 )
                 if all_type_workers:
                     random_worker = random.choice(all_type_workers)
                     self.logger.info(
-                        "[CLIENT_MANAGER] Using random available worker as last resort",
+                        "[CLIENT_MANAGER] Using random available worker "
+                        "as last resort",
                         worker_id=random_worker.info.client_id,
                         executor_type=executor_type,
                     )
@@ -512,12 +553,11 @@ class ClientManager:
             client.info.update_stats(**stats)
 
             # Виклик callback
-            if self.on_client_updated:
-                await self.on_client_updated(client)
+            await self._emit_event(self.on_client_updated, client)
 
             return True
 
-        except Exception as e:
+        except (KeyError, AttributeError, ValueError, TypeError) as e:
             self.logger.error(
                 "Failed to update client stats", client_id=client_id, error=str(e)
             )
@@ -549,12 +589,18 @@ class ClientManager:
                     try:
                         await client.websocket.send_json(message)
                         sent_count += 1
-                    except Exception as e:
+                    except (
+                        OSError,
+                        RuntimeError,
+                        ConnectionError,
+                        asyncio.TimeoutError,
+                    ) as e:
                         self.logger.error(
                             "Failed to send message to client",
                             client_id=client.info.client_id,
                             error=str(e),
                         )
+
                         failed_count += 1
 
             if sent_count or failed_count:
@@ -565,7 +611,7 @@ class ClientManager:
                     target_types=[t.value for t in (client_types or [])],
                 )
 
-        except Exception as e:
+        except (RuntimeError, OSError, ConnectionError, asyncio.TimeoutError) as e:
             self.logger.error("Failed to broadcast message", error=str(e))
 
     def get_stats(self) -> Dict[str, Any]:
@@ -614,10 +660,11 @@ class ClientManager:
 
             except asyncio.CancelledError:
                 break
-            except Exception as e:
+            except (RuntimeError, OSError, asyncio.TimeoutError) as e:
                 self.logger.error("Error in cleanup loop", error=str(e))
                 await asyncio.sleep(10)
 
+    # pylint: disable=too-many-nested-blocks
     async def _cleanup_unhealthy_clients(self):
         """Очищення нездорових клієнтів"""
         try:
@@ -659,17 +706,24 @@ class ClientManager:
                 if client.websocket:
                     try:
                         # Надсилаємо код 1001 (Going Away) з причиною неактивності
-                        await client.websocket.close(
-                            code=1001, reason="Client inactive"
-                        )
+                        close_method = getattr(client.websocket, "close", None)
+                        if callable(close_method):
+                            result = close_method(code=1001, reason="Client inactive")
+                            if asyncio.iscoroutine(result):
+                                await result
                         self.logger.debug(
                             "WebSocket closed for inactive client",
                             client_id=client.info.client_id,
                         )
-                    except Exception as websocket_error:
+                    except (
+                        OSError,
+                        RuntimeError,
+                        ConnectionError,
+                        asyncio.TimeoutError,
+                    ) as websocket_error:
                         # Логуємо помилки закриття WebSocket, але не припиняємо cleanup
                         self.logger.debug(
-                            "Failed to close WebSocket for inactive client",
+                            "WebSocket close failed for inactive client",
                             client_id=client.info.client_id,
                             error=str(websocket_error),
                         )
@@ -677,7 +731,7 @@ class ClientManager:
                 # Видаляємо клієнта з менеджера
                 await self.remove_client(client.info.client_id)
 
-        except Exception as e:
+        except (RuntimeError, OSError, ConnectionError, asyncio.TimeoutError) as e:
             self.logger.error("Error cleaning up unhealthy clients", error=str(e))
 
     def __bool__(self) -> bool:

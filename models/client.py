@@ -122,7 +122,7 @@ class ClientInfo(BaseModel):
     # Базова інформація
     client_id: str
     client_type: ClientType
-    client_name: str
+    client_name: str = "unknown"
     client_version: str = "1.0.0"
 
     # Статус підключення

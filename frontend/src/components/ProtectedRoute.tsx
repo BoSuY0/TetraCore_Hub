@@ -30,11 +30,8 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     );
   }
 
-  // Додаткова перевірка токена в localStorage
-  const sessionId = localStorage.getItem("sessionId");
-
   // Якщо не авторизований або немає токена - показуємо сторінку входу
-  if (!auth.isAuthenticated || !auth.user || !sessionId) {
+  if (!auth.isAuthenticated || !auth.user || !auth.sessionId) {
     return <LoginPage />;
   }
 

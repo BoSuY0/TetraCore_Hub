@@ -13,7 +13,7 @@ from enum import Enum
 import structlog
 import httpx
 
-from models.messages import BaseMessage, MessageType, create_message
+from models.messages import BaseMessage, MessageType, create_message, TaskStatus
 from models.client import Client
 from models.task import Task, TaskPriority, TaskType
 
@@ -72,7 +72,7 @@ class AsyncTaskHandler:
             else:
                 self.stats["direct_tasks"] += 1
 
-        except Exception as e:
+        except (ValueError, TypeError, httpx.HTTPError) as e:
             self.logger.error(
                 "Error handling task submission",
                 client_id=client.info.client_id,
@@ -173,7 +173,7 @@ class AsyncTaskHandler:
             await self._send_error(
                 client, "API_UNAVAILABLE", "Cannot connect to tetra-core-api"
             )
-        except Exception as e:
+        except (httpx.HTTPError, ValueError) as e:
             self.logger.error(
                 "Failed to redirect task to API", task_id=task.task_id, error=str(e)
             )
@@ -209,39 +209,52 @@ class AsyncTaskHandler:
                     f"{self.api_base_url}/api/v1/tasks/{api_task_id}"
                 )
 
-                if response.status_code == 200:
-                    task_result = response.json()
-                    current_status = task_result.get("status")
-
-                    if current_status != last_status:
-                        last_status = current_status
-
-                        # Відправка оновлення статусу клієнту
-                        await self._send_task_status_update(
-                            client, task_id, task_result
-                        )
-
-                        # Якщо завдання завершено
-                        if current_status in ["completed", "failed"]:
-                            if (
-                                current_status == "completed"
-                                and "result" in task_result
-                            ):
-                                await self._send_task_result(
-                                    client, task_id, task_result["result"]
-                                )
-                            break
-
-                elif response.status_code == 404:
-                    # Завдання не знайдено
+                # 404 — немає такого завдання
+                if response.status_code == 404:
                     await self._send_error(
                         client, "TASK_NOT_FOUND", f"Task {api_task_id} not found"
                     )
                     break
 
+                # Не готово — зачекаємо і продовжимо
+                if response.status_code != 200:
+                    await asyncio.sleep(2)
+                    continue
+
+                task_result = response.json()
+                current_status = task_result.get("status")
+
+                # Без змін — чекаємо наступної ітерації
+                if current_status == last_status:
+                    await asyncio.sleep(2)
+                    continue
+
+                last_status = current_status
+
+                # Відправка оновлення статусу клієнту
+                await self._send_task_status_update(client, task_id, task_result)
+
+                # Якщо завдання завершено — відправляємо фінальний результат
+                if current_status in ["completed", "failed"]:
+                    if current_status == "completed" and "result" in task_result:
+                        await self._send_task_result(
+                            client,
+                            task_id,
+                            task_result["result"],
+                            status=TaskStatus.COMPLETED,
+                        )
+                    else:
+                        await self._send_task_result(
+                            client,
+                            task_id,
+                            None,
+                            status=TaskStatus.FAILED,
+                        )
+                    break
+
                 await asyncio.sleep(2)  # Перевірка кожні 2 секунди
 
-            except Exception as e:
+            except (httpx.HTTPError, ValueError) as e:
                 self.logger.error(
                     "Error monitoring API task",
                     task_id=task_id,
@@ -257,10 +270,10 @@ class AsyncTaskHandler:
     ):
         """Відправка підтвердження прийняття задачі"""
         response = create_message(
-            MessageType.TASK_ACCEPTED,
+            MessageType.TASK_RESULT,
             task_id=task.task_id,
-            api_task_id=api_task_id,
-            status="accepted",
+            status=TaskStatus.PENDING,
+            metadata={"api_task_id": api_task_id, "event": "accepted"},
             timestamp=datetime.utcnow().isoformat(),
         )
 
@@ -268,21 +281,50 @@ class AsyncTaskHandler:
 
     async def _send_task_status_update(self, client: Client, task_id: str, task_result):
         """Відправка оновлення статусу задачі"""
+        # Нормалізація статусу з відповіді API
+        status_value = (
+            task_result.get("status")
+            if isinstance(task_result, dict)
+            else getattr(task_result, "status", None)
+        )
+
+        # Конвертація в TaskStatus без довгих тернарних виразів
+        if isinstance(status_value, str):
+            try:
+                status_enum = TaskStatus(status_value)
+            except ValueError:
+                status_enum = TaskStatus.PROCESSING
+        elif isinstance(status_value, TaskStatus):
+            status_enum = status_value
+        else:
+            status_enum = TaskStatus.PROCESSING
+
         response = create_message(
-            MessageType.TASK_STATUS,
+            MessageType.TASK_RESULT,
             task_id=task_id,
-            status=task_result.status.value,
-            progress=getattr(task_result, "progress", None),
+            status=status_enum,
+            metadata=(
+                {"progress": task_result.get("progress")}
+                if isinstance(task_result, dict) and "progress" in task_result
+                else {}
+            ),
             timestamp=datetime.utcnow().isoformat(),
         )
 
         await client.websocket.send_json(response.model_dump(mode="json"))
 
-    async def _send_task_result(self, client: Client, task_id: str, result: Any):
+    async def _send_task_result(
+        self,
+        client: Client,
+        task_id: str,
+        result: Any,
+        status: TaskStatus = TaskStatus.COMPLETED,
+    ):
         """Відправка результату задачі"""
         response = create_message(
             MessageType.TASK_RESULT,
             task_id=task_id,
+            status=status,
             result=result,
             timestamp=datetime.utcnow().isoformat(),
         )

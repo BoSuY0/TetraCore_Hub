@@ -376,6 +376,8 @@ class TaskRouter:
                     priority=task.priority.value,
                     overflow_size=len(self.overflow_queues[task.priority]),
                 )
+                # Додатково персистимо як active (PENDING) із TTL, щоб мати пер-ідентифікований ключ таску
+                await self._persist_task_active(task)
                 # Тригеримо негайне зливання overflow якщо є можливість
                 await self._drain_overflow_for_priority(task.priority, max_per_cycle=1)
                 return True
@@ -431,6 +433,9 @@ class TaskRouter:
 
             # Очищаємо кеш статистики при додаванні нового таску
             await self._invalidate_stats_cache()
+
+            # Зберігаємо як active (стан PENDING) з TTL у Redis
+            await self._persist_task_active(task)
 
             # Спроба призначити завдання негайно
             assigned = await self._try_assign_task(task)
@@ -570,6 +575,9 @@ class TaskRouter:
             # Призначення завдання БЕЗ зміни статусу на PROCESSING (тільки ASSIGNED)
             task.assign_to_worker(worker_id)
 
+            # Оновлюємо збереження в Redis (ASSIGNED)
+            await self._persist_task_active(task)
+
             # Перевірка можливості воркера прийняти завдання
             if not worker.assign_task(task.task_id):
                 self.logger.error(
@@ -678,6 +686,9 @@ class TaskRouter:
             # ТІЛЬКИ ТЕПЕР встановлюємо статус PROCESSING після успішного надсилання
             task.start_execution()
 
+            # Оновлюємо збереження в Redis (PROCESSING)
+            await self._persist_task_active(task)
+
             # Оновлення внутрішніх структур після успішного надсилання
             self.executor_tasks[worker_id].add(task.task_id)
 
@@ -782,6 +793,9 @@ class TaskRouter:
             # Переміщення з активних завдань в історію
             del self.active_tasks[task_id]
             self._add_to_history(task)
+
+            # Оновлюємо Redis: переносимо у history та видаляємо active-ключ
+            await self._move_task_to_history_redis(task)
 
             # Очищаємо кеш статистики при зміні статусу таску
             await self._invalidate_stats_cache()
@@ -955,6 +969,8 @@ class TaskRouter:
             await self._send_result_to_client(task)
             del self.active_tasks[task_id]
             self._add_to_history(task)
+            # Оновлення Redis: переносимо у history
+            await self._move_task_to_history_redis(task)
             await self._invalidate_stats_cache()
             return True
         except Exception as e:
@@ -1110,49 +1126,142 @@ class TaskRouter:
     ) -> bool:
         """Скасування завдання"""
         try:
-            if task_id not in self.active_tasks:
-                # Спроба знайти в чергах
-                for queue in self.task_queues.values():
-                    task = queue.remove_task(task_id)
-                    if task:
-                        task.cancel(reason)
-                        self._add_to_history(task)
-                        self.total_cancelled += 1
-                        return True
-                return False
+            # 1) Якщо завдання у активних – відміняємо, повідомляємо, релізимо воркера
+            if task_id in self.active_tasks:
+                task = self.active_tasks[task_id]
 
-            task = self.active_tasks[task_id]
-
-            # Якщо завдання призначене воркеру, сповістити його
-            if task.context.worker_id and self.client_manager:
-                worker = self.client_manager.get_client(task.context.worker_id)
-                if worker and worker.websocket:
-                    if worker.websocket:
-                        cancel_message = create_message(
-                            MessageType.TASK_CANCEL, task_id=task_id, reason=reason
-                        )
-                        await worker.websocket.send_json(
-                            cancel_message.model_dump(mode="json")
+                # Сповістити призначеного воркера (якщо є)
+                if task.context.worker_id and self.client_manager:
+                    worker = self.client_manager.get_client(task.context.worker_id)
+                    try:
+                        if worker and worker.websocket:
+                            cancel_message = create_message(
+                                MessageType.TASK_CANCEL, task_id=task_id, reason=reason
+                            )
+                            await worker.websocket.send_json(
+                                cancel_message.model_dump(mode="json")
+                            )
+                    except Exception as ws_err:
+                        self.logger.warning(
+                            "Failed to notify worker about cancellation",
+                            task_id=task_id,
+                            worker_id=task.context.worker_id,
+                            error=str(ws_err),
                         )
 
-                # Видалення з завдань воркера
-                self.executor_tasks[task.context.worker_id].discard(task_id)
+                    # Оновлюємо локальні структури по воркеру
+                    try:
+                        self.executor_tasks[task.context.worker_id].discard(task_id)
+                    except Exception:
+                        pass
 
-            # Скасування завдання
-            task.cancel(reason)
+                    # Реліз воркера, щоб синхронізувати лічильники/статистику
+                    try:
+                        if worker:
+                            worker.release_task(task_id)
+                    except Exception as rel_err:
+                        self.logger.warning(
+                            "Failed to release task from worker",
+                            task_id=task_id,
+                            worker_id=task.context.worker_id,
+                            error=str(rel_err),
+                        )
 
-            # Відправка результату клієнту
-            await self._send_result_to_client(task)
+                # Скасування задачі і повідомлення клієнта
+                task.cancel(reason)
+                await self._send_result_to_client(task)
 
-            # Переміщення з активних завдань в історію
-            del self.active_tasks[task_id]
-            self._add_to_history(task)
+                # Переміщення з активних завдань в історію + Redis
+                del self.active_tasks[task_id]
+                self._add_to_history(task)
+                await self._move_task_to_history_redis(task)
 
-            self.total_cancelled += 1
+                # Лічильники/очищення
+                self.total_cancelled += 1
+                try:
+                    self.pending_results.pop(task_id, None)
+                except Exception:
+                    pass
+                await self._invalidate_stats_cache()
 
-            self.logger.info("Task cancelled", task_id=task_id, reason=reason)
+                self.logger.info(
+                    "Task cancelled",
+                    task_id=task_id,
+                    reason=reason,
+                    origin="active",
+                )
+                return True
 
-            return True
+            # 2) Спроба видалити з основних черг
+            for queue in self.task_queues.values():
+                task = queue.remove_task(task_id)
+                if task:
+                    task.cancel(reason)
+                    # Відправляємо результат клієнту (скасування)
+                    await self._send_result_to_client(task)
+                    self._add_to_history(task)
+                    await self._move_task_to_history_redis(task)
+                    self.total_cancelled += 1
+                    try:
+                        self.pending_results.pop(task_id, None)
+                    except Exception:
+                        pass
+                    await self._invalidate_stats_cache()
+                    self.logger.info(
+                        "Task cancelled",
+                        task_id=task_id,
+                        reason=reason,
+                        origin="queue",
+                    )
+                    return True
+
+            # 3) Спроба видалити з overflow у пам'яті
+            removed_from_mem = await self._remove_from_overflow_in_memory(task_id)
+            if removed_from_mem:
+                removed_from_mem.cancel(reason)
+                # Клієнту теж шлемо скасування (може не відправитись, якщо немає client_id)
+                await self._send_result_to_client(removed_from_mem)
+                self._add_to_history(removed_from_mem)
+                await self._move_task_to_history_redis(removed_from_mem)
+                self.total_cancelled += 1
+                try:
+                    self.pending_results.pop(task_id, None)
+                except Exception:
+                    pass
+                await self._invalidate_stats_cache()
+                self.logger.info(
+                    "Task cancelled",
+                    task_id=task_id,
+                    reason=reason,
+                    origin="overflow_memory",
+                )
+                return True
+
+            # 4) Спроба видалити з Redis overflow (list/stream)
+            removed_from_redis = await self._remove_from_redis_overflow(task_id)
+            if removed_from_redis:
+                removed_from_redis.cancel(reason)
+                # Може не мати client_id (ми зберігаємо мінімальне подання у overflow)
+                await self._send_result_to_client(removed_from_redis)
+                self._add_to_history(removed_from_redis)
+                await self._move_task_to_history_redis(removed_from_redis)
+                self.total_cancelled += 1
+                try:
+                    self.pending_results.pop(task_id, None)
+                except Exception:
+                    pass
+                await self._invalidate_stats_cache()
+                self.logger.info(
+                    "Task cancelled",
+                    task_id=task_id,
+                    reason=reason,
+                    origin="overflow_redis",
+                )
+                return True
+
+            # Якщо ніде не знайшли
+            self.logger.info("Task not found for cancellation", task_id=task_id)
+            return False
 
         except Exception as e:
             self.logger.error("Failed to cancel task", task_id=task_id, error=str(e))
@@ -1185,6 +1294,9 @@ class TaskRouter:
                         )
 
                         queue.add_task(task)
+
+                        # Оновлюємо Redis (стан PENDING з рефрешем TTL)
+                        await self._persist_task_active(task)
 
                         # Спроба призначити іншому воркеру
                         await self._try_assign_task(task)
@@ -1335,6 +1447,8 @@ class TaskRouter:
 
             if queue.add_task(task):
                 moved += 1
+                # Зберігаємо у Redis як active (PENDING) з TTL
+                await self._persist_task_active(task)
                 self.logger.debug(
                     "Moved task from overflow to main queue",
                     task_id=task.task_id,
@@ -1345,6 +1459,132 @@ class TaskRouter:
                 overflow.appendleft(task)
                 break
         return moved
+
+    async def _remove_from_overflow_in_memory(self, task_id: str) -> Optional[Task]:
+        """Видаляє задачу з in-memory overflow дея (за всіма пріоритетами) та повертає її.
+
+        Повертає Task, якщо знайдено, інакше None.
+        """
+        try:
+            for priority in [
+                TaskPriority.CRITICAL,
+                TaskPriority.HIGH,
+                TaskPriority.NORMAL,
+                TaskPriority.LOW,
+            ]:
+                dq = self.overflow_queues[priority]
+                found_task = None
+                for _ in range(len(dq)):
+                    t = dq.popleft()
+                    if not found_task and getattr(t, "task_id", None) == task_id:
+                        found_task = t
+                        continue
+                    dq.append(t)
+                if found_task:
+                    self.logger.info(
+                        "Removed task from in-memory overflow",
+                        task_id=task_id,
+                        priority=priority.value,
+                    )
+                    return found_task
+        except Exception as e:
+            self.logger.warning(
+                "Failed to remove task from in-memory overflow",
+                task_id=task_id,
+                error=str(e),
+            )
+        return None
+
+    async def _remove_from_redis_overflow(self, task_id: str) -> Optional[Task]:
+        """Видаляє задачу з Redis overflow (list або stream) і повертає Task, якщо знайдено.
+
+        Зауваження: у Redis overflow зберігається мінімальне подання Task (to_storage),
+        тому клієнтський ідентифікатор може бути недоступним для WS-нотифікації.
+        """
+        try:
+            if not self.redis_client or self.redis_error_handler.should_skip_redis():
+                return None
+
+            # Порядок пріоритетів шукати швидше
+            for priority in [
+                TaskPriority.CRITICAL,
+                TaskPriority.HIGH,
+                TaskPriority.NORMAL,
+                TaskPriority.LOW,
+            ]:
+                if self.use_streams_overflow:
+                    # Stream: проходимо по записах і шукаємо task_id
+                    skey = self.stream_overflow_keys[priority]
+                    try:
+                        entries = await self.redis_client.xrange(
+                            skey, min="-", max="+", count=1000
+                        )
+                        if entries:
+                            for eid, fields in entries:
+                                raw = fields.get("task")
+                                if not raw:
+                                    continue
+                                try:
+                                    data = orjson.loads(raw)
+                                except Exception:
+                                    continue
+                                if data.get("task_id") == task_id:
+                                    try:
+                                        await self.redis_client.xdel(skey, eid)
+                                    except Exception:
+                                        pass
+                                    task = Task.from_storage(data)
+                                    self.logger.info(
+                                        "Removed task from Redis stream overflow",
+                                        task_id=task_id,
+                                        priority=priority.value,
+                                        entry_id=eid,
+                                    )
+                                    return task
+                    except Exception as se:
+                        self.logger.warning(
+                            "Failed to scan Redis stream overflow",
+                            key=skey,
+                            error=str(se),
+                        )
+                else:
+                    # List: LRANGE, шукаємо елемент і LREM за сирим значенням
+                    key = self.redis_overflow_keys[priority]
+                    try:
+                        items = await self.redis_client.lrange(key, 0, -1)
+                        if not items:
+                            continue
+                        for raw in items:
+                            try:
+                                data = orjson.loads(raw)
+                            except Exception:
+                                continue
+                            if data.get("task_id") == task_id:
+                                try:
+                                    # Видаляємо всі входження саме цього сирого значення
+                                    await self.redis_client.lrem(key, 0, raw)
+                                except Exception:
+                                    pass
+                                task = Task.from_storage(data)
+                                self.logger.info(
+                                    "Removed task from Redis list overflow",
+                                    task_id=task_id,
+                                    priority=priority.value,
+                                )
+                                return task
+                    except Exception as le:
+                        self.logger.warning(
+                            "Failed to scan Redis list overflow",
+                            key=key,
+                            error=str(le),
+                        )
+        except Exception as e:
+            self.logger.warning(
+                "Unexpected error during Redis overflow removal",
+                task_id=task_id,
+                error=str(e),
+            )
+        return None
 
     async def _invalidate_stats_cache(self):
         """Очищення кешу статистики при зміні тасків"""
@@ -1368,6 +1608,90 @@ class TaskRouter:
             self.logger.debug("Stats cache invalidated", keys_count=keys_count)
         else:
             self.logger.warning("Failed to invalidate stats cache after retries")
+
+    # --- Redis persistence helpers for tasks with TTL ---
+    def _get_task_ttl(self) -> int:
+        """Обчислити TTL для ключів задач. Мінімум 4 години."""
+        try:
+            default_ttl = int(getattr(self.settings, "redis_default_ttl", 86400) or 0)
+        except Exception:
+            default_ttl = 86400
+        # Мінімум 4 години
+        return max(14400, default_ttl)
+
+    def _redis_key_active(self, task_id: str) -> str:
+        return f"task:active:{task_id}"
+
+    def _redis_key_history(self, task_id: str) -> str:
+        return f"task:history:{task_id}"
+
+    async def _persist_task_active(self, task: Task) -> bool:
+        """Зберегти/оновити активну задачу в Redis із TTL. Без падіння при збоях."""
+        if not self.redis_client or self.redis_error_handler.should_skip_redis():
+            return False
+
+        key = self._redis_key_active(task.task_id)
+        ttl = self._get_task_ttl()
+        data = task.to_storage()
+
+        async def _op():
+            return await self.redis_client.set(key, orjson.dumps(data), ex=ttl)
+
+        res = await self.redis_error_handler.execute_with_retry(_op)
+        if res is None:
+            self.logger.warning(
+                "Failed to persist active task to Redis after retries",
+                task_id=task.task_id,
+            )
+            return False
+        return bool(res)
+
+    async def _persist_task_history(self, task: Task) -> bool:
+        """Зберегти завершену/завершену з помилкою/таймаут/скасовану задачу в Redis history із TTL."""
+        if not self.redis_client or self.redis_error_handler.should_skip_redis():
+            return False
+
+        key = self._redis_key_history(task.task_id)
+        ttl = self._get_task_ttl()
+        data = task.to_storage()
+
+        async def _op():
+            return await self.redis_client.set(key, orjson.dumps(data), ex=ttl)
+
+        res = await self.redis_error_handler.execute_with_retry(_op)
+        if res is None:
+            self.logger.warning(
+                "Failed to persist history task to Redis after retries",
+                task_id=task.task_id,
+            )
+            return False
+        return bool(res)
+
+    async def _delete_task_active_key(self, task_id: str) -> bool:
+        """Видалити active-ключ задачі (коли вона перейшла в history)."""
+        if not self.redis_client or self.redis_error_handler.should_skip_redis():
+            return False
+
+        key = self._redis_key_active(task_id)
+
+        async def _op():
+            return await self.redis_client.delete(key)
+
+        res = await self.redis_error_handler.execute_with_retry(_op)
+        if res is None:
+            self.logger.warning(
+                "Failed to delete active task key from Redis after retries",
+                task_id=task_id,
+            )
+            return False
+        return bool(res)
+
+    async def _move_task_to_history_redis(self, task: Task) -> bool:
+        """Перемістити задачу з active у history в Redis без дублювання ключів."""
+        saved = await self._persist_task_history(task)
+        # Спробуємо видалити active-ключ навіть якщо збереження в history не відбулось
+        await self._delete_task_active_key(task.task_id)
+        return saved
 
     def _add_to_history(self, task: Task):
         """Додавання завершеного завдання до історії"""

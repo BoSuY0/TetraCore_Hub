@@ -110,16 +110,9 @@ export const authenticatedFetch = async (
   url: string,
   options: RequestInit = {},
 ): Promise<Response> => {
-  const sessionId = localStorage.getItem("sessionId");
-
   const defaultHeaders: Record<string, string> = {
     "Content-Type": "application/json",
   };
-
-  // Додаємо Authorization header якщо є валідний токен
-  if (sessionId && sessionId !== "undefined" && sessionId !== "null" && sessionId.length > 10) {
-    defaultHeaders["Authorization"] = `Bearer ${sessionId}`;
-  }
 
   const mergedOptions: RequestInit = {
     ...options,

@@ -5,6 +5,7 @@ Authentication endpoints for TetraCore Hub
 import os
 import json
 import uuid
+import hashlib
 from datetime import datetime
 from typing import Dict, List
 
@@ -13,6 +14,7 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 import structlog
+import redis
 
 # Імпорт нового менеджера автентифікації
 from core.auth_manager import (
@@ -22,35 +24,49 @@ from core.auth_manager import (
     require_role,
     SERVER_BOOT_ID,
     REFRESH_TOKEN_EXPIRE_DAYS,
-)
-from core.secrets_manager import get_secrets_manager
-from core.network_security import rate_limit
-from config import get_settings, get_user_role, get_user_permissions
+)  # pylint: disable=import-error
+from core.secrets_manager import get_secrets_manager  # pylint: disable=import-error
+from core.network_security import rate_limit  # pylint: disable=import-error
+from config import (
+    get_settings,
+    get_user_role,
+    get_user_permissions,
+)  # pylint: disable=import-error
 
 
 # Модель для валідації сесії
 class SessionValidation(BaseModel):
+    """Модель запиту для валідації сесії."""
+
     sessionId: str
 
 
 # Модель для виходу
 class LogoutRequest(BaseModel):
+    """Модель запиту для виходу з системи."""
+
     sessionId: str
 
 
 # Модель для входу з логіном та паролем
 class LoginRequest(BaseModel):
+    """Модель запиту для входу користувача."""
+
     username: str
     password: str
 
 
 # Модель для refresh токена
 class RefreshTokenRequest(BaseModel):
+    """Модель запиту для оновлення токена доступу."""
+
     refresh_token: str
 
 
 # Модель користувача
 class User(BaseModel):
+    """Модель користувача для відповіді API."""
+
     id: str
     username: str
     role: str = "admin"
@@ -108,6 +124,7 @@ auth_router = APIRouter(prefix="/api/auth", tags=["authentication"])
 @auth_router.post("/login")
 async def login(request: Request, credentials: LoginRequest):
     """Авторизація користувача з JWT токенами"""
+    # pylint: disable=too-many-locals
 
     client_ip = get_client_ip(request)
 
@@ -210,15 +227,9 @@ async def login(request: Request, credentials: LoginRequest):
 
         # Побудова fingerprint (IP + UA hash)
         user_agent = request.headers.get("User-Agent", "")
-        fingerprint = None
-        try:
-            import hashlib
-
-            fingerprint = hashlib.sha256(
-                f"{client_ip}|{user_agent}".encode("utf-8")
-            ).hexdigest()
-        except Exception:
-            fingerprint = None
+        fingerprint = hashlib.sha256(
+            f"{client_ip}|{user_agent}".encode("utf-8")
+        ).hexdigest()
 
         user_data = {
             "id": "admin",
@@ -279,15 +290,14 @@ async def login(request: Request, credentials: LoginRequest):
         )
 
         return response
-    else:
-        logger.warning(
-            "Login failed - invalid credentials",
-            username_present=bool(credentials.username),
-            ip=client_ip,
-        )
-        # Застосувати lockout якщо перевищено ліміт
-        await auth_mgr.apply_lockout_if_needed(credentials.username, client_ip)
-        raise HTTPException(status_code=401, detail="Невірний логін або пароль")
+    logger.warning(
+        "Login failed - invalid credentials",
+        username_present=bool(credentials.username),
+        ip=client_ip,
+    )
+    # Застосувати lockout якщо перевищено ліміт
+    await auth_mgr.apply_lockout_if_needed(credentials.username, client_ip)
+    raise HTTPException(status_code=401, detail="Невірний логін або пароль")
 
 
 @auth_router.post("/validate")
@@ -330,7 +340,7 @@ async def validate_token(
         )
         raise HTTPException(
             status_code=500, detail=f"Token validation failed: {str(e)}"
-        )
+        ) from e
 
 
 @auth_router.post("/refresh")
@@ -351,7 +361,8 @@ async def refresh_token(request: Request):
     try:
         token_pair = await get_auth_manager().refresh_access_token(refresh_cookie)
 
-        # Ротація refresh токена може відбутися всередині; оновимо cookie якщо token_pair.refresh_token змінився
+        # Ротація refresh токена може відбутися всередині.
+        # Оновимо cookie, якщо token_pair.refresh_token змінився
         secure_cookie = os.getenv("ENVIRONMENT", "development").lower() == "production"
         response = JSONResponse(
             {
@@ -383,7 +394,7 @@ async def refresh_token(request: Request):
         raise
     except Exception as e:
         logger.error("❌ Token refresh error", error=str(e))
-        raise HTTPException(status_code=401, detail="Could not refresh token")
+        raise HTTPException(status_code=401, detail="Could not refresh token") from e
 
 
 @auth_router.post("/logout")
@@ -416,7 +427,13 @@ async def logout(
                             logger.info(
                                 "Deleted user session", key=key, user_id=user["user_id"]
                             )
-                except Exception as e:
+                except (
+                    json.JSONDecodeError,
+                    ValueError,
+                    TypeError,
+                    KeyError,
+                    redis.exceptions.RedisError,
+                ) as e:
                     logger.error("Error deleting session", key=key, error=str(e))
 
         # Маскуємо session_id у логах
@@ -432,14 +449,14 @@ async def logout(
         response.set_cookie("csrf_token", "", max_age=0, path="/api/auth")
         return response
 
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
         logger.error("Logout error", error=str(e))
         return {"success": True, "message": "Logged out"}  # Завжди успішно
 
 
 @auth_router.get("/sessions")
 @require_permission("auth.manage")
-async def get_active_sessions(user: Dict = Depends(get_current_user)):
+async def get_active_sessions(_user: Dict = Depends(get_current_user)):
     """Отримання списку активних сесій (тільки для адмінів)"""
 
     try:
@@ -459,7 +476,12 @@ async def get_active_sessions(user: Dict = Depends(get_current_user)):
             )
 
         return {"total": len(sessions), "sessions": sessions_info}
-    except Exception as e:
+    except (
+        redis.exceptions.RedisError,
+        ValueError,
+        TypeError,
+        KeyError,
+    ) as e:
         logger.error("Error getting sessions", error=str(e))
         return {"total": 0, "sessions": []}
 
@@ -487,10 +509,8 @@ async def get_permissions(user: Dict = Depends(get_current_user)):
 
 @auth_router.get("/debug")
 @require_role("admin")
-async def debug_auth(user: Dict = Depends(get_current_user)):
+async def debug_auth(_user: Dict = Depends(get_current_user)):
     """Debug endpoint для перевірки авторизації (тільки в development)"""
-    import os
-
     if os.getenv("ENVIRONMENT", "development") != "development":
         raise HTTPException(status_code=404, detail="Not found")
 

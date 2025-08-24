@@ -31,7 +31,7 @@ export interface AuthContextType {
   logout: () => Promise<void>;
   validateSession: () => Promise<boolean>;
   clearError: () => void;
-  refreshToken: () => Promise<boolean>;
+  refreshToken: () => Promise<string | null>;
   refreshAccessToken: () => Promise<string | null>;
 }
 
@@ -50,7 +50,7 @@ const AuthContext = createContext<AuthContextType>({
   logout: async () => {},
   validateSession: async () => false,
   clearError: () => {},
-  refreshToken: async () => false,
+  refreshToken: async () => null,
   refreshAccessToken: async () => null,
 });
 
@@ -94,6 +94,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
             error: null,
             isLoading: false,
           });
+          // No persistent storage: access token живе лише в пам'яті
           return true;
         } else {
           throw new Error(data.message || "Login failed");
@@ -125,9 +126,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   // Функція для очищення всіх даних авторизації
   const clearAuthData = useCallback(() => {
     setAuth(initialAuthState);
-    localStorage.removeItem("sessionId");
-    localStorage.removeItem("accessToken");
-    localStorage.removeItem("refreshToken");
   }, []);
 
   // Функція виходу
@@ -149,6 +147,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           Authorization: `Bearer ${sessionId}`,
         },
         body: JSON.stringify({ sessionId }),
+        credentials: "include", // гарантуємо надсилання httpOnly кукі для видалення на сервері
       });
 
       if (!response.ok) {
@@ -162,27 +161,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       // Очищаємо стан навіть при помилці
       clearAuthData();
     }
-  }, []);
+  }, [auth.sessionId, clearAuthData]);
 
-  // Функція оновлення токена (БЛОКОВАНА для автоматичного виклику)
-  // Залишена тільки для ручного виклику через UI (кнопка "Оновити сесію")
-  const refreshToken = useCallback(async (): Promise<boolean> => {
+  // Функція оновлення токена (використовується при bootstrap і точково при необхідності)
+  // Повертає новий access_token або null
+  const refreshToken = useCallback(async (): Promise<string | null> => {
     const csrf = (document.cookie || "")
       .split(";")
       .map((s) => s.trim())
       .find((c) => c.startsWith("csrf_token="))
       ?.split("=")[1];
-    if (!csrf) return false;
+    if (!csrf) return null;
     try {
       const response = await fetch("/api/auth/refresh", {
         method: "POST",
         headers: { "X-CSRF-Token": csrf },
         credentials: "include",
       });
-      if (!response.ok) return false;
+      if (!response.ok) return null;
       const data = await response.json();
       const newAccess = data?.tokens?.access_token;
-      if (!newAccess) return false;
+      if (!newAccess) return null;
       setAuth((prev) => ({
         ...prev,
         isAuthenticated: true,
@@ -190,9 +189,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         user: prev.user ? { ...prev.user, sessionId: newAccess } : prev.user,
         isLoading: false,
       }));
-      return true;
+      return newAccess;
     } catch (e) {
-      return false;
+      return null;
     }
   }, []);
 
@@ -264,37 +263,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, [auth.sessionId]); // Видаляємо залежність від refreshToken
 
-  // Перевірка сесії при завантаженні (тільки один раз)
+  // Ініціалізація: намагаємось відновити сесію через httpOnly refresh cookie
   useEffect(() => {
-    const checkSession = async () => {
-      // Додаємо невелику затримку щоб уникнути race condition з іншими запитами
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      const sessionId = auth.sessionId;
-      const isLoginPage = window.location.pathname === "/login";
-      
-      if (sessionId) {
-        const isValid = await validateSession();
-        if (!isValid) {
-          // validateSession вже виконало logout, просто перенаправляємо
-          if (!isLoginPage) {
-            logDevWarning("⚠️ Сесія невалідна, перенаправлення на сторінку входу");
-            window.location.href = "/login";
-          }
-        }
+    const bootstrap = async () => {
+      setAuth((prev) => ({ ...prev, isLoading: true }));
+      const newToken = await refreshToken();
+      if (newToken) {
+        await validateSession();
       } else {
-        // Немає токена - очищаємо стан та перенаправляємо
-        if (!isLoginPage) {
-          clearAuthData();
-          window.location.href = "/login";
-        } else {
-          clearAuthData();
-        }
+        setAuth((prev) => ({ ...prev, isLoading: false }));
       }
     };
+    bootstrap();
+  }, []);
 
-    checkSession();
-  }, [auth.sessionId]); // Виконується при зміні сесії
+  // Перевірка сесії при зміні токена (без редиректів; роутінг вирішує ProtectedRoute)
+  useEffect(() => {
+    const verify = async () => {
+      const sessionId = auth.sessionId;
+      if (sessionId) {
+        await validateSession();
+      } else {
+        clearAuthData();
+      }
+    };
+    verify();
+  }, [auth.sessionId]);
 
   // Очищення помилки
   const clearError = useCallback(() => {
@@ -304,8 +298,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   // Функція для оновлення access_token через refresh_token (БЛОКОВАНА)
   // Залишена тільки для ручного виклику через UI
   const refreshAccessToken = async (): Promise<string | null> => {
-    const ok = await refreshToken();
-    return ok ? auth.sessionId : null;
+    const token = await refreshToken();
+    return token;
   };
 
   return (

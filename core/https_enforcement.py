@@ -3,11 +3,12 @@ HTTPS/WSS Enforcement Module for TetraCore Hub
 Примусове використання безпечних протоколів в production
 """
 
-from typing import Optional, Dict, Any, List
+import json
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse, urlunparse
 
-from fastapi import Request, Response, HTTPException, APIRouter, Depends
-from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import JSONResponse, RedirectResponse
 import structlog
 
 from core.auth_manager import get_current_user, require_permission
@@ -27,11 +28,12 @@ EXCLUDED_PATHS = {"/health", "/api/health", "/_health", "/metrics", "/_internal"
 WS_USER_AGENTS = ["websocket", "ws-client", "tetracore-worker"]
 
 
-class HTTPSEnforcer:
+class HTTPSEnforcer:  # pylint: disable=too-many-instance-attributes
     """Клас для примусового використання HTTPS/WSS"""
 
     def __init__(
         self,
+        *,
         enabled: bool = True,
         environment: str = "production",
         redirect_enabled: bool = True,
@@ -41,7 +43,7 @@ class HTTPSEnforcer:
         hsts_preload: bool = False,
         exclude_paths: Optional[List[str]] = None,
         trusted_proxies: Optional[List[str]] = None,
-    ):
+    ):  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self.enabled = enabled and environment == "production"
         self.environment = environment
         self.redirect_enabled = redirect_enabled
@@ -71,12 +73,10 @@ class HTTPSEnforcer:
         cf_visitor = request.headers.get("CF-Visitor")
         if cf_visitor:
             try:
-                import json
-
                 visitor_data = json.loads(cf_visitor)
                 if visitor_data.get("scheme") in SECURE_SCHEMES:
                     return True
-            except Exception:
+            except (json.JSONDecodeError, TypeError, ValueError):
                 pass
 
         # Перевірка схеми URL
@@ -202,18 +202,18 @@ class HTTPSEnforcer:
             )
 
             return RedirectResponse(url=secure_url, status_code=REDIRECT_STATUS_CODE)
-        else:
-            # Якщо redirect вимкнено, блокуємо запит
-            self.stats["blocked_requests"] += 1
-            logger.warning(
-                "Insecure request blocked",
-                path=request.url.path,
-                client=request.client.host if request.client else "unknown",
-            )
-            raise HTTPException(
-                status_code=426,
-                detail="HTTPS required",  # Upgrade Required
-            )
+
+        # Якщо redirect вимкнено, блокуємо запит
+        self.stats["blocked_requests"] += 1
+        logger.warning(
+            "Insecure request blocked",
+            path=request.url.path,
+            client=request.client.host if request.client else "unknown",
+        )
+        raise HTTPException(
+            status_code=426,
+            detail="HTTPS required",  # Upgrade Required
+        )
 
     def add_security_headers(self, response: Response, is_secure: bool):
         """Додавання security headers до відповіді"""
@@ -287,7 +287,6 @@ def configure_https_enforcement(
     app, enabled: Optional[bool] = None, environment: Optional[str] = None, **kwargs
 ):
     """Налаштування HTTPS enforcement для додатка"""
-    global https_enforcer
 
     # Оновлення конфігурації якщо потрібно
     if enabled is not None:
@@ -316,14 +315,14 @@ https_router = APIRouter(prefix="/api/security/https", tags=["security"])
 
 @https_router.get("/stats")
 @require_permission("settings.view")
-async def get_https_stats(user: Dict = Depends(get_current_user)):
+async def get_https_stats(_user: Dict = Depends(get_current_user)):
     """Отримання статистики HTTPS enforcement"""
     return https_enforcer.get_stats()
 
 
 @https_router.post("/reset-stats")
 @require_permission("settings.manage")
-async def reset_https_stats(user: Dict = Depends(get_current_user)):
+async def reset_https_stats(_user: Dict = Depends(get_current_user)):
     """Скидання статистики HTTPS enforcement"""
     https_enforcer.reset_stats()
     return {"message": "Stats reset successfully"}
@@ -331,7 +330,7 @@ async def reset_https_stats(user: Dict = Depends(get_current_user)):
 
 @https_router.get("/config")
 @require_permission("settings.view")
-async def get_https_config(user: Dict = Depends(get_current_user)):
+async def get_https_config(_user: Dict = Depends(get_current_user)):
     """Отримання конфігурації HTTPS enforcement"""
     return {
         "enabled": https_enforcer.enabled,

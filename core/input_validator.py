@@ -3,11 +3,16 @@ Input Validation Module for TetraCore Hub
 Безпечна валідація та санітизація вхідних даних
 """
 
+# Standard library imports
 import re
 import json
 import ipaddress
-from typing import Any, Dict, List, Optional, Union, Callable, TypeVar
+import unicodedata
+import html
+from typing import Any, Dict, List, Optional, Union, Callable, TypeVar, Annotated
 from urllib.parse import urlparse
+
+# Third-party imports
 import bleach
 import structlog
 from pydantic import (
@@ -18,9 +23,10 @@ from pydantic import (
     conint,
     EmailStr,
     ConfigDict,
+    TypeAdapter,
+    ValidationError as PydanticValidationError,
 )
 from pydantic.functional_validators import AfterValidator
-from typing import Annotated
 
 logger = structlog.get_logger()
 
@@ -142,14 +148,13 @@ class InputValidator:
             raise ValidationError("Input must be a string")
 
         # Unicode normalization to prevent bypass attempts
-        import unicodedata
-
         value = unicodedata.normalize("NFKC", value)
 
         # Decode Unicode escapes
         try:
             value = value.encode("utf-8").decode("unicode-escape")
-        except Exception:
+        except UnicodeDecodeError:
+            # Ігноруємо некоректні escape-послідовності
             pass
 
         # Remove null bytes
@@ -165,8 +170,6 @@ class InputValidator:
         if not allow_html:
             # Aggressive HTML sanitization
             # First, decode HTML entities multiple times
-            import html
-
             for _ in range(3):  # Handle triple encoding
                 prev = value
                 value = html.unescape(value)
@@ -337,23 +340,14 @@ class InputValidator:
         """Валідація email"""
         try:
             # Pydantic v2: використовуємо TypeAdapter для валідації EmailStr
-            try:
-                from pydantic import TypeAdapter  # type: ignore
-
-                adapter = TypeAdapter(EmailStr)
-                validated = adapter.validate_python(email)
-                return str(validated).lower()
-            except Exception:
-                # Fallback для можливих сумісностей/версій
-                if (
-                    isinstance(email, str)
-                    and "@" in email
-                    and "." in email.split("@")[-1]
-                ):
-                    return email.lower()
-                raise
-        except Exception:
-            raise ValidationError("Invalid email format", field="email")
+            adapter = TypeAdapter(EmailStr)
+            validated = adapter.validate_python(email)
+            return str(validated).lower()
+        except (PydanticValidationError, TypeError, ValueError) as exc:
+            # Фолбек на просту перевірку, але як ValidationError з причинністю
+            if isinstance(email, str) and "@" in email and "." in email.split("@")[-1]:
+                return email.lower()
+            raise ValidationError("Invalid email format", field="email") from exc
 
     @classmethod
     def validate_url(cls, url: str, allowed_schemes: List[str] = None) -> str:
@@ -376,14 +370,17 @@ class InputValidator:
                     ip = ipaddress.ip_address(parsed.hostname)
                     if ip.is_private or ip.is_loopback:
                         raise ValidationError("Local URLs are not allowed", field="url")
-                except ValueError:
+                except ValueError as exc:
                     # Не IP адреса, перевіряємо домен
                     if parsed.hostname in ["localhost", "127.0.0.1", "0.0.0.0"]:
-                        raise ValidationError("Local URLs are not allowed", field="url")
+                        raise ValidationError(
+                            "Local URLs are not allowed", field="url"
+                        ) from exc
 
             return url
-        except Exception as e:
-            raise ValidationError(f"Invalid URL: {str(e)}", field="url")
+        except ValueError as exc:
+            # urlparse зазвичай не кидає ValueError, але інші перевірки можуть
+            raise ValidationError(f"Invalid URL: {str(exc)}", field="url") from exc
 
     @classmethod
     def validate_ip_address(cls, ip: str, allow_private: bool = False) -> str:
@@ -397,8 +394,8 @@ class InputValidator:
                 )
 
             return str(ip_obj)
-        except ValueError:
-            raise ValidationError("Invalid IP address", field="ip_address")
+        except ValueError as exc:
+            raise ValidationError("Invalid IP address", field="ip_address") from exc
 
     @classmethod
     def validate_file_upload(
@@ -446,8 +443,10 @@ class InputValidator:
         if isinstance(value, str):
             try:
                 value = json.loads(value)
-            except json.JSONDecodeError as e:
-                raise ValidationError(f"Invalid JSON: {str(e)}", field="json")
+            except json.JSONDecodeError as exc:
+                raise ValidationError(
+                    f"Invalid JSON: {str(exc)}", field="json"
+                ) from exc
 
         if not isinstance(value, dict):
             raise ValidationError("JSON must be an object", field="json")
@@ -537,10 +536,12 @@ class PaginationParams(BaseModel):
 
     @property
     def offset(self) -> int:
+        """Обчислює зміщення (offset) для пагінації."""
         return (self.page - 1) * self.per_page
 
     @property
     def limit(self) -> int:
+        """Ліміт елементів на сторінку."""
         return self.per_page
 
 
@@ -557,6 +558,7 @@ class SearchParams(BaseModel):
     @field_validator("filters")
     @classmethod
     def validate_filters(cls, v):
+        """Валідує та нормалізує поле `filters` як коректний JSON-об'єкт."""
         if v:
             return InputValidator.validate_json(v)
         return v
@@ -564,6 +566,7 @@ class SearchParams(BaseModel):
     @field_validator("sort_by")
     @classmethod
     def validate_sort_by(cls, v):
+        """Перевіряє безпечність назви поля сортування (латинські літери/цифри/_)."""
         if v:
             # Дозволяємо тільки безпечні назви полів
             if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", v):
@@ -582,6 +585,7 @@ class FileUploadParams(BaseModel):
 
     @model_validator(mode="after")
     def validate_upload(self):
+        """Перевіряє параметри завантаження файлу через `InputValidator.validate_file_upload`."""
         result = InputValidator.validate_file_upload(
             self.filename, self.content_type, self.size
         )
@@ -593,10 +597,23 @@ class FileUploadParams(BaseModel):
 
 # Декоратор для валідації
 def validate_input(model_class: BaseModel):
-    """Декоратор для автоматичної валідації вхідних даних"""
+    """Декоратор для автоматичної валідації вхідних даних.
+
+    Приймає клас Pydantic-моделі, будує його на базі переданих даних,
+    підміняє `kwargs["data"]` валідованим словником і передає керування
+    до оригінальної асинхронної функції.
+    """
 
     def decorator(func):
+        """Обгортка-декоратор для конкретної функції.
+
+        Очікує, що першим параметром у kwargs буде `data` або він буде
+        переданий позиційно як перший аргумент. У випадку помилки валідації
+        логує попередження та підіймає `ValidationError`.
+        """
+
         async def wrapper(*args, **kwargs):
+            """Асинхронний враппер, що виконує валідацію вхідних даних."""
             # Знаходимо дані для валідації
             data = kwargs.get("data") or (args[0] if args else {})
 
@@ -604,9 +621,14 @@ def validate_input(model_class: BaseModel):
                 # Валідуємо через Pydantic
                 validated = model_class(**data)
                 kwargs["data"] = validated.dict()
-            except ValidationError as e:
-                logger.warning("Input validation failed", errors=e.errors())
-                raise ValidationError(f"Validation failed: {e}")
+            except ValidationError as exc:
+                # Захищене логування: у кастомної помилки може не бути .errors()
+                logger.warning(
+                    "Input validation failed",
+                    error=str(exc),
+                    field=getattr(exc, "field", None),
+                )
+                raise ValidationError(f"Validation failed: {exc}") from exc
 
             return await func(*args, **kwargs)
 

@@ -5,13 +5,18 @@ TetraCore StreamHub Web Dashboard Routes
 Забезпечує HTML інтерфейс та API endpoints для моніторингу.
 """
 
+from typing import Optional
 from datetime import datetime
+
 from fastapi import APIRouter, Request, HTTPException, Query, Depends
 from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 import structlog
-from core.rate_limiter import get_rate_limiter
-from typing import Optional
+
+from core.rate_limiter import get_rate_limiter  # pylint: disable=import-error
+from models.messages import TaskPriority
+from models.task import Task
+from utils.in_memory_logger import get_recent_logs  # pylint: disable=import-error
 
 logger = structlog.get_logger(__name__)
 
@@ -58,7 +63,12 @@ api_router = APIRouter(prefix="/api", tags=["api"])
 frontend_api_router = APIRouter(prefix="/api/frontend", tags=["frontend-api"])
 
 # Простий favicon як bytes (16x16 прозорий PNG)
-SIMPLE_FAVICON = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x10\x00\x00\x00\x10\x08\x06\x00\x00\x00\x1f\xf3\xffa\x00\x00\x00\x19tEXtSoftware\x00Adobe ImageReadyq\xc9e<\x00\x00\x00\x0eIDATx\xdac\xf8\x0f\x00\x00\x01\x00\x01\x00\x00\x00\x00\x00IEND\xaeB`\x82"
+SIMPLE_FAVICON = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x10\x00\x00\x00\x10\x08\x06"
+    b"\x00\x00\x00\x1f\xf3\xffa\x00\x00\x00\x19tEXtSoftware\x00Adobe ImageReadyq"
+    b"\xc9e<\x00\x00\x00\x0eIDATx\xdac\xf8\x0f\x00\x00\x01\x00\x01\x00\x00\x00\x00"
+    b"\x00IEND\xaeB`\x82"
+)
 
 
 # =============================================================================
@@ -80,7 +90,7 @@ async def dashboard_home(request: Request):
         )
     except Exception as e:
         logger.error("Error rendering dashboard", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to render dashboard")
+        raise HTTPException(status_code=500, detail="Failed to render dashboard") from e
 
 
 @dashboard_router.get("/clients", response_class=HTMLResponse)
@@ -97,7 +107,9 @@ async def dashboard_clients(request: Request):
         )
     except Exception as e:
         logger.error("Error rendering clients page", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to render clients page")
+        raise HTTPException(
+            status_code=500, detail="Failed to render clients page"
+        ) from e
 
 
 # =============================================================================
@@ -172,46 +184,26 @@ async def get_frontend_health():
 @frontend_api_router.get("/real-time-metrics")
 async def get_real_time_metrics():
     """Метрики реального часу для frontend (реальні з хабу)"""
-    try:
-        # Імпортуємо тут, щоб уникнути циклічних залежностей при імпорті модуля
-        # Поточний FastAPI app недоступний тут напряму; цей ендпоінт використовується
-        # як standalone. Для реальних даних використовується перевизначення у register_dashboard_routes.
-        # Тож тут залишаємо бековий fallback на випадок прямого виклику без інтеграції.
-        return {
-            "timestamp": datetime.utcnow().isoformat(),
-            "tasks_per_second": 0,
-            "average_latency": 0,
-            "active_connections": 0,
-            "queue_sizes": {
-                "critical": 0,
-                "high": 0,
-                "normal": 0,
-                "low": 0,
-            },
-            "performance_data": {
-                "cpu_usage": 0,
-                "memory_usage": 0,
-                "network_io": 0,
-            },
-        }
-    except Exception:
-        return {
-            "timestamp": datetime.utcnow().isoformat(),
-            "tasks_per_second": 0,
-            "average_latency": 0,
-            "active_connections": 0,
-            "queue_sizes": {
-                "critical": 0,
-                "high": 0,
-                "normal": 0,
-                "low": 0,
-            },
-            "performance_data": {
-                "cpu_usage": 0,
-                "memory_usage": 0,
-                "network_io": 0,
-            },
-        }
+    # Поточний FastAPI app недоступний тут напряму.
+    # Ендпоінт використовується як standalone; реальні дані перевизначаються у register_dashboard_routes.
+    # Тож тут залишаємо бековий fallback на випадок прямого виклику без інтеграції.
+    return {
+        "timestamp": datetime.utcnow().isoformat(),
+        "tasks_per_second": 0,
+        "average_latency": 0,
+        "active_connections": 0,
+        "queue_sizes": {
+            "critical": 0,
+            "high": 0,
+            "normal": 0,
+            "low": 0,
+        },
+        "performance_data": {
+            "cpu_usage": 0,
+            "memory_usage": 0,
+            "network_io": 0,
+        },
+    }
 
 
 @frontend_api_router.get("/system-logs")
@@ -359,7 +351,9 @@ async def export_metrics():
 # =============================================================================
 
 
-def register_dashboard_routes(app, streamhub_instance):
+def register_dashboard_routes(
+    app, streamhub_instance
+):  # pylint: disable=too-many-locals, too-many-statements
     """Реєстрація роутів дашборду з інстансом StreamHub"""
 
     # Видалені зайві логи registration
@@ -368,7 +362,7 @@ def register_dashboard_routes(app, streamhub_instance):
     if streamhub_instance:
         # Реєструємо API ендпоінти з реальними даними
         # Factory for rate limit dependency
-        def get_rate_limiter(limit: int, window: int):
+        def make_rate_limit_dep(limit: int, window: int):
             async def dependency(request: Request):
                 return await rate_limit_dependency(request, limit, window)
 
@@ -376,14 +370,14 @@ def register_dashboard_routes(app, streamhub_instance):
 
         @app.get("/api/health")
         async def get_api_health_with_hub(
-            rate_limit_info: dict = Depends(get_rate_limiter(limit=30, window=60)),
+            _rate_limit_info: dict = Depends(make_rate_limit_dep(limit=30, window=60)),
         ):
             """Health check з реальними даними"""
             return await streamhub_instance.get_health_status()
 
         @app.get("/api/metrics")
         async def get_api_metrics_with_hub(
-            rate_limit_info: dict = Depends(get_rate_limiter(limit=30, window=60)),
+            _rate_limit_info: dict = Depends(make_rate_limit_dep(limit=30, window=60)),
         ):
             """Метрики з реальними даними"""
             return await streamhub_instance.get_system_metrics()
@@ -397,7 +391,7 @@ def register_dashboard_routes(app, streamhub_instance):
             return []
 
         @app.get("/api/tasks")
-        async def get_api_tasks_with_hub(
+        async def get_api_tasks_with_hub(  # pylint: disable=too-many-arguments, too-many-positional-arguments
             page: int = Query(1, ge=1, description="Номер сторінки"),
             limit: int = Query(
                 50, ge=1, le=1000, description="Кількість тасків на сторінку"
@@ -418,7 +412,7 @@ def register_dashboard_routes(app, streamhub_instance):
                 None, description="Пошук за ID завдання або типом", max_length=100
             ),
             worker: str = Query(None, description="Фільтр за worker ID", max_length=50),
-            rate_limit_info: dict = Depends(get_rate_limiter(limit=60, window=60)),
+            _rate_limit_info: dict = Depends(make_rate_limit_dep(limit=60, window=60)),
         ):
             """Завдання з реальними даними з підтримкою пагінації та фільтрації"""
             if streamhub_instance.task_router:
@@ -504,8 +498,7 @@ def register_dashboard_routes(app, streamhub_instance):
                 success = await streamhub_instance.task_router.cancel_task(task_id)
                 if success:
                     return {"success": True, "message": "Task cancelled successfully"}
-                else:
-                    raise HTTPException(status_code=404, detail="Task not found")
+                raise HTTPException(status_code=404, detail="Task not found")
             raise HTTPException(status_code=503, detail="StreamHub not initialized")
 
         @app.post("/api/tasks/{task_id}/retry")
@@ -514,32 +507,33 @@ def register_dashboard_routes(app, streamhub_instance):
             if streamhub_instance.task_router:
                 # Знаходимо таск в активних або завершених
                 task = streamhub_instance.task_router.active_tasks.get(task_id)
+                if not task:
+                    # шукаємо у історії завершених/failed/timeout
+                    task = streamhub_instance.task_router.task_history.get(task_id)
                 if task and task.can_retry():
                     # Створюємо новий таск на основі поточного
-                    new_task_id = await streamhub_instance.task_router.submit_task(
+                    new_task = Task.create(
                         task_type=task.task_type,
-                        task_data=task.data,
+                        data=task.data,
                         priority=task.priority,
-                        client_id=task.context.client_id,
                         timeout=task.timeout,
                         max_retries=task.max_retries,
                         executor_type=task.executor_type,
                         worker_requirements=task.worker_requirements,
                     )
-                    if new_task_id:
+                    # Зберігаємо джерело (клієнт)
+                    new_task.context.client_id = task.context.client_id
+                    success = await streamhub_instance.task_router.submit_task(new_task)
+                    if success:
                         return {
                             "success": True,
-                            "new_task_id": new_task_id,
+                            "new_task_id": new_task.task_id,
                             "message": "Task retry scheduled",
                         }
-                    else:
-                        raise HTTPException(
-                            status_code=500, detail="Failed to retry task"
-                        )
-                else:
-                    raise HTTPException(
-                        status_code=404, detail="Task not found or cannot be retried"
-                    )
+                    raise HTTPException(status_code=500, detail="Failed to retry task")
+                raise HTTPException(
+                    status_code=404, detail="Task not found or cannot be retried"
+                )
             raise HTTPException(status_code=503, detail="StreamHub not initialized")
 
         @app.post("/api/tasks/clear-queue")
@@ -557,12 +551,9 @@ def register_dashboard_routes(app, streamhub_instance):
                         for (
                             queue
                         ) in streamhub_instance.task_router.task_queues.values():
-                            cleared_count += len(queue.tasks)
-                            queue.tasks.clear()
+                            cleared_count += queue.clear()
                     else:
                         # Очищуємо конкретну чергу
-                        from models.task import TaskPriority
-
                         priority_enum = None
                         for p in TaskPriority:
                             if p.value.lower() == priority.lower():
@@ -577,8 +568,7 @@ def register_dashboard_routes(app, streamhub_instance):
                             queue = streamhub_instance.task_router.task_queues[
                                 priority_enum
                             ]
-                            cleared_count = len(queue.tasks)
-                            queue.tasks.clear()
+                            cleared_count = queue.clear()
                         else:
                             raise HTTPException(
                                 status_code=400, detail=f"Invalid priority: {priority}"
@@ -592,11 +582,11 @@ def register_dashboard_routes(app, streamhub_instance):
                 except Exception as e:
                     raise HTTPException(
                         status_code=500, detail=f"Failed to clear queue: {str(e)}"
-                    )
+                    ) from e
             raise HTTPException(status_code=503, detail="StreamHub not initialized")
 
         @app.get("/api/clients/detailed")
-        async def get_detailed_clients_with_hub():
+        async def get_detailed_clients_with_hub():  # pylint: disable=too-many-branches
             """Детальна інформація про клієнтів з реальними даними"""
             if not streamhub_instance.client_manager:
                 return {
@@ -695,21 +685,10 @@ def register_dashboard_routes(app, streamhub_instance):
         @app.get("/api/frontend/system-logs")
         async def get_system_logs_with_hub():
             """Системні логи з реальними даними"""
-            try:
-                from utils.in_memory_logger import get_recent_logs
-
-                logs = get_recent_logs(limit=200)
-                return {
-                    "logs": logs,
-                    "total_count": len(logs),
-                    "timestamp": datetime.utcnow().isoformat(),
-                }
-            except Exception as e:
-                logger.error("Error getting system logs", error=str(e))
-
+            logs = get_recent_logs(limit=200)
             return {
-                "logs": [],
-                "total_count": 0,
+                "logs": logs,
+                "total_count": len(logs),
                 "timestamp": datetime.utcnow().isoformat(),
             }
 
@@ -761,7 +740,7 @@ def register_dashboard_routes(app, streamhub_instance):
                                 include_tasks=False
                             )
                         )
-                except Exception:
+                except Exception:  # pylint: disable=broad-except
                     task_stats = {}
 
                 return {
@@ -789,7 +768,7 @@ def register_dashboard_routes(app, streamhub_instance):
                         ),
                     },
                 }
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-except
                 logger.debug("Failed to build real-time metrics", error=str(e))
                 return {
                     "timestamp": datetime.utcnow().isoformat(),
