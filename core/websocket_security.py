@@ -269,6 +269,92 @@ class WebSocketSecurityManager:
             return default
         return default
 
+    # --------------------- Subprotocol helpers ---------------------
+    def _extract_subprotocols(self, websocket: WebSocket) -> List[str]:
+        """Повертає список запропонованих субпротоколів із scope або заголовка.
+
+        Формати підтримки:
+        - scope["subprotocols"] як список/кортеж рядків
+        - заголовок 'Sec-WebSocket-Protocol' як кома-сепарований список
+        """
+        try:
+            protocols: List[str] = []
+            # 1) З ASGI scope
+            scope = getattr(websocket, "scope", {}) or {}
+            offered = scope.get("subprotocols")
+            if isinstance(offered, (list, tuple)):
+                protocols.extend([str(p) for p in offered if p is not None])
+
+            # 2) Fallback: із заголовка
+            if not protocols:
+                headers = getattr(websocket, "headers", None)
+                proto_hdr = self._get_header_ci(headers, "sec-websocket-protocol")
+                if proto_hdr:
+                    parts = [p.strip() for p in str(proto_hdr).split(",") if p.strip()]
+                    protocols.extend(parts)
+
+            return protocols
+        except Exception:
+            return []
+
+    def _parse_hmac_params_from_subprotocols(
+        self, websocket: WebSocket
+    ) -> Dict[str, str]:
+        """Парсить параметри HMAC із списку субпротоколів.
+
+        Очікувані префікси:
+        - xci-<val> → client_id
+        - xts-<val> → timestamp
+        - xnn-<val> → nonce
+        - xct-<val> → client_type
+        - xcv-<val> → client_version
+        - xsig-<val> → signature
+
+        Також підтримує формат key=value як запасний варіант.
+        """
+        result: Dict[str, str] = {}
+        try:
+            protocols = self._extract_subprotocols(websocket)
+            if not protocols:
+                return result
+
+            mapping = {
+                "xci": "client_id",
+                "xts": "timestamp",
+                "xnn": "nonce",
+                "xct": "client_type",
+                "xcv": "client_version",
+                "xsig": "signature",
+            }
+
+            for raw in protocols:
+                if not raw:
+                    continue
+                s = str(raw).strip()
+                if not s:
+                    continue
+                lower = s.lower()
+
+                # Спроба парсити як key=value
+                if "=" in s:
+                    k, v = s.split("=", 1)
+                    k = k.strip().lower()
+                    v = v.strip()
+                    if k in mapping and v:
+                        result[mapping[k]] = v
+                        continue
+
+                # Спроба парсити як key-<value>
+                for prefix, target in mapping.items():
+                    hyphen = prefix + "-"
+                    if lower.startswith(hyphen) and len(s) > len(hyphen):
+                        result[target] = s[len(hyphen) :]
+                        break
+
+            return result
+        except Exception:
+            return result
+
     async def authenticate_websocket(
         self, websocket: WebSocket, token: Optional[str]
     ) -> Optional[Dict]:
@@ -964,8 +1050,20 @@ class WebSocketSecurityManager:
             client_type = self._get_header_ci(headers, "X-Client-Type") or "service"
             client_version = self._get_header_ci(headers, "X-Client-Version") or "1.0.0"
 
+            # Fallback: якщо деякі або всі X-* відсутні — парсимо з Sec-WebSocket-Protocol
             if not all([client_id, ts_str, nonce, sig]):
-                logger.warning("Missing HMAC handshake headers")
+                sp = self._parse_hmac_params_from_subprotocols(websocket)
+                client_id = client_id or sp.get("client_id")
+                ts_str = ts_str or sp.get("timestamp")
+                nonce = nonce or sp.get("nonce")
+                sig = sig or sp.get("signature")
+                client_type = client_type or sp.get("client_type") or "service"
+                client_version = client_version or sp.get("client_version") or "1.0.0"
+
+            if not all([client_id, ts_str, nonce, sig]):
+                logger.warning(
+                    "Missing HMAC handshake parameters (headers/subprotocol)"
+                )
                 return False
 
             # Перевірка timestamp
@@ -1013,8 +1111,20 @@ class WebSocketSecurityManager:
             client_type = self._get_header_ci(headers, "X-Client-Type") or "service"
             client_version = self._get_header_ci(headers, "X-Client-Version") or "1.0.0"
 
+            # Fallback: якщо деякі або всі X-* відсутні — парсимо з Sec-WebSocket-Protocol
             if not all([client_id, ts_str, nonce, sig]):
-                logger.warning("Missing HMAC handshake headers")
+                sp = self._parse_hmac_params_from_subprotocols(websocket)
+                client_id = client_id or sp.get("client_id")
+                ts_str = ts_str or sp.get("timestamp")
+                nonce = nonce or sp.get("nonce")
+                sig = sig or sp.get("signature")
+                client_type = client_type or sp.get("client_type") or "service"
+                client_version = client_version or sp.get("client_version") or "1.0.0"
+
+            if not all([client_id, ts_str, nonce, sig]):
+                logger.warning(
+                    "Missing HMAC handshake parameters (headers/subprotocol)"
+                )
                 return False
 
             try:
