@@ -355,6 +355,28 @@ class WebSocketSecurityManager:
         except Exception:
             return result
 
+    def _log_hmac_debug(
+        self, source: str, canonical: str, sig: str, expected: str
+    ) -> None:
+        """Діагностичне логування HMAC (за прапорцем WS_HMAC_DEBUG=true).
+
+        Не логує секрет. Показує лише префікси підписів для співставлення.
+        """
+        try:
+            if os.getenv("WS_HMAC_DEBUG", "false").lower() not in ("1", "true", "yes"):
+                return
+            logger.debug(
+                "HMAC debug",
+                source=source,
+                canonical=canonical,
+                sig_len=len(sig or ""),
+                sig_prefix=(sig or "")[:12],
+                expected_prefix=(expected or "")[:12],
+            )
+        except Exception:
+            # Ніколи не ламаємо потік через діагностичне логування
+            pass
+
     async def authenticate_websocket(
         self, websocket: WebSocket, token: Optional[str]
     ) -> Optional[Dict]:
@@ -1043,22 +1065,24 @@ class WebSocketSecurityManager:
     def _validate_hmac_handshake(self, websocket: WebSocket, secret: str) -> bool:
         try:
             headers = getattr(websocket, "headers", None)
-            client_id = self._get_header_ci(headers, "X-Client-Id")
-            ts_str = self._get_header_ci(headers, "X-Timestamp")
-            nonce = self._get_header_ci(headers, "X-Nonce")
-            sig = self._get_header_ci(headers, "X-Signature")
-            client_type = self._get_header_ci(headers, "X-Client-Type") or "service"
-            client_version = self._get_header_ci(headers, "X-Client-Version") or "1.0.0"
+            # Зчитуємо сировинні значення заголовків без дефолтів
+            client_id_hdr = self._get_header_ci(headers, "X-Client-Id")
+            ts_str_hdr = self._get_header_ci(headers, "X-Timestamp")
+            nonce_hdr = self._get_header_ci(headers, "X-Nonce")
+            sig_hdr = self._get_header_ci(headers, "X-Signature")
+            client_type_hdr = self._get_header_ci(headers, "X-Client-Type")
+            client_version_hdr = self._get_header_ci(headers, "X-Client-Version")
 
-            # Fallback: якщо деякі або всі X-* відсутні — парсимо з Sec-WebSocket-Protocol
-            if not all([client_id, ts_str, nonce, sig]):
-                sp = self._parse_hmac_params_from_subprotocols(websocket)
-                client_id = client_id or sp.get("client_id")
-                ts_str = ts_str or sp.get("timestamp")
-                nonce = nonce or sp.get("nonce")
-                sig = sig or sp.get("signature")
-                client_type = client_type or sp.get("client_type") or "service"
-                client_version = client_version or sp.get("client_version") or "1.0.0"
+            # Парсимо параметри з субпротоколу
+            sp = self._parse_hmac_params_from_subprotocols(websocket)
+
+            # Поєднуємо: пріоритет у X-*, далі subprotocol, потім дефолти
+            client_id = client_id_hdr or sp.get("client_id")
+            ts_str = ts_str_hdr or sp.get("timestamp")
+            nonce = nonce_hdr or sp.get("nonce")
+            sig = sig_hdr or sp.get("signature")
+            client_type = client_type_hdr or sp.get("client_type") or "service"
+            client_version = client_version_hdr or sp.get("client_version") or "1.0.0"
 
             if not all([client_id, ts_str, nonce, sig]):
                 logger.warning(
@@ -1089,6 +1113,9 @@ class WebSocketSecurityManager:
                 msg=canonical.encode("utf-8"),
                 digestmod=hashlib.sha256,
             ).hexdigest()
+            # Діагностика
+            source = "headers" if client_id_hdr else "subprotocol"
+            self._log_hmac_debug(source, canonical, sig, expected)
 
             if not hmac.compare_digest(expected, sig):
                 logger.warning("Invalid HMAC signature")
@@ -1104,22 +1131,21 @@ class WebSocketSecurityManager:
     ) -> bool:
         try:
             headers = getattr(websocket, "headers", None)
-            client_id = self._get_header_ci(headers, "X-Client-Id")
-            ts_str = self._get_header_ci(headers, "X-Timestamp")
-            nonce = self._get_header_ci(headers, "X-Nonce")
-            sig = self._get_header_ci(headers, "X-Signature")
-            client_type = self._get_header_ci(headers, "X-Client-Type") or "service"
-            client_version = self._get_header_ci(headers, "X-Client-Version") or "1.0.0"
+            client_id_hdr = self._get_header_ci(headers, "X-Client-Id")
+            ts_str_hdr = self._get_header_ci(headers, "X-Timestamp")
+            nonce_hdr = self._get_header_ci(headers, "X-Nonce")
+            sig_hdr = self._get_header_ci(headers, "X-Signature")
+            client_type_hdr = self._get_header_ci(headers, "X-Client-Type")
+            client_version_hdr = self._get_header_ci(headers, "X-Client-Version")
 
-            # Fallback: якщо деякі або всі X-* відсутні — парсимо з Sec-WebSocket-Protocol
-            if not all([client_id, ts_str, nonce, sig]):
-                sp = self._parse_hmac_params_from_subprotocols(websocket)
-                client_id = client_id or sp.get("client_id")
-                ts_str = ts_str or sp.get("timestamp")
-                nonce = nonce or sp.get("nonce")
-                sig = sig or sp.get("signature")
-                client_type = client_type or sp.get("client_type") or "service"
-                client_version = client_version or sp.get("client_version") or "1.0.0"
+            sp = self._parse_hmac_params_from_subprotocols(websocket)
+
+            client_id = client_id_hdr or sp.get("client_id")
+            ts_str = ts_str_hdr or sp.get("timestamp")
+            nonce = nonce_hdr or sp.get("nonce")
+            sig = sig_hdr or sp.get("signature")
+            client_type = client_type_hdr or sp.get("client_type") or "service"
+            client_version = client_version_hdr or sp.get("client_version") or "1.0.0"
 
             if not all([client_id, ts_str, nonce, sig]):
                 logger.warning(
@@ -1149,6 +1175,8 @@ class WebSocketSecurityManager:
                 msg=canonical.encode("utf-8"),
                 digestmod=hashlib.sha256,
             ).hexdigest()
+            source = "headers" if client_id_hdr else "subprotocol"
+            self._log_hmac_debug(source, canonical, sig, expected)
             if not hmac.compare_digest(expected, sig):
                 logger.warning("Invalid HMAC signature")
                 return False
