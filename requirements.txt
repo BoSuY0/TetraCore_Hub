@@ -57,7 +57,7 @@ orjson>=3.10.0
 msgpack==1.1.1
 
 # Date/time utilities
-python-dateutil==2.8.2
+python-dateutil==2.9.0.post0
 
 # API Testing dependencies (for test_api.py)
 requests>=2.31.0
