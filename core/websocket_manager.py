@@ -411,8 +411,16 @@ class WebSocketManager:
                         error=str(e),
                     )
 
-            if sent_count or failed_count:
-                self.logger.info(
+            # Зменшуємо шум логів: логуємо підсумок розсилки лише при невдачах або в DEBUG
+            if failed_count > 0:
+                self.logger.warning(
+                    "Broadcast had failures",
+                    sent=sent_count,
+                    failed=failed_count,
+                    total_connections=len(self.connections),
+                )
+            else:
+                self.logger.debug(
                     "Broadcast completed",
                     sent=sent_count,
                     failed=failed_count,

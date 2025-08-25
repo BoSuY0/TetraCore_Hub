@@ -354,21 +354,169 @@ def suppress_duplicate_logs_processor(logger, method_name, event_dict):
 class PIIMaskingFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         try:
+            # Маскуємо додаткові аргументи, якщо це dict
             if isinstance(record.args, dict):
                 record.args = mask_event_dict(record.args)  # type: ignore
-            # Best-effort заміна у повідомленні
-            msg = str(record.getMessage())
-            msg = _mask_text_patterns(msg)
-            record.msg = msg
+
+            # Якщо повідомлення є словником (structlog), НЕ перетворюємо в рядок
+            # а маскуємо поля без зміни типу
+            if isinstance(record.msg, dict) or getattr(
+                record, "_from_structlog", False
+            ):
+                try:
+                    record.msg = mask_event_dict(dict(record.msg))  # type: ignore[arg-type]
+                except Exception:
+                    pass
+            else:
+                # Для звичайних рядкових повідомлень безпечно формуємо message,
+                # маскуємо текст і обнуляємо args, щоб уникнути повторної інтерполяції
+                try:
+                    msg = record.getMessage()
+                except Exception:
+                    msg = str(record.msg)
+                msg = _mask_text_patterns(str(msg))
+                record.msg = msg
+                # Ми вже виконали форматування, тож args більше не потрібні
+                record.args = ()
         except Exception:
             pass
+        return True
+
+
+class WebsocketFrameNoiseFilter(logging.Filter):
+    """Видаляє низькорівневі дампи WS-кадрів (>, < TEXT/PING/PONG ... [N bytes]).
+
+    Ми НЕ змінюємо рівень логів, лише відкидаємо повідомлення, що заважають читати логи.
+    """
+
+    _SUBSTRINGS = (
+        "> TEXT ",
+        "< TEXT ",
+        "> BINARY ",
+        "< BINARY ",
+        "> CONTINUATION ",
+        "< CONTINUATION ",
+        "> PING",
+        "< PONG",
+        "> CLOSE",
+        "< CLOSE",
+        '"WebSocket /ws',
+    )
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+            # Жорстка перевірка кадрів та рядків типу "WebSocket /ws"
+            for s in self._SUBSTRINGS:
+                if s in msg:
+                    return False
+
+            # Нормалізований пошук рукопотискання та станів з'єднання
+            mlow = msg.lower()
+            handshake_markers = (
+                "< get /ws",  # вхідний запит WS
+                "> http/1.1 101",  # відповідь switching protocols
+                "> http/1.1 403",  # заборонено (невдале рукопотискання)
+                "> http/1.1 401",
+                "> http/1.1 400",
+                "upgrade: websocket",
+                "connection: upgrade",
+                "sec-websocket-accept:",
+                "sec-websocket-extensions:",
+                "sec-websocket-version:",
+                "sec-websocket-key:",
+                "origin: ",
+                "host: ",
+                "pragma: no-cache",
+                "cache-control: no-cache",
+                "accept-encoding:",
+                "accept-language:",
+                "user-agent:",
+                "cookie: ",
+                "server: uvicorn",
+                " = connection is ",  # стани CONNECTING/OPEN/CLOSING/CLOSED
+                "connection open",
+                "connection closed",
+                "closing tcp connection",
+                "connection rejected (403",
+                "connection rejected (401",
+            )
+
+            for s in handshake_markers:
+                if s in mlow:
+                    return False
+        except Exception:
+            return True
         return True
 
 
 def install_standard_logging_mask():
     try:
         root_logger = logging.getLogger()
-        root_logger.addFilter(PIIMaskingFilter())
+        pii_filter = PIIMaskingFilter()
+        ws_noise_filter = WebsocketFrameNoiseFilter()
+
+        # Додаємо фільтри до root логера
+        root_logger.addFilter(pii_filter)
+        root_logger.addFilter(ws_noise_filter)
+        # Та до всіх його існуючих хендлерів
+        for h in list(root_logger.handlers):
+            try:
+                h.addFilter(pii_filter)
+                h.addFilter(ws_noise_filter)
+            except Exception:
+                pass
+
+        # Цільові логери, де можуть з'являтися дампи WS-кадрів
+        target_logger_names = [
+            "websockets",
+            "websockets.client",
+            "websockets.server",
+            "websockets.protocol",
+            "websockets.legacy",
+            "uvicorn",
+            "uvicorn.error",
+            "uvicorn.access",
+            "uvicorn.protocols",
+            "uvicorn.protocols.websockets",
+            "uvicorn.protocols.websockets.websockets_impl",
+            "uvicorn.asgi",
+        ]
+
+        # Підключаємо фільтри до вказаних логерів і їхніх хендлерів
+        for name in target_logger_names:
+            try:
+                lg = logging.getLogger(name)
+                lg.addFilter(pii_filter)
+                lg.addFilter(ws_noise_filter)
+                for h in list(lg.handlers):
+                    try:
+                        h.addFilter(pii_filter)
+                        h.addFilter(ws_noise_filter)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        # Також підстрахуємося: пройдемося по вже створених логерах у менеджері
+        try:
+            for name, obj in logging.Logger.manager.loggerDict.items():
+                if not isinstance(obj, logging.Logger):
+                    continue
+                if name.startswith(("websockets", "uvicorn")):
+                    try:
+                        obj.addFilter(pii_filter)
+                        obj.addFilter(ws_noise_filter)
+                        for h in list(obj.handlers):
+                            try:
+                                h.addFilter(pii_filter)
+                                h.addFilter(ws_noise_filter)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+        except Exception:
+            pass
     except Exception:
         pass
 

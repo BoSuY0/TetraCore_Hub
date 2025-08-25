@@ -219,6 +219,9 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
   const websocketTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const websocketUpdateTimeoutMs = 30000; // 30 секунд без updates = форсуємо HTTP refresh
 
+  // Тротлінг перевірки токена перед (ре)підключенням WS
+  const lastTokenValidationRef = useRef<number | null>(null);
+
   const maxReconnectAttempts = 5;
   const reconnectDelay = 5000;
   const connectionTimeoutMs = 30000; // Збільшено до 30 секунд
@@ -861,6 +864,42 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       return;
     }
 
+    // Швидка попередня перевірка валідності токена, щоб уникнути 403-лупів
+    try {
+      // Ініціалізуємо ensureTokenValid тут, щоб уникнути порядку оголошень
+      const ensureTokenValid = async (): Promise<boolean> => {
+        const now = Date.now();
+        if (lastTokenValidationRef.current && now - lastTokenValidationRef.current < 15000) {
+          return true;
+        }
+        try {
+          const url = buildUrl("/api/auth/validate");
+          // Використовуємо локальний легкий fetch з Bearer токеном
+          const headers: Record<string, string> = { "Content-Type": "application/json" };
+          if (authState.sessionId) {
+            headers["Authorization"] = `Bearer ${authState.sessionId}`;
+          }
+          const resp = await fetch(url, { method: "POST", headers });
+          lastTokenValidationRef.current = now;
+          if (!resp.ok) {
+            await logout();
+            return false;
+          }
+          return true;
+        } catch {
+          lastTokenValidationRef.current = now;
+          return true;
+        }
+      };
+
+      const tokenOk = await ensureTokenValid();
+      if (!tokenOk) {
+        return;
+      }
+    } catch {
+      // Ігноруємо попередню перевірку при винятках — даємо шанс з'єднанню
+    }
+
     console.log("🔌 Initiating WebSocket connection...");
     isConnectingRef.current = true;
     dispatch({ type: "SET_CONNECTION_STATUS", payload: "connecting" });
@@ -1246,7 +1285,7 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
       }
     };
 
-    ws.onclose = (event) => {
+    ws.onclose = async (event) => {
       isConnectingRef.current = false;
       console.log("🔌 WebSocket closed (onclose):", event.code, event.reason);
 
@@ -1387,24 +1426,30 @@ export const StatusProvider: React.FC<StatusProviderProps> = ({
         (error.isRetryable || isNetworkError || isTemporaryError);
 
       if (shouldReconnect) {
+        // Перед реконнектом повторно швидко валідовуємо токен
+        try {
+          const url = buildUrl("/api/auth/validate");
+          const headers: Record<string, string> = { "Content-Type": "application/json" };
+          if (authState.sessionId) {
+            headers["Authorization"] = `Bearer ${authState.sessionId}`;
+          }
+          const resp = await fetch(url, { method: "POST", headers });
+          if (!resp.ok) {
+            await logout();
+            return;
+          }
+        } catch {
+          // Ігноруємо мережеві помилки
+        }
+        // Повторну локальну валідацію вже виконали вище; додатково нічого не робимо
+
         const nextAttempt = state.reconnectInfo.attempts + 1;
         
-        // ПОКРАЩЕННЯ: Інтелектуальний backoff з особливою обробкою мережевих помилок
-        let delay;
-        if (isNetworkError && error.code === 1006) {
-          // Для code 1006 (мережева помилка) - агресивніший retry
-          delay = Math.min(500 * Math.pow(1.2, state.reconnectInfo.attempts), 5000); // Max 5 seconds
-          console.log("🌐 Network error (1006) detected - using aggressive retry strategy");
-        } else if (isTemporaryError) {
-          // Для тимчасових помилок - швидший retry
-          delay = Math.min(1000 * Math.pow(1.5, state.reconnectInfo.attempts), 10000); // Max 10 seconds
-        } else {
-          // Стандартний exponential backoff
-          delay = Math.min(
-            reconnectDelay * Math.pow(2, state.reconnectInfo.attempts),
-            30000,
-          ); // Max 30 seconds
-        }
+        // Уніфікований backoff без агресивного 1006 для уникнення спаму при 403 handshake
+        let delay = Math.min(
+          reconnectDelay * Math.pow(2, state.reconnectInfo.attempts),
+          30000,
+        ); // Max 30 seconds
 
         console.log(
           `⏰ Scheduling WebSocket reconnection attempt ${nextAttempt}/${state.reconnectInfo.maxAttempts} in ${delay}ms... (${error.type} error, code ${error.code})`,

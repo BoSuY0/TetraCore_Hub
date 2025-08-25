@@ -953,11 +953,17 @@ class StreamHubLauncher:
             pass
 
         # Реєструємо базові fallback-роути для API (health/metrics/clients/tasks)
-        # Це потрібно для тестового середовища, де StreamHub ще не ініціалізований
-        try:
-            register_dashboard_routes(app, streamhub_instance=None)
-        except Exception:
-            pass
+        # ТІЛЬКИ якщо embedded-режим вимкнений. Інакше вони перекриють реальні роути
+        # і фронтенд бачитиме "неактивні" компоненти навіть після запуску хаба.
+        if os.getenv("AUTO_BOOTSTRAP_HUB_FOR_APP", "true").lower() not in (
+            "1",
+            "true",
+            "yes",
+        ):
+            try:
+                register_dashboard_routes(app, streamhub_instance=None)
+            except Exception:
+                pass
 
         # Підключення статичних файлів буде в run_backend після реєстрації API роутів
         # щоб уникнути перехоплення API запитів SPA fallback'ом
@@ -988,6 +994,42 @@ class StreamHubLauncher:
                 app.state.hub = hub
                 # Зберігаємо інстанс, щоб уникнути GC у середовищі embed/тестів
                 self._hub_instance = hub
+
+                # Опційна авто-ініціалізація embedded hub на startup події,
+                # щоб /api/health повертав реальний стан компонентів
+                if os.getenv("AUTO_INIT_EMBEDDED_HUB", "true").lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                ):
+
+                    @app.on_event("startup")
+                    async def _auto_init_embedded_hub():  # type: ignore[misc]
+                        try:
+                            # Якщо вже ініціалізований (або run_backend це робитиме) — пропускаємо
+                            if getattr(self, "_hub_instance", None) and getattr(
+                                self._hub_instance, "is_running", False
+                            ):
+                                return
+                            await hub.initialize()
+                            # Після ініціалізації переконаємось, що роути прив'язані до реального hub
+                            try:
+                                hub.app = app
+                                hub._register_routes()
+                            except Exception:
+                                pass
+                            if hasattr(self, "logger"):
+                                self.logger.info(
+                                    "✅ Embedded StreamHub initialized on startup"
+                                )
+                        except Exception as e:
+                            if hasattr(self, "logger"):
+                                self.logger.warning(
+                                    "Could not auto-initialize embedded StreamHub",
+                                    extra={"error": str(e)},
+                                )
+                            # Не падаємо під час create_app()
+
             except Exception:
                 # Повний хаб буде ініціалізований у run_backend(); ця секція не критична.
                 pass

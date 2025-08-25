@@ -310,14 +310,17 @@ async def validate_token(
 ):
     """Валідація JWT токена"""
 
-    logger.info("🔍 Token validation started", has_credentials=bool(credentials))
+    # Діагностичний лог лише за прапорцем, щоб уникати шуму
+    if os.getenv("LOG_AUTH_EVENTS", "false").lower() in ("1", "true", "yes"):
+        logger.info("🔍 Token validation started", has_credentials=bool(credentials))
 
     try:
         logger.debug("📋 Credentials received")
 
         user_data = await get_current_user(credentials)
 
-        logger.info("✅ Token validated successfully")
+        if os.getenv("LOG_AUTH_EVENTS", "false").lower() in ("1", "true", "yes"):
+            logger.info("✅ Token validated successfully")
 
         return {"valid": True, "user": user_data}
 
@@ -411,11 +414,19 @@ async def logout(
     try:
         auth_mgr = get_auth_manager()
 
-        # Відкликаємо токен
-        await auth_mgr.revoke_token(credentials.credentials)
+        # Відкликаємо токен (синхронний виклик, виконує асинхронну частину у фоні за потреби)
+        auth_mgr.revoke_token(credentials.credentials)
 
-        # Видаляємо поточну сесію
-        await auth_mgr.logout(user["session_id"])
+        # Видаляємо поточну сесію. Якщо Redis-клієнт асинхронний і цикл подій вже запущений,
+        # метод поверне asyncio.Task — дочекаємось його завершення без падіння, інакше ігноруємо
+        logout_result = auth_mgr.logout(user["session_id"])
+        try:
+            import asyncio
+
+            if isinstance(logout_result, asyncio.Task):
+                await logout_result
+        except Exception:
+            pass
 
         # Додатково очищаємо всі можливі сесії користувача
         if auth_mgr.redis_client:

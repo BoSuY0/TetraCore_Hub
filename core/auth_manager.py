@@ -396,12 +396,15 @@ class AuthManager:
                 server_boot_id=self.server_boot_id[:8] + "...",
             )
 
-        logger.info(
-            "Token pair created",
-            user_id=token_data.get("user_id"),
-            session_id=session_id[:8] + "...",
-            server_boot_id=self.server_boot_id[:8] + "...",
-        )
+        # Лог створення токенів показуємо лише при важливих змінах сеансу,
+        # або коли активований явний діагностичний режим
+        if os.getenv("LOG_AUTH_EVENTS", "false").lower() in ("1", "true", "yes"):
+            logger.info(
+                "Token pair created",
+                user_id=token_data.get("user_id"),
+                session_id=session_id[:8] + "...",
+                server_boot_id=self.server_boot_id[:8] + "...",
+            )
 
         return TokenPair(access_token=access_token, refresh_token=refresh_token)
 
@@ -411,11 +414,13 @@ class AuthManager:
         """Декодування та валідація JWT токена"""
         # Мінімальне діагностичне логування без виводу токена/секретів (придушено у проді)
         if os.getenv("ENVIRONMENT", "development").lower() != "production":
-            logger.info(
-                "🔓 decode_token called",
-                token_type=token_type,
-                token_present=bool(token),
-            )
+            # Детальний виклик decode_token логувати лише за умови LOG_AUTH_EVENTS
+            if os.getenv("LOG_AUTH_EVENTS", "false").lower() in ("1", "true", "yes"):
+                logger.info(
+                    "🔓 decode_token called",
+                    token_type=token_type,
+                    token_present=bool(token),
+                )
 
         try:
             # Перевірка базового формату JWT (має бути 3 частини розділені крапками)
@@ -446,9 +451,10 @@ class AuthManager:
                 decode_kwargs["issuer"] = self.jwt_issuer
 
             payload = jwt.decode(token, secret, **decode_kwargs)
-            logger.info(
-                "✅ JWT decoded successfully", payload_keys=list(payload.keys())
-            )
+            if os.getenv("LOG_AUTH_EVENTS", "false").lower() in ("1", "true", "yes"):
+                logger.info(
+                    "✅ JWT decoded successfully", payload_keys=list(payload.keys())
+                )
 
             # Перевірка типу токена
             if payload.get("token_type") != token_type:
@@ -548,7 +554,13 @@ class AuthManager:
                             logger.debug(
                                 "Session activity update skipped", error=str(_e)
                             )
-                        logger.info("✅ Redis session validated and updated")
+                        # Уникаємо шуму: інформативний лог лише при явному діагностичному режимі
+                        if os.getenv("LOG_AUTH_EVENTS", "false").lower() in (
+                            "1",
+                            "true",
+                            "yes",
+                        ):
+                            logger.info("✅ Redis session validated and updated")
                 except redis.exceptions.RedisError as redis_error:
                     if STRICT_SESSION_VALIDATION:
                         logger.warning(
@@ -563,9 +575,10 @@ class AuthManager:
                         error=str(redis_error),
                     )
 
-            logger.info(
-                "✅ Token validation successful", user_id=payload.get("user_id")
-            )
+            if os.getenv("LOG_AUTH_EVENTS", "false").lower() in ("1", "true", "yes"):
+                logger.info(
+                    "✅ Token validation successful", user_id=payload.get("user_id")
+                )
             return payload
 
         except jwt.ExpiredSignatureError as exc:

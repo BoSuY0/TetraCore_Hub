@@ -137,23 +137,26 @@ class ClientManager:  # pylint: disable=too-many-instance-attributes
             client_id = client.info.client_id
             client_type = client.info.client_type
 
-            self.logger.info(
-                "[CLIENT_MANAGER] Registering new client",
-                client_id=client_id,
-                client_type=client_type.value,
-                client_name=client.info.client_name,
-                capabilities=(
-                    client.info.capabilities.supported_task_types
-                    if client.info.capabilities
-                    else None
-                ),
-                max_concurrent_tasks=(
-                    client.info.capabilities.max_concurrent_tasks
-                    if client.info.capabilities
-                    else None
-                ),
-                current_count=len(self.clients),
-            )
+            # Лог реєстрації: лише для перших клієнтів або при різкій зміні кількості
+            _count_before = len(self.clients)
+            if _count_before < 3 or _count_before % 10 == 0:
+                self.logger.info(
+                    "[CLIENT_MANAGER] Registering new client",
+                    client_id=client_id,
+                    client_type=client_type.value,
+                    client_name=client.info.client_name,
+                    capabilities=(
+                        client.info.capabilities.supported_task_types
+                        if client.info.capabilities
+                        else None
+                    ),
+                    max_concurrent_tasks=(
+                        client.info.capabilities.max_concurrent_tasks
+                        if client.info.capabilities
+                        else None
+                    ),
+                    current_count=_count_before,
+                )
 
             # Перевірка ліміту підключень
             if len(self.clients) >= self.settings.max_connections:
@@ -181,26 +184,31 @@ class ClientManager:  # pylint: disable=too-many-instance-attributes
             # Статистика
             self.total_connections += 1
 
-            self.logger.info(
-                "Client added successfully",
-                client_id=client_id,
-                client_type=client.info.client_type,
-                total_clients=len(self.clients),
-                clients_by_type={
-                    k.value: len(v) for k, v in self.clients_by_type.items()
-                },
-            )
+            # Підсумок додавання: інформуємо лише при суттєвій зміні лічильника
+            _count_after = len(self.clients)
+            if _count_after <= 3 or _count_after % 10 == 0:
+                self.logger.info(
+                    "Client added successfully",
+                    client_id=client_id,
+                    client_type=client.info.client_type,
+                    total_clients=_count_after,
+                    clients_by_type={
+                        k.value: len(v) for k, v in self.clients_by_type.items()
+                    },
+                )
             self.peak_connections = max(self.peak_connections, len(self.clients))
 
-            # Логування успішного додавання
-            self.logger.info(
-                "✅ Client added to manager",
-                client_id=client_id,
-                client_type=client.info.client_type.value,
-                client_name=client.info.client_name,
-                total_clients=len(self.clients),
-                clients_of_this_type=len(self.clients_by_type[client.info.client_type]),
-            )
+            # Логування “✅ Client added to manager” тільки коли n-кратні або перші підключення
+            clients_of_type = len(self.clients_by_type[client.info.client_type])
+            if clients_of_type == 1 or clients_of_type % 5 == 0:
+                self.logger.info(
+                    "✅ Client added to manager",
+                    client_id=client_id,
+                    client_type=client.info.client_type.value,
+                    client_name=client.info.client_name,
+                    total_clients=_count_after,
+                    clients_of_this_type=clients_of_type,
+                )
 
             # Зменшуємо рівень логування для зменшення шуму в продакшн
             self.logger.debug(
@@ -603,8 +611,16 @@ class ClientManager:  # pylint: disable=too-many-instance-attributes
 
                         failed_count += 1
 
-            if sent_count or failed_count:
-                self.logger.info(
+            # Лог підсумку розсилки виводимо лише якщо були невдачі або якщо надсилали > 0
+            if failed_count > 0:
+                self.logger.warning(
+                    "Broadcast had failures",
+                    sent=sent_count,
+                    failed=failed_count,
+                    target_types=[t.value for t in (client_types or [])],
+                )
+            elif sent_count > 0:
+                self.logger.debug(
                     "Broadcast completed",
                     sent=sent_count,
                     failed=failed_count,

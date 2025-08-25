@@ -437,11 +437,13 @@ class WebSocketSecurityManager:
 
             payload = await auth_mgr.decode_token(token)
 
-            logger.info(
-                "WebSocket authentication successful with JWT token",
-                user_id=payload.get("user_id"),
-                username=payload.get("username"),
-            )
+            # Не спамимо на кожне підключення: лог тільки за прапорцем або для перших підключень
+            if os.getenv("LOG_WS_AUTH", "false").lower() in ("1", "true", "yes"):
+                logger.info(
+                    "WebSocket authentication successful with JWT token",
+                    user_id=payload.get("user_id"),
+                    username=payload.get("username"),
+                )
 
             return {
                 "user_id": payload.get("user_id"),
@@ -452,6 +454,8 @@ class WebSocketSecurityManager:
             }
 
         except (jwt.InvalidTokenError, ValueError, TypeError, HTTPException) as e:
+            # Уникаємо дублювання логів: детальну причину логуємо тут,
+            # у виклику зверху (hub) логуємо тільки короткий контекст без повтору помилки
             logger.warning("WebSocket authentication failed", error=str(e))
             return None
 
@@ -474,12 +478,24 @@ class WebSocketSecurityManager:
             await self._send_error(websocket, "Too many connections")
             return None
 
-        logger.info(
-            "WebSocket connection limit check passed",
-            user_id=user_id,
-            current_connections=current_connections,
-            max_connections=MAX_CONNECTIONS_PER_USER,
+        # Лог успішної перевірки ліміту виводимо не частіше ніж раз на хвилину для кожного користувача
+        _now = int(time.time())
+        throttle_key = f"limit_ok:{user_id}"
+        last = (
+            getattr(self, "_throttle_log_ts", {}).get(throttle_key)
+            if hasattr(self, "_throttle_log_ts")
+            else None
         )
+        if not hasattr(self, "_throttle_log_ts"):
+            self._throttle_log_ts = {}
+        if last is None or _now - last >= 60:
+            logger.info(
+                "WebSocket connection limit check passed",
+                user_id=user_id,
+                current_connections=current_connections,
+                max_connections=MAX_CONNECTIONS_PER_USER,
+            )
+            self._throttle_log_ts[throttle_key] = _now
 
         # Створюємо інформацію про з'єднання
         conn_info = ConnectionInfo(websocket, user_id, client_id)
@@ -504,12 +520,15 @@ class WebSocketSecurityManager:
                 conn_key, CONNECTION_TIMEOUT, json.dumps(conn_data)
             )
 
-        logger.info(
-            "WebSocket connection accepted",
-            client_id=client_id,
-            user_id=user_id,
-            total_connections=len(self.connections),
-        )
+        # Прийняття з'єднання — лог лише якщо змінилась кількість підключень modulo 10 або для перших підключень
+        total_now = len(self.connections)
+        if total_now <= 3 or total_now % 10 == 0:
+            logger.info(
+                "WebSocket connection accepted",
+                client_id=client_id,
+                user_id=user_id,
+                total_connections=total_now,
+            )
 
         # Запускаємо cleanup якщо ще не запущений
         if not self._cleanup_task:

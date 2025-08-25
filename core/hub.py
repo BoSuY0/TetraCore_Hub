@@ -320,11 +320,17 @@ class StreamHub:
         async def websocket_endpoint(websocket: WebSocket):
             """WebSocket endpoint with authentication"""
             # Видалений зайвий лог WebSocket endpoint
-            self.logger.info(
-                "🔌 WebSocket endpoint called",
-                client=websocket.client.host if websocket.client else "unknown",
-                path=websocket.url.path if websocket.url else "unknown",
-            )
+            # Лог вхідної події WS показуємо не на кожний запит, а лише коли включений діагностичний прапорець
+            if os.getenv("LOG_WS_ENDPOINT_EVENTS", "false").lower() in (
+                "1",
+                "true",
+                "yes",
+            ):
+                self.logger.info(
+                    "🔌 WebSocket endpoint called",
+                    client=websocket.client.host if websocket.client else "unknown",
+                    path=websocket.url.path if websocket.url else "unknown",
+                )
 
             # Отримуємо hub instance з app.state (встановлюється в lifespan)
             hub = getattr(websocket.app.state, "hub", None)
@@ -339,7 +345,14 @@ class StreamHub:
                 await websocket.close(code=1011, reason="Server not initialized")
                 return
 
-            self.logger.info("✅ Passing WebSocket to hub.handle_websocket_connection")
+            if os.getenv("LOG_WS_ENDPOINT_EVENTS", "false").lower() in (
+                "1",
+                "true",
+                "yes",
+            ):
+                self.logger.info(
+                    "✅ Passing WebSocket to hub.handle_websocket_connection"
+                )
             await hub.handle_websocket_connection(websocket)
 
         # Видалені зайві логи endpoints
@@ -531,6 +544,7 @@ class StreamHub:
             )
 
             if not user_data:
+                # Уникаємо дублювання: причина вже залогована у authenticate_websocket
                 self.logger.warning(
                     "WebSocket authentication failed",
                     remote_addr=(
@@ -599,13 +613,21 @@ class StreamHub:
             )
 
             # Очікування реєстрації клієнта з автентифікованими даними
-            self.logger.info(
-                "Starting client registration process",
-                websocket_state=(
-                    websocket.client_state.name if websocket.client_state else "unknown"
-                ),
-                conn_info_client_id=conn_info.client_id if conn_info else None,
-            )
+            # Лог початку реєстрації — лише діагностично
+            if os.getenv("LOG_WS_REGISTRATION_EVENTS", "false").lower() in (
+                "1",
+                "true",
+                "yes",
+            ):
+                self.logger.info(
+                    "Starting client registration process",
+                    websocket_state=(
+                        websocket.client_state.name
+                        if websocket.client_state
+                        else "unknown"
+                    ),
+                    conn_info_client_id=conn_info.client_id if conn_info else None,
+                )
             client = await self._handle_client_registration(websocket, user_data)
             if not client:
                 self.logger.error(
@@ -632,44 +654,61 @@ class StreamHub:
             client.security_client_id = conn_info.client_id
 
             # Додавання клієнта до менеджера
-            self.logger.info(
-                "Checking ClientManager availability",
-                has_client_manager=hasattr(self, "client_manager"),
-                client_manager_value=self.client_manager,
-                client_manager_type=(
-                    type(self.client_manager).__name__ if self.client_manager else None
-                ),
-                client_manager_bool=bool(self.client_manager),
-            )
+            if os.getenv("LOG_WS_MESSAGE_FLOW", "false").lower() in (
+                "1",
+                "true",
+                "yes",
+            ):
+                self.logger.info(
+                    "Checking ClientManager availability",
+                    has_client_manager=hasattr(self, "client_manager"),
+                    client_manager_value=self.client_manager,
+                    client_manager_type=(
+                        type(self.client_manager).__name__
+                        if self.client_manager
+                        else None
+                    ),
+                    client_manager_bool=bool(self.client_manager),
+                )
 
             if self.client_manager:
-                self.logger.info(
-                    "Adding client to ClientManager",
-                    client_id=client.info.client_id,
-                    client_type=client.info.client_type,
-                    client_manager_id=id(self.client_manager),
-                    manager_is_running=(
-                        self.client_manager.is_running
-                        if hasattr(self.client_manager, "is_running")
-                        else None
-                    ),
-                    current_client_count=(
-                        self.client_manager.get_client_count()
-                        if hasattr(self.client_manager, "get_client_count")
-                        else None
-                    ),
-                )
+                if os.getenv("LOG_WS_MESSAGE_FLOW", "false").lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                ):
+                    self.logger.info(
+                        "Adding client to ClientManager",
+                        client_id=client.info.client_id,
+                        client_type=client.info.client_type,
+                        client_manager_id=id(self.client_manager),
+                        manager_is_running=(
+                            self.client_manager.is_running
+                            if hasattr(self.client_manager, "is_running")
+                            else None
+                        ),
+                        current_client_count=(
+                            self.client_manager.get_client_count()
+                            if hasattr(self.client_manager, "get_client_count")
+                            else None
+                        ),
+                    )
                 added = await self.client_manager.add_client(client)
-                self.logger.info(
-                    "Client added to manager",
-                    success=added,
-                    client_id=client.info.client_id,
-                    total_clients_after=(
-                        self.client_manager.get_client_count()
-                        if hasattr(self.client_manager, "get_client_count")
-                        else None
-                    ),
-                )
+                if os.getenv("LOG_WS_MESSAGE_FLOW", "false").lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                ):
+                    self.logger.info(
+                        "Client added to manager",
+                        success=added,
+                        client_id=client.info.client_id,
+                        total_clients_after=(
+                            self.client_manager.get_client_count()
+                            if hasattr(self.client_manager, "get_client_count")
+                            else None
+                        ),
+                    )
             else:
                 self.logger.error(
                     "ClientManager not available!",
@@ -720,14 +759,23 @@ class StreamHub:
     ) -> Optional[Client]:
         """Обробка реєстрації клієнта з автентифікованими даними"""
         try:
-            self.logger.info(
-                "Waiting for client registration message",
-                remote_addr=websocket.client.host if websocket.client else "unknown",
-                user_data_keys=list(user_data.keys()) if user_data else None,
-                websocket_state=(
-                    websocket.client_state.name if websocket.client_state else "unknown"
-                ),
-            )
+            if os.getenv("LOG_WS_REGISTRATION_EVENTS", "false").lower() in (
+                "1",
+                "true",
+                "yes",
+            ):
+                self.logger.info(
+                    "Waiting for client registration message",
+                    remote_addr=(
+                        websocket.client.host if websocket.client else "unknown"
+                    ),
+                    user_data_keys=list(user_data.keys()) if user_data else None,
+                    websocket_state=(
+                        websocket.client_state.name
+                        if websocket.client_state
+                        else "unknown"
+                    ),
+                )
             registration_received = False
             max_attempts = 5
             attempt = 0
@@ -762,11 +810,16 @@ class StreamHub:
                             ),
                         )
                         break
-                    self.logger.info(
-                        "[REGISTRATION] Waiting for registration message",
-                        attempt=attempt,
-                        timeout=1.0 if attempt == 1 else 10.0,
-                    )
+                    if os.getenv("LOG_WS_REGISTRATION_EVENTS", "false").lower() in (
+                        "1",
+                        "true",
+                        "yes",
+                    ):
+                        self.logger.info(
+                            "[REGISTRATION] Waiting for registration message",
+                            attempt=attempt,
+                            timeout=1.0 if attempt == 1 else 10.0,
+                        )
                     raw_text = await asyncio.wait_for(
                         websocket.receive_text(),
                         timeout=(1.0 if attempt == 1 else 10.0),
@@ -777,13 +830,18 @@ class StreamHub:
                         data_received_event.set()
                     except Exception:
                         pass
-                    self.logger.info(
-                        "[REGISTRATION] Отримано raw повідомлення під час реєстрації",
-                        raw_data=data,
-                        data_keys=list(data.keys()),
-                        type=data.get("type"),
-                        attempt=attempt,
-                    )
+                    if os.getenv("LOG_WS_REGISTRATION_EVENTS", "false").lower() in (
+                        "1",
+                        "true",
+                        "yes",
+                    ):
+                        self.logger.info(
+                            "[REGISTRATION] Отримано raw повідомлення під час реєстрації",
+                            raw_data=data,
+                            data_keys=list(data.keys()),
+                            type=data.get("type"),
+                            attempt=attempt,
+                        )
                     if data.get("type") == "ping":
                         self.logger.info(
                             "[REGISTRATION] Received ping during registration, responding with pong"
@@ -1048,14 +1106,19 @@ class StreamHub:
                         websocket.client.host if websocket.client else "unknown"
                     ),
                 )
-                self.logger.info(
-                    "📊 Monitor client registered successfully",
-                    client_id=message.client_id,
-                    client_name=message.client_name,
-                    remote_address=(
-                        websocket.client.host if websocket.client else "unknown"
-                    ),
-                )
+                if os.getenv("LOG_WS_MESSAGE_FLOW", "false").lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                ):
+                    self.logger.info(
+                        "📊 Monitor client registered successfully",
+                        client_id=message.client_id,
+                        client_name=message.client_name,
+                        remote_address=(
+                            websocket.client.host if websocket.client else "unknown"
+                        ),
+                    )
             elif message.client_type == ClientType.STREAM_HUB:
                 # StreamHub також може виконувати таски - додаємо базові capabilities
                 hub_capabilities = getattr(message, "capabilities", [])
@@ -1105,9 +1168,14 @@ class StreamHub:
                 return None
 
             # Підключення клієнта
-            self.logger.info(
-                "Connecting client to websocket", client_id=client.info.client_id
-            )
+            if os.getenv("LOG_WS_MESSAGE_FLOW", "false").lower() in (
+                "1",
+                "true",
+                "yes",
+            ):
+                self.logger.info(
+                    "Connecting client to websocket", client_id=client.info.client_id
+                )
             client.connect(websocket)
 
             # Відправка підтвердження реєстрації
@@ -1126,11 +1194,16 @@ class StreamHub:
                     if "message_type" in ack_payload and "type" not in ack_payload:
                         ack_payload["type"] = ack_payload.pop("message_type")
                     await websocket.send_json(ack_payload)
-                    self.logger.info(
-                        "Sending registration acknowledgment",
-                        client_id=client.info.client_id,
-                        session_id=client.info.session_id,
-                    )
+                    if os.getenv("LOG_WS_MESSAGE_FLOW", "false").lower() in (
+                        "1",
+                        "true",
+                        "yes",
+                    ):
+                        self.logger.info(
+                            "Sending registration acknowledgment",
+                            client_id=client.info.client_id,
+                            session_id=client.info.session_id,
+                        )
                 else:
                     self.logger.warning(
                         "Cannot send registration ack - WebSocket not connected",
@@ -1147,12 +1220,17 @@ class StreamHub:
                 return None
 
             # Фінальне логування успішної реєстрації
-            self.logger.info(
-                "✅ Client successfully connected to StreamHub",
-                client_id=client.info.client_id,
-                client_type=client.info.client_type.value,
-                session_id=client.info.session_id,
-            )
+            if os.getenv("LOG_WS_MESSAGE_FLOW", "false").lower() in (
+                "1",
+                "true",
+                "yes",
+            ):
+                self.logger.info(
+                    "✅ Client successfully connected to StreamHub",
+                    client_id=client.info.client_id,
+                    client_type=client.info.client_type.value,
+                    session_id=client.info.session_id,
+                )
 
             # Після успішної реєстрації прибираємо підказку, якщо ще активна
             try:
@@ -1172,11 +1250,12 @@ class StreamHub:
         """Обробка повідомлень від клієнта"""
         from core.websocket_security import ws_security_manager
 
-        self.logger.info(
-            "📨 [MESSAGE HANDLER] Starting message handler for client",
-            client_id=client.info.client_id,
-            client_type=client.info.client_type.value,
-        )
+        if os.getenv("LOG_WS_MESSAGE_FLOW", "false").lower() in ("1", "true", "yes"):
+            self.logger.info(
+                "📨 [MESSAGE HANDLER] Starting message handler for client",
+                client_id=client.info.client_id,
+                client_type=client.info.client_type.value,
+            )
 
         try:
             while True:
@@ -1191,14 +1270,14 @@ class StreamHub:
                     os.getenv("ENVIRONMENT", "development").lower() == "production"
                 )
                 if is_prod:
-                    self.logger.info(
+                    self.logger.debug(
                         "[WS RAW] Отримано WebSocket повідомлення",
                         client_id=client.info.client_id,
                         client_type=client.info.client_type.value,
                         raw_data_length=len(raw_data),
                     )
                 else:
-                    self.logger.info(
+                    self.logger.debug(
                         "[WS RAW] Отримано сире WebSocket повідомлення",
                         client_id=client.info.client_id,
                         client_type=client.info.client_type.value,
@@ -1212,7 +1291,7 @@ class StreamHub:
                 # Увімкнуто: використовуємо валідацію WS для всіх клієнтів (окрім специфічних кейсів у майбутньому)
                 if hasattr(client, "security_client_id") and client.security_client_id:
                     # Логування raw повідомлення
-                    self.logger.info(
+                    self.logger.debug(
                         "[DEBUG] Raw WebSocket message received",
                         client_id=client.info.client_id,
                         raw_data_preview=(
@@ -1245,7 +1324,7 @@ class StreamHub:
                             ),
                         )
                     else:
-                        self.logger.info(
+                        self.logger.debug(
                             "[DEBUG] Validated message structure",
                             client_id=client.info.client_id,
                             message_type=validated_message.type,
@@ -1298,7 +1377,7 @@ class StreamHub:
                             message_data_keys=list(message_data.keys()),
                         )
                     else:
-                        self.logger.info(
+                        self.logger.debug(
                             "[DEBUG] Message data before parsing",
                             client_id=client.info.client_id,
                             message_data_keys=list(message_data.keys()),
@@ -1318,7 +1397,7 @@ class StreamHub:
                             has_task_data=hasattr(message, "task_data"),
                         )
                     else:
-                        self.logger.info(
+                        self.logger.debug(
                             "[DEBUG] Parsed message structure",
                             client_id=client.info.client_id,
                             message_type=getattr(message, "message_type", None),
@@ -1362,7 +1441,7 @@ class StreamHub:
 
                     # Додаткове логування для API Worker
                     if client.info.client_type == ClientType.WORKER:
-                        self.logger.info(
+                        self.logger.debug(
                             "[DEBUG] API Worker raw message data",
                             client_id=client.info.client_id,
                             data_keys=list(data.keys()),
@@ -1377,7 +1456,7 @@ class StreamHub:
                         data["message_type"] = data["type"]
 
                     # Логування перед створенням повідомлення
-                    self.logger.info(
+                    self.logger.debug(
                         "[WS PARSE] Парсинг повідомлення",
                         client_id=client.info.client_id,
                         message_type=data.get("message_type"),
@@ -1409,7 +1488,7 @@ class StreamHub:
                     ):
                         from models.messages import TaskMessage
 
-                        self.logger.info(
+                        self.logger.debug(
                             "[DEBUG] Special handling for TASK_SUBMIT",
                             client_id=client.info.client_id,
                             data_keys=list(data.keys()),
@@ -1453,7 +1532,7 @@ class StreamHub:
                         message = parse_message(data)
 
                     # Логування розпаршеного message
-                    self.logger.info(
+                    self.logger.debug(
                         "[DEBUG] Parsed message structure",
                         client_id=client.info.client_id,
                         message_type=getattr(message, "message_type", None),
