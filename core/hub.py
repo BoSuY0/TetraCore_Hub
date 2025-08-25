@@ -988,8 +988,8 @@ class StreamHub:
                 )
                 return None
 
-            # Перевірка аутентифікації
-            auth_result = self._authenticate_client(message)
+            # Перевірка аутентифікації (беремо до уваги дані автентифікації рівня WS)
+            auth_result = self._authenticate_client(message, user_data)
             self.logger.info(
                 "Authentication check",
                 auth_required=bool(self.settings.auth_token),
@@ -2001,8 +2001,14 @@ class StreamHub:
                 websocket_error=str(e),
             )
 
-    def _authenticate_client(self, message: BaseMessage) -> bool:
-        """Аутентифікація клієнта"""
+    def _authenticate_client(
+        self, message: BaseMessage, user_data: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """Аутентифікація клієнта.
+
+        Якщо WebSocket уже автентифіковано (наприклад, статичним сервісним токеном
+        із HMAC-handshake), дозволяємо реєстрацію без дублювання токена в payload.
+        """
         # 1) MONITOR клієнти вже аутентифіковані через JWT на рівні WS
         from models.client import (
             ClientType,
@@ -2011,7 +2017,14 @@ class StreamHub:
         if message.client_type == ClientType.MONITOR:
             return True
 
-        # 2) Підтримуємо ротацію токенів: приймаємо auth_token, auth_token_active, auth_token_next
+        # 2) Якщо з'єднання вже автентифіковане як сервісне на рівні WS — довіряємо йому
+        try:
+            if user_data and str(user_data.get("role", "")).lower() == "service":
+                return True
+        except Exception:
+            pass
+
+        # 3) Підтримуємо ротацію токенів: приймаємо auth_token, auth_token_active, auth_token_next
         allowed_tokens = []
         for tk in [
             getattr(self.settings, "auth_token_active", None),
@@ -2021,11 +2034,11 @@ class StreamHub:
             if tk:
                 allowed_tokens.append(tk)
 
-        # 3) Якщо токени не налаштовані - пропускаємо додаткову перевірку
+        # 4) Якщо токени не налаштовані - пропускаємо додаткову перевірку
         if not allowed_tokens:
             return True
 
-        # 4) Перевірка токена з повідомлення реєстрації
+        # 5) Перевірка токена з повідомлення реєстрації (dev/test сумісність)
         client_token = getattr(message, "auth_token", None)
         return client_token in allowed_tokens
 
