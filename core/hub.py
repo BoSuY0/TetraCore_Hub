@@ -286,11 +286,8 @@ class StreamHub:
 
         # Templates removed - using React SPA instead
 
-        # Підключення статичних файлів (якщо директорія існує)
-        if os.path.exists("frontend/build"):
-            self.app.mount(
-                "/static", StaticFiles(directory="frontend/build/static"), name="static"
-            )
+        # Відключено сервінг React статики з backend
+        # Якщо потрібно повертати статику — ввімкніть окремий CDN/статичний сервер
 
         # Реєстрація роутів
         self.logger.info(
@@ -459,40 +456,13 @@ class StreamHub:
         # Task cancel endpoint will be handled by dashboard.py to avoid conflicts
 
         @self.app.get("/")  # type: ignore[attr-defined]
-        async def serve_react_app():
-            """Сервіс React додатку"""
-            from fastapi.responses import FileResponse  # type: ignore
-
-            """Serve React app for root and dashboard routes"""
-            if os.path.exists("frontend/build/index.html"):
-                return FileResponse("frontend/build/index.html")
-            else:
-                return {
-                    "message": "TetraCore StreamHub API",
-                    "status": "running",
-                    "frontend": "not built",
-                }
+        async def root_handler():
+            return {"message": "TetraCore StreamHub API", "status": "running"}
 
         @self.app.get("/{path:path}")  # type: ignore[attr-defined]
-        async def serve_react_routes(path: str):
-            """Сервіс React роутів (SPA fallback)"""
-            from fastapi.responses import FileResponse  # type: ignore
-
-            # Якщо це API роут, не обробляємо тут - це буде оброблено dashboard.py або повернути 404
-            if path.startswith(("api/", "ws")):
-                raise HTTPException(status_code=404, detail="Not found")
-
-            # Перевіряємо чи існує статичний файл (CSS, JS, images тощо)
-            file_path = f"static/{path}"
-            if os.path.isfile(file_path):
-                return FileResponse(file_path)
-
-            # Для всіх інших роутів (включно з dashboard/) повертаємо index.html (SPA роутинг)
-            """Serve React app for all unmatched routes (React Router support)"""
-            if os.path.exists("frontend/build/index.html"):
-                return FileResponse("frontend/build/index.html")
-            else:
-                raise HTTPException(status_code=404, detail="Frontend not built")
+        async def not_found_fallback(path: str):
+            # Не слугуємо SPA; невідомі шляхи → 404
+            raise HTTPException(status_code=404, detail="Not found")
 
     async def handle_websocket_connection(self, websocket: WebSocket):
         """Обробка WebSocket підключення"""
