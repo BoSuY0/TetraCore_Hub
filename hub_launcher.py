@@ -388,95 +388,8 @@ class StreamHubLauncher:
         return uvicorn_log_level
 
     def _register_spa_routes(self, app):
-        """Реєструє SPA роути після API роутів для правильного порядку обробки"""
-        # Підключення статичних файлів тільки в non-dev режимах
-        if os.environ.get("ENVIRONMENT") != "development" and self.static_dir.exists():
-            from fastapi.staticfiles import StaticFiles
-            from fastapi.responses import HTMLResponse, JSONResponse
-            from fastapi import HTTPException
-
-            app.mount(
-                "/static", StaticFiles(directory=str(self.static_dir)), name="static"
-            )
-
-            # Web App Manifest
-            @app.get("/manifest.json")
-            async def manifest():
-                return JSONResponse(
-                    {
-                        "name": "TetraCore StreamHub Dashboard",
-                        "short_name": "StreamHub",
-                        "start_url": "/",
-                        "display": "standalone",
-                        "background_color": "#ffffff",
-                        "theme_color": "#3b82f6",
-                        "icons": [
-                            {
-                                "src": "/favicon.ico",
-                                "sizes": "16x16",
-                                "type": "image/x-icon",
-                            }
-                        ],
-                    },
-                    media_type="application/manifest+json",
-                    headers={"Cache-Control": "no-store"},
-                )
-
-            @app.get("/manifest.webmanifest")
-            async def manifest_webmanifest():
-                return JSONResponse(
-                    {
-                        "name": "TetraCore StreamHub Dashboard",
-                        "short_name": "StreamHub",
-                        "start_url": "/",
-                        "display": "standalone",
-                        "background_color": "#ffffff",
-                        "theme_color": "#3b82f6",
-                        "icons": [
-                            {
-                                "src": "/favicon.ico",
-                                "sizes": "16x16",
-                                "type": "image/x-icon",
-                            }
-                        ],
-                    },
-                    media_type="application/manifest+json",
-                    headers={"Cache-Control": "no-store"},
-                )
-
-            # SPA підтримка - сервування index.html на корені та fallback для роутингу
-            @app.get("/", response_class=HTMLResponse)
-            @app.get("/dashboard", response_class=HTMLResponse)
-            @app.get(
-                "/dashboard/{path:path}", response_class=HTMLResponse
-            )  # Fallback для SPA роутингу
-            async def serve_spa():
-                if (self.static_dir / "index.html").exists():
-                    with open(
-                        self.static_dir / "index.html", "r", encoding="utf-8"
-                    ) as f:
-                        return HTMLResponse(f.read())
-                return HTMLResponse("Frontend not found", status_code=404)
-
-            # Глобальний fallback для SPA (останній, після всіх API роутів)
-            @app.get("/{path:path}", response_class=HTMLResponse)
-            async def serve_spa_fallback(path: str):
-                # Повертаємо 404 для неіснуючих API/WS/static шляхів
-                if (
-                    path.startswith("api/")
-                    or path.startswith("ws")
-                    or path.startswith("static/")
-                ):
-                    raise HTTPException(status_code=404, detail="Not found")
-                if (self.static_dir / "index.html").exists():
-                    with open(
-                        self.static_dir / "index.html", "r", encoding="utf-8"
-                    ) as f:
-                        return HTMLResponse(f.read())
-                self.logger.warning("Frontend not found: index.html відсутній")
-                return HTMLResponse("Frontend not found", status_code=404)
-
-            self.logger.info("✅ SPA роути зареєстровано після API роутів")
+        """SPA роути відключені: бекенд більше не сервить фронтенд."""
+        return
 
     def _check_if_frontend_needs_rebuild(self):
         """Перевіряє чи потрібна перебудова frontend"""
@@ -663,189 +576,16 @@ class StreamHubLauncher:
             return False
 
     async def install_dependencies(self):
-        """Встановлює залежності frontend з безпековими обмеженнями"""
-        if not await self.check_node_available():
-            return False
-
-        if not self.frontend_dir.exists():
-            self.logger.error("Frontend директорія не знайдена")
-            return False
-
-        self.logger.debug("Перевірка залежностей...")
-
-        self.logger.debug("Використовуємо системний Node.js та 'npm install'.")
-
-        command_list = ["npm", "install", "--legacy-peer-deps", "--no-audit"]
-
-        try:
-            frontend_path = self.secure_path.validate_path(str(self.frontend_dir))
-
-            returncode, stdout, stderr = await self.secure_cmd.run_safe(
-                command_list,
-                cwd=frontend_path,
-                timeout=600,  # 10 хвилин
-            )
-
-            if returncode == 0:
-                self.logger.debug("Залежності встановлено/перевірено.")
-                return True
-            else:
-                # Детальне логування помилки
-                error_msg = f"Помилка виконання 'npm install' (код: {returncode})"
-                self.logger.error(error_msg)
-
-                if stdout.strip():
-                    self.logger.error(f"npm stdout: {stdout.strip()}")
-
-                if stderr.strip():
-                    self.logger.error(f"npm stderr: {stderr.strip()}")
-
-                # Додаткова діагностика
-                self.logger.debug(
-                    "npm install diagnostics",
-                    command=" ".join(command_list),
-                    cwd=str(frontend_path),
-                    env_keys=list(self.secure_cmd.create_safe_env().keys()),
-                )
-
-                return False
-
-        except Exception as e:
-            self.logger.error(f"Фатальна помилка під час встановлення залежностей: {e}")
-            return False
+        """Відключено: фронтенд перенесено з проекту."""
+        return False
 
     async def build_frontend(self, force=False):
-        """Збирає frontend, якщо потрібно"""
-        if not await self.check_node_available():
-            self.logger.error("Node.js не встановлено")
-            return False
-
-        # Перевіряємо чи потрібна збірка
-        if not force and not self._check_if_frontend_needs_rebuild():
-            self.logger.info("✅ Frontend вже зібрано, використовуємо існуючу збірку")
-            return self._copy_build_files()
-
-        # Встановлюємо залежності якщо потрібно
-        if not await self.install_dependencies():
-            return False
-
-        self.logger.info("🔨 Збірка frontend...")
-        try:
-            # Валідуємо шлях
-            frontend_path = self.secure_path.validate_path(str(self.frontend_dir))
-
-            # Встановлюємо змінні оточення для збірки
-            env = self.secure_cmd.create_safe_env()
-            env.update(
-                {
-                    "CI": "false",  # Вимикаємо CI режим для локальної збірки
-                    "GENERATE_SOURCEMAP": "false",  # Вимикаємо source maps для production
-                    "NODE_ENV": "production",
-                }
-            )
-
-            returncode, stdout, stderr = await self.secure_cmd.run_safe(
-                ["npm", "run", "build"],
-                cwd=frontend_path,
-                timeout=600,  # 10 хвилин для збірки
-            )
-
-            if returncode == 0:
-                self.logger.info("✅ Frontend зібрано успішно")
-                # Копіюємо файли в static
-                return self._copy_build_files()
-            else:
-                self.logger.error(f"❌ Помилка збірки: {stderr}")
-                return False
-
-        except Exception as e:
-            self.logger.error(f"❌ Помилка збірки frontend: {e}")
-            return False
+        """Відключено: фронтенд перенесено з проекту."""
+        return False
 
     async def start_development_server(self):
-        """Запускає development сервер frontend з безпековими обмеженнями"""
-        if not await self.check_node_available():
-            return None
-
-        if not await self.install_dependencies():
-            return None
-
-        self.logger.info("🚀 Запуск frontend development server...")
-
-        # Звільняємо порт 3000 для frontend
-        await self.free_port(3000)
-
-        try:
-            # Валідуємо шлях
-            frontend_path = self.secure_path.validate_path(str(self.frontend_dir))
-
-            command_list = ["npm", "run", "dev", "--", "--host", "--port", "3000"]
-
-            # Валідуємо команду через SecureCommand (автоматично додасть .cmd на Windows)
-            validated_command = self.secure_cmd.validate_command(command_list)
-
-            process = await asyncio.create_subprocess_exec(
-                *validated_command,
-                cwd=str(frontend_path),
-                env=self.secure_cmd.create_safe_env(),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-
-            self.frontend_process = process
-
-            # Запускаємо моніторинг логів
-            async def log_output(pipe, prefix):
-                try:
-                    while True:
-                        line = await pipe.readline()
-                        if not line:
-                            break
-                        line_text = line.decode().strip()
-                        if line_text:
-                            lower = line_text.lower()
-                            if "error" in lower:
-                                self.logger.error(f"frontend {prefix}: {line_text}")
-                            elif "warn" in lower:
-                                self.logger.warning(f"frontend {prefix}: {line_text}")
-                            elif any(
-                                k in lower for k in ["local:", "ready", "compiled"]
-                            ):
-                                self.logger.info(f"frontend {prefix}: {line_text}")
-                            else:
-                                self.logger.debug(f"frontend {prefix}: {line_text}")
-                except Exception as e:
-                    self.logger.error(f"Помилка читання {prefix}: {e}")
-
-            # Створюємо задачі для моніторингу
-            stdout_task = asyncio.create_task(log_output(process.stdout, "stdout"))
-            stderr_task = asyncio.create_task(log_output(process.stderr, "stderr"))
-
-            # Зберігаємо задачі для cleanup
-            if not hasattr(self, "frontend_log_tasks"):
-                self.frontend_log_tasks = []
-            self.frontend_log_tasks.extend([stdout_task, stderr_task])
-
-            # Чекаємо поки сервер запуститься
-            await asyncio.sleep(3)
-
-            if process.returncode is None:
-                self.logger.info(
-                    "✅ Frontend development server запущено на http://localhost:3000"
-                )
-                return process
-            else:
-                # Зупиняємо задачі моніторингу якщо процес не запустився
-                for task in [stdout_task, stderr_task]:
-                    if not task.done():
-                        task.cancel()
-                stdout, stderr = await process.communicate()
-                self.logger.error(f"❌ Помилка запуску frontend: {stderr.decode()}")
-                return None
-
-        except Exception as e:
-            self.logger.error(f"❌ Помилка запуску development server: {e}")
-            return None
+        """Відключено: фронтенд перенесено з проекту."""
+        return None
 
     def setup_environment(self):
         """Налаштування змінних оточення"""
@@ -1451,11 +1191,7 @@ class StreamHubLauncher:
                     "❌ Backend не готовий, але продовжуємо запуск frontend..."
                 )
 
-            # Запускаємо frontend dev server
-            self.logger.info("🎨 Запускаємо frontend dev server...")
-            frontend_process = await self.start_development_server()
-            if frontend_process:
-                self.frontend_process = frontend_process
+            # Frontend dev server відключено
 
             # Чекаємо завершення backend (він блокує до сигналу)
             try:
@@ -1479,9 +1215,6 @@ class StreamHubLauncher:
 
         # Виводимо банер
         self.print_banner("fast")
-
-        # Копіюємо існуючу збірку якщо є
-        self._copy_build_files()
 
         try:
             # Запускаємо тільки backend
@@ -1509,10 +1242,7 @@ class StreamHubLauncher:
         # Виводимо банер
         self.print_banner("prod")
 
-        # Збірка frontend
-        if not await self.build_frontend(force=force_build):
-            self.logger.error("❌ Не вдалося зібрати frontend")
-            return
+        # Збірка frontend відключена
 
         try:
             # Запускаємо production сервер

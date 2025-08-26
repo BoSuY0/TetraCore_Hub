@@ -1,0 +1,11 @@
+[workspace]
+members = [
+    "hub",
+    "core",
+    "models",
+    "tools",
+    "utils",
+]
+resolver = "2"
+
+
