@@ -445,7 +445,7 @@ class Task(BaseModel):
             "worker_requirements": self.worker_requirements,
             # metadata може бути великим, тому зберігаємо лише базові поля
             "metadata": (
-                self.metadata.model_dump()
+                self.metadata.model_dump(mode="json")
                 if hasattr(self.metadata, "model_dump")
                 else {}
             ),
