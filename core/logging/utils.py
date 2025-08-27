@@ -323,6 +323,13 @@ def suppress_duplicate_logs_processor(logger, method_name, event_dict):
     Логуємо першу подію одразу; наступні з таким самим підписом
     у межах LOG_DEDUP_WINDOW_SECONDS (дефолт 10с) відкидаються.
     """
+    # Не придушувати спеціально позначені логи Redis (вимога: щоб фільтр не прибирав їх)
+    try:
+        if event_dict.get("redis_log") is True:
+            return event_dict
+    except Exception:
+        # У разі будь-якої помилки — не придушуємо
+        return event_dict
     try:
         signature = _build_log_signature(method_name, event_dict)
         now = time.monotonic()

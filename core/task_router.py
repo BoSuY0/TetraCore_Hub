@@ -358,6 +358,15 @@ class TaskRouter:
                             key = self.redis_overflow_keys[task.priority]
                             # LPUSH у Redis для черги (ліва вставка — як стек FIFO з RPOP)
                             await self.redis_client.lpush(key, orjson.dumps(stored))
+                            try:
+                                self.logger.debug(
+                                    "Redis LPUSH task overflow",
+                                    redis_log=True,
+                                    key=key,
+                                    task_id=task.task_id,
+                                )
+                            except Exception:
+                                pass
                             persisted = True
                 except Exception as e:
                     self.logger.warning(
@@ -1591,23 +1600,22 @@ class TaskRouter:
         if not self.redis_client or self.redis_error_handler.should_skip_redis():
             return
 
-        async def _clear_cache():
-            # Очищаємо всі ключі статистики
-            pattern = "task_stats:*"
-            keys = []
-            async for key in self.redis_client.scan_iter(match=pattern):
-                keys.append(key)
+        # Замість масового DEL: версіонування кешу через інкремент версії
+        async def _bump_version():
+            try:
+                v = await self.redis_client.incr("task_stats:version")
+                # Логуємо дію версіонування
+                self.logger.debug(
+                    "Redis INCR stats version", redis_log=True, new_version=v
+                )
+                return v
+            except Exception as e:
+                self.logger.warning(
+                    "Failed to bump task stats version", error=str(e)
+                )
+                return None
 
-            if keys:
-                await self.redis_client.delete(*keys)
-                return len(keys)
-            return 0
-
-        keys_count = await self.redis_error_handler.execute_with_retry(_clear_cache)
-        if keys_count is not None:
-            self.logger.debug("Stats cache invalidated", keys_count=keys_count)
-        else:
-            self.logger.warning("Failed to invalidate stats cache after retries")
+        await self.redis_error_handler.execute_with_retry(_bump_version)
 
     # --- Redis persistence helpers for tasks with TTL ---
     def _get_task_ttl(self) -> int:
@@ -1644,6 +1652,16 @@ class TaskRouter:
                 task_id=task.task_id,
             )
             return False
+        try:
+            self.logger.debug(
+                "Redis SET task active",
+                redis_log=True,
+                key=key,
+                ttl=ttl,
+                task_id=task.task_id,
+            )
+        except Exception:
+            pass
         return bool(res)
 
     async def _persist_task_history(self, task: Task) -> bool:
@@ -1665,6 +1683,16 @@ class TaskRouter:
                 task_id=task.task_id,
             )
             return False
+        try:
+            self.logger.debug(
+                "Redis SET task history",
+                redis_log=True,
+                key=key,
+                ttl=ttl,
+                task_id=task.task_id,
+            )
+        except Exception:
+            pass
         return bool(res)
 
     async def _delete_task_active_key(self, task_id: str) -> bool:
@@ -1684,6 +1712,16 @@ class TaskRouter:
                 task_id=task_id,
             )
             return False
+        try:
+            self.logger.debug(
+                "Redis DEL task active",
+                redis_log=True,
+                key=key,
+                task_id=task_id,
+                deleted=bool(res),
+            )
+        except Exception:
+            pass
         return bool(res)
 
     async def _move_task_to_history_redis(self, task: Task) -> bool:
@@ -1761,13 +1799,29 @@ class TaskRouter:
                     "worker": worker,
                     "include_tasks": include_tasks,
                 }
-                cache_key = f"task_stats:{hash(str(sorted(cache_params.items())))}"
+                # Додаємо версію namespace, щоб уникати масових DEL
+                try:
+                    version_bytes = await self.redis_client.get("task_stats:version")
+                    version = (
+                        int(version_bytes)
+                        if version_bytes is not None
+                        else 0
+                    )
+                except Exception:
+                    version = 0
+                cache_key = f"task_stats:{version}:{hash(str(sorted(cache_params.items())))}"
 
                 # Спробуємо отримати з кешу з retry логікою
                 async def _get_cached():
                     cached_data = await self.redis_client.get(cache_key)
                     if cached_data:
+                        self.logger.debug(
+                            "Redis GET stats cache hit", redis_log=True, key=cache_key
+                        )
                         return orjson.loads(cached_data)
+                    self.logger.debug(
+                        "Redis GET stats cache miss", redis_log=True, key=cache_key
+                    )
                     return None
 
                 cached_result = await self.redis_error_handler.execute_with_retry(
@@ -2004,6 +2058,12 @@ class TaskRouter:
                     serializable_result = self._convert_sets_to_lists(result)
                     await self.redis_client.set(
                         cache_key, orjson.dumps(serializable_result), ex=cache_ttl
+                    )
+                    self.logger.debug(
+                        "Redis SET stats cache",
+                        redis_log=True,
+                        key=cache_key,
+                        ttl=cache_ttl,
                     )
                     return cache_ttl
 

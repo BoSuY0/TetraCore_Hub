@@ -1195,6 +1195,16 @@ class WebSocketSecurityManager:
                     res = self.redis_client.set(
                         key, "1", ex=self._nonce_ttl_seconds, nx=True
                     )
+                    try:
+                        logger.debug(
+                            "Redis SET NX EX ws_nonce",
+                            redis_log=True,
+                            key=key,
+                            ttl=self._nonce_ttl_seconds,
+                            ok=bool(res),
+                        )
+                    except Exception:
+                        pass
                 except Exception:
                     res = None
                 # Якщо не вдалося атомарно встановити або ключ уже існує — перевірка/retry
@@ -1202,8 +1212,19 @@ class WebSocketSecurityManager:
                     if not res:
                         exists = self.redis_client.get(key)
                         if exists:
+                            logger.debug(
+                                "Redis GET ws_nonce (exists)",
+                                redis_log=True,
+                                key=key,
+                            )
                             return False
                         self.redis_client.set(key, "1", ex=self._nonce_ttl_seconds)
+                        logger.debug(
+                            "Redis SET EX ws_nonce (fallback)",
+                            redis_log=True,
+                            key=key,
+                            ttl=self._nonce_ttl_seconds,
+                        )
                 except Exception:
                     # Якщо Redis недоступний – переходимо до in-memory
                     pass
@@ -1238,15 +1259,36 @@ class WebSocketSecurityManager:
                     )  # type: ignore
                     if not res:
                         return False
+                    try:
+                        logger.debug(
+                            "Redis SET NX EX ws_nonce (async)",
+                            redis_log=True,
+                            key=key,
+                            ttl=self._nonce_ttl_seconds,
+                            ok=bool(res),
+                        )
+                    except Exception:
+                        pass
                 except Exception:
                     # Якщо Redis недоступний – перевірка існування і повторна спроба
                     try:
                         exists = await self.redis_client.get(key)  # type: ignore
                         if exists:
+                            logger.debug(
+                                "Redis GET ws_nonce (exists, async)",
+                                redis_log=True,
+                                key=key,
+                            )
                             return False
                         await self.redis_client.set(
                             key, "1", ex=self._nonce_ttl_seconds
                         )  # type: ignore
+                        logger.debug(
+                            "Redis SET EX ws_nonce (fallback, async)",
+                            redis_log=True,
+                            key=key,
+                            ttl=self._nonce_ttl_seconds,
+                        )
                     except Exception:
                         # перехід на in-memory
                         pass

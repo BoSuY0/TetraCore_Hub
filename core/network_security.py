@@ -198,8 +198,24 @@ class NetworkSecurityManager:
             key = f"rate_limit:{identifier}"
             try:
                 current_count = self.redis_client.incr(key)
+                # Логуємо INCR (значення може бути як int, так і awaitable)
+                try:
+                    logger.debug(
+                        "Redis INCR ratelimit",
+                        redis_log=True,
+                        key=key,
+                        count=int(current_count) if isinstance(current_count, int) else None,
+                    )
+                except Exception:
+                    pass
                 if current_count == 1:
                     self.redis_client.expire(key, self.rate_limit_config.window_seconds)
+                    logger.debug(
+                        "Redis EXPIRE ratelimit",
+                        redis_log=True,
+                        key=key,
+                        ttl=self.rate_limit_config.window_seconds,
+                    )
 
                 return current_count <= limit
             except Exception as e:
@@ -231,7 +247,20 @@ class NetworkSecurityManager:
         if self.redis_client:
             blocked_key = f"blocked_ip:{ip}"
             if await self.redis_client.exists(blocked_key):
+                logger.debug(
+                    "Redis EXISTS blocked_ip",
+                    redis_log=True,
+                    key=blocked_key,
+                    exists=True,
+                )
                 return True
+            else:
+                logger.debug(
+                    "Redis EXISTS blocked_ip",
+                    redis_log=True,
+                    key=blocked_key,
+                    exists=False,
+                )
 
         # In-memory перевірка
         return ip in self.blocked_ips
@@ -253,6 +282,12 @@ class NetworkSecurityManager:
                 "reason": reason or "Rate limit exceeded",
             }
             await self.redis_client.setex(blocked_key, duration, json.dumps(block_info))
+            logger.debug(
+                "Redis SETEX blocked_ip",
+                redis_log=True,
+                key=blocked_key,
+                ttl=duration,
+            )
 
         # In-memory блокування
         self.blocked_ips.add(ip)
@@ -420,11 +455,26 @@ class NetworkSecurityManager:
             "timestamp": datetime.utcnow().isoformat(),
         }
 
-        # Зберігаємо в Redis для аналізу
+        # Зберігаємо в Redis для аналізу (з семплінгом, щоб не перевантажувати Redis)
         if self.redis_client:
-            log_key = f"request_log:{datetime.utcnow().strftime('%Y%m%d')}:{ip}"
-            self.redis_client.lpush(log_key, json.dumps(log_data))
-            self.redis_client.expire(log_key, 86400 * 7)  # Зберігаємо 7 днів
+            try:
+                # Семплінг кожного N-го запиту для IP (або всі 4xx/5xx)
+                sample_n = int(os.getenv("REQUEST_LOG_SAMPLE_EVERY", "20"))
+                sample_key = f"request_log:sample:{ip}"
+                c = await self.redis_client.incr(sample_key)
+                if c == 1:
+                    await self.redis_client.expire(sample_key, 60)
+                if (c % sample_n) == 0 or response.status_code >= 400:
+                    log_key = f"request_log:{datetime.utcnow().strftime('%Y%m%d')}:{ip}"
+                    await self.redis_client.lpush(log_key, json.dumps(log_data))
+                    await self.redis_client.expire(log_key, 86400 * 7)
+                    logger.debug(
+                        "Redis request log stored", redis_log=True, key=log_key
+                    )
+            except Exception as e:
+                logger.debug(
+                    "Redis request log store failed", redis_log=True, error=str(e)
+                )
 
     async def get_security_stats(self) -> Dict[str, Any]:
         """Отримання статистики безпеки"""

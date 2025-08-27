@@ -389,6 +389,31 @@ class AuthManager:
             if inspect.isawaitable(setex_result):
                 await setex_result
 
+            # Додаємо індекс користувача → сесії для швидкого logout
+            try:
+                index_key = f"user_sessions:{token_data.get('user_id')}"
+                sadd_res = self.redis_client.sadd(index_key, session_id)
+                if inspect.isawaitable(sadd_res):
+                    await sadd_res
+                # TTL на індекс трохи довше за сесію, щоб прибрати хвости при потребі
+                expire_res = self.redis_client.expire(
+                    index_key, int(session_ttl.total_seconds()) + 3600
+                )
+                if inspect.isawaitable(expire_res):
+                    await expire_res
+                logger.debug(
+                    "Redis SADD user_sessions index",
+                    redis_log=True,
+                    key=index_key,
+                    session_id=session_id,
+                )
+            except Exception as e:
+                logger.debug(
+                    "Redis user_sessions index update failed",
+                    redis_log=True,
+                    error=str(e),
+                )
+
             logger.info(
                 "Session created in Redis",
                 session_id=session_id[:8] + "...",
@@ -504,6 +529,12 @@ class AuthManager:
                         if isinstance(exists_val, (bool, int))
                         else False
                     )
+                    logger.debug(
+                        "Redis EXISTS blocked_token",
+                        redis_log=True,
+                        key=blocked_key,
+                        exists=bool(exists),
+                    )
                     if exists:
                         logger.warning("❌ Token is revoked in Redis", jti=jti)
                         raise jwt.InvalidTokenError("Token has been revoked")
@@ -522,6 +553,12 @@ class AuthManager:
                         exists = bool(exists_val)
                     else:
                         exists = None
+                    logger.debug(
+                        "Redis EXISTS session",
+                        redis_log=True,
+                        key=session_key,
+                        exists=exists,
+                    )
 
                     if exists is None:
                         if STRICT_SESSION_VALIDATION:
@@ -698,10 +735,36 @@ class AuthManager:
 
         Інакше видаляє і піднімає помилку.
         """
-        last_activity = data.get("last_activity")
-        if not last_activity:
-            return
-        last_activity_time = datetime.fromisoformat(last_activity)
+        # Спершу пробуємо прочитати compact-ключ last_activity
+        last_activity_time = None
+        try:
+            if self.redis_client:
+                la_key = f"session:last_activity:{data.get('session_id') or ''}"
+                raw = self.redis_client.get(la_key)
+                la_val = await raw if inspect.isawaitable(raw) else raw
+                if la_val:
+                    if isinstance(la_val, (bytes, bytearray)):
+                        la_val = la_val.decode("utf-8", errors="ignore")
+                    last_activity_time = datetime.fromisoformat(str(la_val))
+                    logger.debug(
+                        "Redis GET last_activity",
+                        redis_log=True,
+                        key=la_key,
+                        ok=True,
+                    )
+        except Exception as e:
+            logger.debug(
+                "Redis GET last_activity failed",
+                redis_log=True,
+                error=str(e),
+            )
+
+        # Фолбек: читаємо з JSON сесії, якщо окремого ключа нема
+        if last_activity_time is None:
+            last_activity = data.get("last_activity")
+            if not last_activity:
+                return
+            last_activity_time = datetime.fromisoformat(last_activity)
         if datetime.now(timezone.utc) - last_activity_time > timedelta(hours=1):
             del_result = self.redis_client.delete(session_key)
             if inspect.isawaitable(del_result):
@@ -745,6 +808,15 @@ class AuthManager:
         )
         if inspect.isawaitable(setex_res):
             await setex_res
+        try:
+            logger.debug(
+                "Redis SETEX refresh_used",
+                redis_log=True,
+                key=f"refresh_used:{refresh_jti}",
+                ttl=int(ttl),
+            )
+        except Exception:
+            pass
 
     async def _maybe_rotate_refresh(
         self, rotate_refresh: bool, refresh_token: str, token_data: Dict[str, Any]
@@ -890,6 +962,15 @@ class AuthManager:
             setex_res = self.redis_client.setex(f"blocked_token:{jti}", int(ttl), "1")
             if inspect.isawaitable(setex_res):
                 await setex_res
+            try:
+                logger.debug(
+                    "Redis SETEX blocked_token",
+                    redis_log=True,
+                    key=f"blocked_token:{jti}",
+                    ttl=int(ttl),
+                )
+            except Exception:
+                pass
             return None
         except jwt.PyJWTError as e:
             logger.debug("JWT decode failed in _revoke_token", error=str(e))
@@ -1041,22 +1122,63 @@ class AuthManager:
     async def update_session_activity(self, session_id: str):
         """Оновлення часу останньої активності сесії"""
         if self.redis_client:
-            session_key = f"session:{session_id}"
-            get_result = self.redis_client.get(session_key)
-            session_data = (
-                await get_result if inspect.isawaitable(get_result) else get_result
-            )
-            if session_data:
-                data = await self.async_optimizer.json_loads(session_data)
-                data["last_activity"] = datetime.now(timezone.utc).isoformat()
-                data_json = await self.async_optimizer.json_dumps(data)
-                setex_res = self.redis_client.setex(
-                    session_key,
-                    int(timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS).total_seconds()),
-                    data_json,
+            # Тротлінг оновлення активності, щоб не писати на кожен запит
+            throttle_key = f"session:touch_throttle:{session_id}"
+            try:
+                set_res = self.redis_client.set(throttle_key, "1", nx=True, ex=60)
+                set_done = (
+                    await set_res if inspect.isawaitable(set_res) else set_res
                 )
-                if inspect.isawaitable(setex_res):
-                    await setex_res
+            except Exception:
+                set_done = True  # якщо помилка — краще оновити
+
+            if set_done:
+                now_iso = datetime.now(timezone.utc).isoformat()
+                session_key = f"session:{session_id}"
+                last_activity_key = f"session:last_activity:{session_id}"
+
+                # Лише поновлюємо TTL основного ключа (без повного перепису JSON)
+                try:
+                    ttl_seconds = int(
+                        timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS).total_seconds()
+                    )
+                    expire_res = self.redis_client.expire(session_key, ttl_seconds)
+                    if inspect.isawaitable(expire_res):
+                        await expire_res
+                    # Логуємо дію
+                    logger.debug(
+                        "Redis EXPIRE session",
+                        redis_log=True,
+                        key=session_key,
+                        ttl=ttl_seconds,
+                    )
+                except Exception as e:
+                    logger.debug(
+                        "Redis EXPIRE session failed",
+                        redis_log=True,
+                        key=session_key,
+                        error=str(e),
+                    )
+
+                # Окремо зберігаємо last_activity у невеликому ключі
+                try:
+                    la_res = self.redis_client.setex(
+                        last_activity_key, 7200, now_iso  # 2 години
+                    )
+                    if inspect.isawaitable(la_res):
+                        await la_res
+                    logger.debug(
+                        "Redis SETEX last_activity",
+                        redis_log=True,
+                        key=last_activity_key,
+                    )
+                except Exception as e:
+                    logger.debug(
+                        "Redis SETEX last_activity failed",
+                        redis_log=True,
+                        key=last_activity_key,
+                        error=str(e),
+                    )
 
     async def get_active_sessions(
         self, user_id: Optional[str] = None

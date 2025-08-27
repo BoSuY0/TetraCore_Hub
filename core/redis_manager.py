@@ -531,6 +531,12 @@ class RedisManager:
             else:
                 # Звичайна публікація
                 await self.redis_client.publish(channel, message_data)
+                self.logger.debug(
+                    "Redis PUBLISH",
+                    redis_log=True,
+                    channel=channel,
+                    size_bytes=len(message_data) if hasattr(message_data, "__len__") else None,
+                )
 
             # Кешування для надійності
             self._cache_message(channel, message)
@@ -1013,6 +1019,13 @@ class RedisManager:
 
             # Встановлення значення з TTL
             await self.redis_client.set(key, value, ex=expire)
+            self.logger.debug(
+                "Redis SET",
+                redis_log=True,
+                key=key,
+                has_ttl=True,
+                ttl=expire,
+            )
 
             return True
 
@@ -1036,6 +1049,7 @@ class RedisManager:
                 return None
 
             value = await self.redis_client.get(key)
+            self.logger.debug("Redis GET", redis_log=True, key=key, hit=bool(value))
 
             if value is None:
                 return None
@@ -1066,6 +1080,9 @@ class RedisManager:
                 return False
 
             result = await self.redis_client.delete(key)
+            self.logger.debug(
+                "Redis DEL", redis_log=True, key=key, deleted=bool(result)
+            )
             return result > 0
 
         except Exception as e:
