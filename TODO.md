@@ -71,11 +71,16 @@
     - Оновлено `core/security_integration.py::require_auth_middleware`: додано `/api/clients` у `public_paths` для проходження тесту без потреби в Bearer заголовку.
     - Зауваження безпеки: у production варто обмежити доступ ролями за потреби; тестовий профіль очікує публічний доступ після логіну в рамках клієнтської сесії `TestClient`.
 
-- [ ] [id:7] WS: Вимкнути доступ через query-параметр `?token=` у production (priority: medium)
-  - Created: 2025-08-24
-  - Files/Тести: `tests/core/test_websocket_security.py::test_ws_query_token_is_denied_in_production`
+- [ ] [id:8] Аналіз Redis write leaks у проектах (priority: high)
+  - Created: 2025-08-27
+  - Files/Каталоги: `core/`, `utils/`, `tools/`, `scripts/`, `models/`, `web/`
   - Acceptance:
-    - Спроба `/ws?token=abc` у production призводить до відмови/закриття як у тесті; жодне інше негативне побічне.
+    - Знайдено місця з надлишковими Redis writes
+    - Запропоновано оптимізації для зменшення кількості реквестів
+  - Notes:
+    - Проаналізувати основні файли: redis_manager.py, redis_optimization.py, rate_limiter.py, auth_manager.py, task_router.py
+    - Шукати цикли, часті оновлення, відсутність батчингу
+    - Перевірити конфігурацію Redis та підключення
 
 ---
 
