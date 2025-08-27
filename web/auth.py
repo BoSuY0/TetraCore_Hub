@@ -8,6 +8,7 @@ import uuid
 import hashlib
 from datetime import datetime
 from typing import Dict, List
+import inspect
 
 from fastapi import APIRouter, HTTPException, Depends, Request, Security
 from fastapi.responses import JSONResponse
@@ -430,26 +431,41 @@ async def logout(
 
         # Додатково очищаємо всі можливі сесії користувача
         if auth_mgr.redis_client:
-            # Шукаємо всі сесії користувача
-            pattern = "session:*"
-            async for key in auth_mgr.redis_client.scan_iter(match=pattern):
-                try:
-                    session_data = await auth_mgr.redis_client.get(key)
-                    if session_data:
-                        session = json.loads(session_data)
-                        if session.get("user_id") == user["user_id"]:
-                            await auth_mgr.redis_client.delete(key)
-                            logger.info(
-                                "Deleted user session", key=key, user_id=user["user_id"]
+            # Видаляємо всі сесії користувача через індекс user_sessions:{user_id}
+            try:
+                index_key = f"user_sessions:{user['user_id']}"
+                members_res = auth_mgr.redis_client.smembers(index_key)
+                members = (
+                    await members_res if inspect.isawaitable(members_res) else members_res
+                )
+                if members:
+                    for sid_bytes in members:
+                        try:
+                            sid = (
+                                sid_bytes.decode("utf-8")
+                                if isinstance(sid_bytes, (bytes, bytearray))
+                                else str(sid_bytes)
                             )
-                except (
-                    json.JSONDecodeError,
-                    ValueError,
-                    TypeError,
-                    KeyError,
-                    redis.exceptions.RedisError,
-                ) as e:
-                    logger.error("Error deleting session", key=key, error=str(e))
+                            del_res = auth_mgr.redis_client.delete(f"session:{sid}")
+                            if inspect.isawaitable(del_res):
+                                await del_res
+                            logger.info(
+                                "Deleted user session",
+                                key=f"session:{sid}",
+                                user_id=user["user_id"],
+                            )
+                        except Exception as e:
+                            logger.error(
+                                "Error deleting session via index",
+                                key=f"session:{sid}",
+                                error=str(e),
+                            )
+                    # Очищаємо індекс
+                    del_index_res = auth_mgr.redis_client.delete(index_key)
+                    if inspect.isawaitable(del_index_res):
+                        await del_index_res
+            except Exception as e:
+                logger.error("Error deleting user sessions index", error=str(e))
 
         # Маскуємо session_id у логах
         sid = user.get("session_id", "")

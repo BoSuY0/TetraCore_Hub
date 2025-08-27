@@ -266,10 +266,18 @@ class RedisOptimizer:
             value = await self._execute_with_retry(self.redis_client.get, full_key)
 
             if value is None:
+                try:
+                    logger.debug("Redis GET cache miss", redis_log=True, key=full_key)
+                except Exception:
+                    pass
                 return None
 
             # Декодування та декомпресія
             decoded_value = self._decode_value(value)
+            try:
+                logger.debug("Redis GET cache hit", redis_log=True, key=full_key)
+            except Exception:
+                pass
 
             # Збереження в локальний кеш
             if use_local_cache:
@@ -306,6 +314,16 @@ class RedisOptimizer:
             result = await self._execute_with_retry(
                 self.redis_client.set, full_key, encoded_value, ex=ttl
             )
+            try:
+                logger.debug(
+                    "Redis SET cache",
+                    redis_log=True,
+                    key=full_key,
+                    ttl=ttl,
+                    size_bytes=len(encoded_value) if hasattr(encoded_value, "__len__") else None,
+                )
+            except Exception:
+                pass
 
             # Оновлення локального кешу
             self._add_to_local_cache(full_key, value, len(encoded_value))
@@ -319,7 +337,12 @@ class RedisOptimizer:
 
     async def _set_with_ttl(self, key: str, value: bytes, ttl: int):
         """Helper для set з TTL"""
-        return await self.redis_client.set(key, value, ex=ttl)
+        res = await self.redis_client.set(key, value, ex=ttl)
+        try:
+            logger.debug("Redis SET", redis_log=True, key=f"{CACHE_PREFIX}{key}", ttl=ttl)
+        except Exception:
+            pass
+        return res
 
     async def delete(self, *keys: str) -> int:
         """Видалення ключів"""
@@ -398,6 +421,15 @@ class RedisOptimizer:
 
                 # Виконуємо pipeline
                 results = await pipe.execute()
+                try:
+                    logger.debug(
+                        "Redis PIPELINE executed",
+                        redis_log=True,
+                        pipeline_id=pipeline_id,
+                        operations=len(operations),
+                    )
+                except Exception:
+                    pass
 
                 self.metrics["pipeline_batches"] += 1
                 self.metrics["operations"] += len(operations)

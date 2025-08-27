@@ -131,7 +131,7 @@ class RedisMemoryMonitor:
                         "Failed to cleanup pattern", pattern=pattern, error=str(e)
                     )
 
-            # Додаткове очищення ключів без TTL
+            # Додаткове очищення ключів без TTL (обмежуємося лише нашими префіксами)
             keys_without_ttl = await self._cleanup_keys_without_ttl()
             keys_deleted += keys_without_ttl
 
@@ -161,9 +161,27 @@ class RedisMemoryMonitor:
 
             deleted = 0
 
-            # Сканування всіх ключів
+            # Скануємо лише ключі нашого додатку за префіксами
+            prefixes = [
+                "session:",
+                "blocked_token:",
+                "refresh_used:",
+                "task:active:",
+                "task:history:",
+                "request_log:",
+                "ws_nonce:",
+                "user_sessions:",
+            ]
             async for key in self.redis_manager.redis_client.scan_iter():
                 try:
+                    # Пропускаємо сторонні ключі
+                    if isinstance(key, (bytes, bytearray)):
+                        key_str = key.decode("utf-8", errors="ignore")
+                    else:
+                        key_str = str(key)
+                    if not any(key_str.startswith(p) for p in prefixes):
+                        continue
+
                     ttl = await self.redis_manager.redis_client.ttl(key)
 
                     # Якщо ключ без TTL
@@ -186,6 +204,8 @@ class RedisMemoryMonitor:
 
             if deleted > 0:
                 self.logger.info("Set TTL for keys without expiration", total=deleted)
+            else:
+                self.logger.debug("No keys without TTL found for our prefixes")
 
             return deleted
 

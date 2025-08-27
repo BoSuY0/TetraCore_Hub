@@ -90,6 +90,16 @@ class RateLimiter:
 
             results = await pipe.execute()
             current_count = results[1]
+            try:
+                logger.debug(
+                    "Redis PIPE rate_limit",
+                    redis_log=True,
+                    key=redis_key,
+                    window=window_seconds,
+                    current_count=current_count,
+                )
+            except Exception:
+                pass
 
             # Перевіряємо ліміт
             allowed = (current_count + cost) <= limit
@@ -98,6 +108,15 @@ class RateLimiter:
             if not allowed:
                 # Видаляємо додану запис якщо перевищено ліміт
                 await self.redis_client.zrem(redis_key, str(current_time))
+                try:
+                    logger.debug(
+                        "Redis ZREM rate_limit rollback",
+                        redis_log=True,
+                        key=redis_key,
+                        member=str(current_time),
+                    )
+                except Exception:
+                    pass
 
             # Розраховуємо час до скидання ліміту
             oldest_request = await self.redis_client.zrange(
@@ -106,6 +125,15 @@ class RateLimiter:
             reset_at = current_time + window_seconds
             if oldest_request:
                 reset_at = oldest_request[0][1] + window_seconds
+                try:
+                    logger.debug(
+                        "Redis ZRANGE rate_limit oldest",
+                        redis_log=True,
+                        key=redis_key,
+                        oldest_ts=oldest_request[0][1],
+                    )
+                except Exception:
+                    pass
 
             return {
                 "allowed": allowed,

@@ -330,7 +330,9 @@ class RedisSecretProvider(SecretProviderInterface):
 
     def get(self, key: str) -> Optional[str]:
         try:
-            value = self.client.get(self._get_full_key(key))
+            full = self._get_full_key(key)
+            value = self.client.get(full)
+            logger.debug("Redis GET secret", redis_log=True, key=full, hit=bool(value))
             return value.decode("utf-8") if value else None
         except Exception as e:
             logger.error(f"Redis error: {e}")
@@ -338,23 +340,30 @@ class RedisSecretProvider(SecretProviderInterface):
 
     def set(self, key: str, value: str) -> bool:
         try:
-            return self.client.setex(
-                self._get_full_key(key), self.ttl, value.encode("utf-8")
-            )
+            full = self._get_full_key(key)
+            res = self.client.setex(full, self.ttl, value.encode("utf-8"))
+            logger.debug("Redis SETEX secret", redis_log=True, key=full, ttl=self.ttl)
+            return res
         except Exception as e:
             logger.error(f"Redis error: {e}")
             return False
 
     def delete(self, key: str) -> bool:
         try:
-            return bool(self.client.delete(self._get_full_key(key)))
+            full = self._get_full_key(key)
+            res = bool(self.client.delete(full))
+            logger.debug("Redis DEL secret", redis_log=True, key=full, deleted=res)
+            return res
         except Exception as e:
             logger.error(f"Redis error: {e}")
             return False
 
     def exists(self, key: str) -> bool:
         try:
-            return bool(self.client.exists(self._get_full_key(key)))
+            full = self._get_full_key(key)
+            res = bool(self.client.exists(full))
+            logger.debug("Redis EXISTS secret", redis_log=True, key=full, exists=res)
+            return res
         except Exception as e:
             logger.error(f"Redis error: {e}")
             return False
