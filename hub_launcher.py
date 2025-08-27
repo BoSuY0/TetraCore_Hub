@@ -687,6 +687,7 @@ class StreamHubLauncher:
         # НЕ реєструємо роути тут - це буде зроблено після створення реального hub
         # Зберігаємо посилання на app для пізнішої реєстрації
         self._app = app
+        return app
 
     async def _startup_hub(self):
         """Запуск StreamHub окремо від FastAPI"""
