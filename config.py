@@ -325,16 +325,9 @@ class Settings:
                 ]
             )
 
-        # Локальні URL для розробки
+        # Локальні URL для розробки — тільки backend
         if self.environment == Environment.DEVELOPMENT:
-            origins.extend(
-                [
-                    "http://localhost:3000",
-                    "http://127.0.0.1:3000",
-                    "http://localhost:8000",
-                    "http://127.0.0.1:8000",
-                ]
-            )
+            origins.extend(["http://localhost:8000", "http://127.0.0.1:8000"])
 
         # Додаткові origins з змінних середовища
         extra_origins = os.getenv("ALLOWED_ORIGINS")
@@ -416,15 +409,7 @@ class Settings:
         return f"http://localhost:{self.port}"
 
     def get_frontend_url(self) -> str:
-        """Отримання URL frontend"""
-        # В development режимі frontend завжди на 3000
-        if self.environment == Environment.DEVELOPMENT:
-            return "http://localhost:3000"
-
-        # В production режимі використовуємо той самий URL що і backend
-        if is_heroku_environment():
-            return self.get_app_url()
-
+        """Отримання URL frontend (вилучено — повертаємо бекенд URL)"""
         return self.get_app_url()
 
     def get_backend_url(self) -> str:

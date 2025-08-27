@@ -279,7 +279,7 @@ class StreamHubLauncher:
 
     def __init__(self):
         self.project_root = Path(__file__).parent.absolute()
-        self.frontend_dir = self.project_root / "frontend"
+        # Frontend вилучено
         self.static_dir = self.project_root / "static"
         self.server_process = None
         self.frontend_process = None
@@ -308,8 +308,6 @@ class StreamHubLauncher:
         settings = get_settings()
 
         backend_url = settings.get_backend_url()
-        frontend_url = settings.get_frontend_url()
-        dashboard_url = settings.get_dashboard_url()
         websocket_url = settings.get_websocket_url()
 
         banner = f"""
@@ -321,8 +319,6 @@ class StreamHubLauncher:
 ║  Environment: {os.getenv("ENVIRONMENT", "development"):<46}║
 ╠══════════════════════════════════════════════════════════════╣
 ║  🔧 Backend:    {backend_url:<44}║
-║  🎨 Frontend:   {frontend_url:<44}║
-║  📊 Dashboard:  {dashboard_url:<44}║
 ║  🔌 WebSocket:  {websocket_url:<44}║
 ╠══════════════════════════════════════════════════════════════╣
 ║  📁 Project:    {str(self.project_root):<44}║
@@ -335,7 +331,6 @@ class StreamHubLauncher:
             self.logger.info("🔧 Development режим:")
             self.logger.info("   • Hot reload активний")
             self.logger.info("   • Debug логування увімкнено")
-            self.logger.info("   • Frontend dev server на :3000")
             self.logger.info("   • Backend API на :8000")
             self.logger.info("   • Один процес для всього\n")
         elif mode == "fast":
@@ -345,7 +340,6 @@ class StreamHubLauncher:
         elif mode == "prod":
             self.logger.info("🚀 Production режим:")
             self.logger.info("   • Оптимізована збірка")
-            self.logger.info("   • Статичні файли з /static")
             self.logger.info("   • Production налаштування\n")
 
     def setup_logging(self, verbose=False):
@@ -384,170 +378,13 @@ class StreamHubLauncher:
         return uvicorn_log_level
 
     def _register_spa_routes(self, app):
-        """SPA роути відключені: бекенд більше не сервить фронтенд."""
         return
 
     def _check_if_frontend_needs_rebuild(self):
-        """Перевіряє чи потрібна перебудова frontend"""
-        # Перевіряємо наявність build директорії
-        build_dir = self.frontend_dir / "build"
-        if not build_dir.exists():
-            return True
-
-        # Перевіряємо наявність основних файлів
-        # Інші дрібниці:
-        required_files = ["index.html", "static/js", "static/css"]
-        for file_path in required_files:
-            if not (build_dir / file_path).exists():
-                return True
-
-        # Перевіряємо час модифікації src файлів
-        src_dir = self.frontend_dir / "src"
-        if src_dir.exists():
-            try:
-                # Знаходимо найновіший src файл (включаючи CSS та HTML)
-                src_files = (
-                    list(src_dir.rglob("*.js"))
-                    + list(src_dir.rglob("*.jsx"))
-                    + list(src_dir.rglob("*.ts"))
-                    + list(src_dir.rglob("*.tsx"))
-                    + list(src_dir.rglob("*.css"))
-                    + list(src_dir.rglob("*.html"))
-                )
-
-                if src_files:
-                    newest_src = max(src_files, key=lambda p: p.stat().st_mtime)
-                    src_time = newest_src.stat().st_mtime
-
-                    # Знаходимо найстаріший build файл
-                    build_files = list(build_dir.rglob("*.js")) + list(
-                        build_dir.rglob("*.css")
-                    )
-                    if build_files:
-                        oldest_build = min(build_files, key=lambda p: p.stat().st_mtime)
-                        build_time = oldest_build.stat().st_mtime
-
-                        # Якщо src новіший за build - потрібна перебудова
-                        if src_time > build_time:
-                            return True
-            except Exception as e:
-                self.logger.warning(f"Помилка перевірки часу файлів: {e}")
-                return True
-
         return False
 
     def _copy_build_files(self):
-        """Копіює файли збірки frontend в static директорію"""
-        build_dir = self.frontend_dir / "build"
-
-        if not build_dir.exists():
-            self.logger.warning("Build директорія не існує")
-            return False
-
-        try:
-            # Очищуємо static_dir перед копіюванням для чистої структури
-            if self.static_dir.exists():
-                shutil.rmtree(self.static_dir)
-            self.static_dir.mkdir(exist_ok=True)
-            # Рекурсивне копіювання всіх файлів з build до static (без nesting)
-            copied_files = 0
-            flattened_files = 0
-
-            for root, dirs, files in os.walk(build_dir):
-                for file in files:
-                    src_file = Path(root) / file
-                    # Визначаємо відносний шлях відносно build
-                    rel_path = src_file.relative_to(build_dir)
-                    str(rel_path)
-
-                    # Універсальний рекурсивний flatten: видаляємо проблематичні префікси
-                    flatten_prefixes = [
-                        "static/",
-                        "assets/static/",
-                        "build/static/",
-                        "public/static/",
-                        "dist/static/",
-                        "out/static/",
-                    ]
-                    path_changed = True
-                    flatten_count = 0
-                    max_iterations = 5  # Запобігаємо нескінченному циклу
-
-                    while path_changed and flatten_count < max_iterations:
-                        path_changed = False
-                        for prefix in flatten_prefixes:
-                            if str(rel_path).startswith(prefix):
-                                old_rel_path = rel_path
-                                rel_path = Path(str(rel_path)[len(prefix) :])
-                                flattened_files += 1
-                                flatten_count += 1
-                                self.logger.debug(
-                                    f"🔄 Flatten #{flatten_count}: {old_rel_path} → {rel_path}"
-                                )
-                                path_changed = True
-                                break  # Перевіряємо з початку після зміни
-
-                    dst_file = self.static_dir / rel_path
-                    dst_file.parent.mkdir(
-                        parents=True, exist_ok=True
-                    )  # Створюємо піддиректорії якщо потрібно
-                    shutil.copy2(src_file, dst_file)
-                    copied_files += 1
-
-            self.logger.info(
-                f"📋 Копіювання завершено: {copied_files} файлів, {flattened_files} flatten'ено"
-            )
-
-            # Перевірки
-            if not (self.static_dir / "index.html").exists():
-                self.logger.error("Помилка: index.html не знайдено після копіювання")
-                return False
-
-            # Ширша перевірка на nesting: перевіряємо на різні проблематичні директорії
-            problematic_dirs = ["static", "assets", "build"]
-            for prob_dir in problematic_dirs:
-                nested_dir = self.static_dir / prob_dir
-                if nested_dir.exists() and nested_dir.is_dir():
-                    sub_structure = list(nested_dir.iterdir())
-                    if sub_structure:
-                        # Перевіряємо чи це не просто assets/ з контентом (це OK)
-                        if prob_dir == "assets" and not any(
-                            item.name in problematic_dirs for item in sub_structure
-                        ):
-                            continue  # assets/ з js/css файлами - це нормально
-                        self.logger.error(
-                            f"Критична помилка: {prob_dir}/ містить файли після flattening - можлива nesting проблема"
-                        )
-                        self.logger.error(
-                            f"Вміст {prob_dir}/: {[item.name for item in sub_structure]}"
-                        )
-                        return False
-
-            # Детальна діагностика структури файлів
-            static_subdirs = [d.name for d in self.static_dir.iterdir() if d.is_dir()]
-            static_files = [f.name for f in self.static_dir.iterdir() if f.is_file()]
-
-            self.logger.info("✅ Frontend файли скопійовано в static")
-            self.logger.debug(f"📁 Директорії в static: {static_subdirs}")
-            self.logger.debug(f"📄 Файли в static: {static_files}")
-
-            # Перевіряємо ключові файли і директорії
-            key_paths = ["js", "css", "assets", "index.html"]
-            for key_path in key_paths:
-                path_obj = self.static_dir / key_path
-                if path_obj.exists():
-                    if path_obj.is_dir():
-                        contents = list(path_obj.iterdir())
-                        self.logger.debug(f"📂 {key_path}/: {len(contents)} елементів")
-                    else:
-                        self.logger.debug(f"📄 {key_path}: файл існує")
-                else:
-                    self.logger.debug(f"❌ {key_path}: не знайдено")
-            return True
-
-        except Exception as e:
-            self.logger.error(f"Помилка копіювання файлів: {e}")
-            return False
+        return False
 
     async def check_node_available(self):
         """Перевіряє наявність Node.js з безпековими обмеженнями"""
@@ -592,7 +429,6 @@ class StreamHubLauncher:
             "ENVIRONMENT": "development",
             "HOST": "0.0.0.0",
             "PORT": os.environ.get("PORT", "8000"),
-            "FRONTEND_URL": "http://localhost:3000",
             "BACKEND_URL": "http://localhost:8000",
             # REDISCLOUD_URL видалено для development - Redis вимкнено за замовчуванням
             "SECRET_KEY": secrets.token_urlsafe(32),
@@ -860,7 +696,7 @@ class StreamHubLauncher:
         """Чекає поки backend стане готовим для прийому запитів"""
         import aiohttp
 
-        backend_url = f"http://localhost:{os.environ.get('PORT', '8000')}/api/health"
+        backend_url = f"http://localhost:{os.environ.get('PORT', '8000')}/health"
 
         for attempt in range(max_attempts):
             try:
@@ -908,8 +744,7 @@ class StreamHubLauncher:
             if self._hub_instance:
                 app.state.hub = self._hub_instance
 
-            # Додаємо SPA роути ПІСЛЯ реєстрації API роутів, щоб уникнути перехоплення
-            self._register_spa_routes(app)
+            # SPA роути не додаються
 
             # Кастомний log_config для уніфікації Uvicorn логів через structlog
             def get_custom_console_renderer():
@@ -1100,9 +935,7 @@ class StreamHubLauncher:
             backend_ready = await self.wait_for_backend_ready(max_attempts=15, delay=1)
 
             if not backend_ready:
-                self.logger.warning(
-                    "❌ Backend не готовий, але продовжуємо запуск frontend..."
-                )
+                self.logger.warning("❌ Backend не готовий — очікуємо далі")
 
             # Frontend dev server відключено
 
@@ -1354,8 +1187,6 @@ class StreamHubLauncher:
         self.logger.info("\n🔗 URL КОНФІГУРАЦІЯ")
         urls = info["urls"]
         self.logger.info(f"Backend: {urls['backend']}")
-        self.logger.info(f"Frontend: {urls['frontend']}")
-        self.logger.info(f"Dashboard: {urls['dashboard']}")
         self.logger.info(f"WebSocket: {urls['websocket']}")
 
         # Redis
@@ -1387,36 +1218,7 @@ class StreamHubLauncher:
 
         cleanup_tasks = []
 
-        # Завершення frontend процесу
-        if self.frontend_process:
-
-            async def cleanup_frontend():
-                try:
-                    # Зупиняємо log monitoring tasks
-                    if hasattr(self, "frontend_log_tasks"):
-                        for task in self.frontend_log_tasks:
-                            if not task.done():
-                                task.cancel()
-                        self.frontend_log_tasks.clear()
-
-                    self.logger.debug("Завершення frontend процесу...")
-                    self.frontend_process.terminate()
-                    await asyncio.wait_for(self.frontend_process.wait(), timeout=5.0)
-                    self.logger.debug("Frontend процес завершено")
-                except ProcessLookupError:
-                    self.logger.debug("Frontend процес вже був завершений")
-                except asyncio.TimeoutError:
-                    self.logger.warning(
-                        "Frontend процес не відповідає, форсуємо завершення"
-                    )
-                    try:
-                        self.frontend_process.kill()
-                    except Exception:
-                        pass
-                except Exception as e:
-                    self.logger.debug(f"Error terminating frontend: {e}")
-
-            cleanup_tasks.append(cleanup_frontend())
+        # Немає frontend процесу для очищення
 
         # Завершення backend сервера
         if self.server_process:
@@ -1474,7 +1276,6 @@ def main():
   python hub_launcher.py dev          # Розробка з hot reload
   python hub_launcher.py fast         # Швидкий запуск backend
   python hub_launcher.py prod         # Production сервер
-  python hub_launcher.py build        # Збірка frontend
   python hub_launcher.py main         # Простий запуск (замість main.py)
   python hub_launcher.py diagnose     # Діагностика середовища
   python hub_launcher.py test-inactive # Тестування неактивності
@@ -1485,12 +1286,10 @@ def main():
         "mode",
         nargs="?",
         default="dev",
-        choices=["dev", "fast", "prod", "build", "main", "diagnose", "test-inactive"],
+        choices=["dev", "fast", "prod", "main", "diagnose", "test-inactive"],
         help="Режим запуску (за замовчуванням: dev)",
     )
-    parser.add_argument(
-        "--force-build", action="store_true", help="Примусова збірка frontend"
-    )
+    # Прапор зборки фронтенду вилучено
     parser.add_argument("--no-banner", action="store_true", help="Не показувати банер")
     parser.add_argument("--verbose", "-v", action="store_true", help="Детальні логи")
     parser.add_argument(
@@ -1517,15 +1316,7 @@ def main():
         elif args.mode == "fast":
             asyncio.run(launcher.run_fast_mode(verbose=args.verbose))
         elif args.mode == "prod":
-            asyncio.run(
-                launcher.run_prod_mode(
-                    force_build=args.force_build, verbose=args.verbose
-                )
-            )
-        elif args.mode == "build":
-            # Режим збірки видалено — фронтенд вилучено з проекту
-            launcher.logger.error("Фронтенд вилучено: режим 'build' недоступний")
-            sys.exit(1)
+            asyncio.run(launcher.run_prod_mode(verbose=args.verbose))
         elif args.mode == "main":
             # Режим main.py для сумісності
             asyncio.run(launcher.run_main_mode(verbose=args.verbose))

@@ -17,9 +17,7 @@ from urllib.parse import urlparse
 
 # Конфігурація тестів
 BACKEND_URL = "http://localhost:8000"
-FRONTEND_URL = "http://localhost:3000"
 WEBSOCKET_URL = "ws://localhost:8000/ws"
-WEBSOCKET_PROXY_URL = "ws://localhost:3000/ws"
 
 # Основні API ендпоінти для тестування
 TEST_ENDPOINTS = ["/api/metrics", "/api/clients", "/api/tasks"]
@@ -29,7 +27,7 @@ TEST_ENDPOINTS = ["/api/metrics", "/api/clients", "/api/tasks"]
 # ВАЖЛИВО: function scope, щоб сервери працювали в тому ж event loop, що й тест
 @pytest.fixture(scope="function", autouse=True)
 async def ensure_test_servers():
-    """Підіймає легкі stub-сервери на 8000/3000, якщо порти закриті, щоб тести не пропускались.
+    """Підіймає легкий backend stub (8000) якщо порт закритий.
 
     HTTP: aiohttp.web з простими маршрутами
     WS:   aiohttp.web WebSocketRoute
@@ -64,7 +62,6 @@ async def ensure_test_servers():
     frontend_runner = None
     # Утримуємо сильні посилання на сайти, щоб GC не зупинив сервери
     backend_sites = []
-    frontend_sites = []
 
     async def start_backend_stub():
         app = web.Application()
@@ -169,93 +166,19 @@ async def ensure_test_servers():
             pass
         return runner, base_url
 
-    async def start_frontend_stub():
-        app = web.Application()
-
-        async def api_any(request):
-            # Імітуємо проксі, яке може бути недоступним
-            return web.Response(status=503, text="Service Unavailable")
-
-        async def ws_handler(request):
-            ws = web.WebSocketResponse()
-            await ws.prepare(request)
-            try:
-                await ws.send_str('{"type":"proxy","status":"ok"}')
-            except Exception:
-                pass
-            async for _ in ws:
-                pass
-            return ws
-
-        app.router.add_route("GET", "/api/{tail:.*}", api_any)
-        app.router.add_get("/ws", ws_handler)
-
-        runner = web.AppRunner(app)
-        await runner.setup()
-        ok_hosts = []
-        for host in ("127.0.0.1", "::1", "localhost"):
-            try:
-                site = web.TCPSite(runner, host=host, port=3000)
-                await site.start()
-                frontend_sites.append(site)
-                ok_hosts.append(host)
-            except Exception:
-                pass
-
-        base_url = None
-        if not ok_hosts:
-            try:
-                ep_site = web.TCPSite(runner, host="127.0.0.1", port=0)
-                await ep_site.start()
-                frontend_sites.append(ep_site)
-                sock = ep_site._server.sockets[0]
-                port = sock.getsockname()[1]
-                base_url = f"http://127.0.0.1:{port}"
-            except Exception:
-                pass
-        else:
-            if "127.0.0.1" in ok_hosts:
-                base_url = "http://127.0.0.1:3000"
-            elif "::1" in ok_hosts:
-                base_url = "http://[::1]:3000"
-            elif "localhost" in ok_hosts:
-                base_url = "http://localhost:3000"
-
-        await asyncio.sleep(0.5)
-        # Перевірка готовності
-        try:
-            import aiohttp
-
-            if base_url:
-                async with aiohttp.ClientSession() as _s:
-                    for _ in range(5):
-                        try:
-                            async with _s.get(f"{base_url}/api/health", timeout=1):
-                                break
-                        except Exception:
-                            await asyncio.sleep(0.2)
-        except Exception:
-            pass
-        return runner, base_url
+    # Frontend stub вилучено
 
     # Стартуємо стаб-сервери завжди: якщо 8000/3000 зайняті — використовуємо випадкові порти і оновлюємо URL
     try:
         backend_runner, backend_base = await start_backend_stub()
-        frontend_runner, frontend_base = await start_frontend_stub()
         # Оновлюємо глобальні URL, щоб тести звертались до реально піднятих стабів
         if backend_base:
             globals()["BACKEND_URL"] = backend_base
             globals()["WEBSOCKET_URL"] = (
                 backend_base.replace("http://", "ws://") + "/ws"
             )
-        if frontend_base:
-            globals()["FRONTEND_URL"] = frontend_base
-            globals()["WEBSOCKET_PROXY_URL"] = (
-                frontend_base.replace("http://", "ws://") + "/ws"
-            )
         # Debug: показуємо, які URL використаємо в тестах
         print(f"[ensure_test_servers] BACKEND_URL -> {globals().get('BACKEND_URL')}")
-        print(f"[ensure_test_servers] FRONTEND_URL -> {globals().get('FRONTEND_URL')}")
     except Exception:
         # Якщо щось пішло не так — не заважаємо тестам, вони можуть відскіпатись
         backend_runner = None
@@ -412,50 +335,7 @@ class TestHubEndpoints:
         if failed_endpoints:
             pytest.fail(f"Backend endpoints недоступні: {', '.join(failed_endpoints)}")
 
-    async def test_proxy_endpoints(self, session):
-        """Тест ендпоінтів через Vite proxy (localhost:3000)"""
-        print(f"\n🔄 Тестування API через Vite proxy...")
-        # Перевіряємо фактичний порт з FRONTEND_URL
-        parsed = urlparse(FRONTEND_URL)
-        host = parsed.hostname or "localhost"
-        port = parsed.port or 3000
-        if not self._is_port_open(host, port):
-            await asyncio.sleep(0.5)
-
-        async def _fetch_proxy(ep: str):
-            url = f"{FRONTEND_URL}{ep}"
-            status, text = await self.retry_request(session, url)
-            return ep, (status, text)
-
-        results = await asyncio.gather(
-            *[_fetch_proxy(ep) for ep in TEST_ENDPOINTS], return_exceptions=True
-        )
-        failed_endpoints = []
-        for res in results:
-            if isinstance(res, Exception):
-                failed_endpoints.append(str(res))
-                continue
-            endpoint, reply = res
-            status, text = reply
-            if status is None:
-                failed_endpoints.append(f"{endpoint}: недоступний")
-            else:
-                print(f"✅ Proxy {endpoint}: {status}")
-                assert (
-                    status != 404
-                ), f"404 помилка для proxy {endpoint} - роути не зареєстровані"
-                assert status in [
-                    200,
-                    401,
-                    403,
-                    503,
-                ], f"Неочікуваний статус {status} для proxy {endpoint}"
-                if status == 503:
-                    # Деякі проксі (Vite/Heroku) повертають HTML error-page. Достатньо самого статусу 503.
-                    print(f"⚠️  {endpoint}: Backend недоступний (503)")
-
-        if failed_endpoints:
-            pytest.fail(f"Proxy endpoints недоступні: {', '.join(failed_endpoints)}")
+    # Proxy тест вилучено
 
     async def test_websocket_direct(self):
         """Тест прямого WebSocket з'єднання (динамічний хост/порт)"""
@@ -484,43 +364,14 @@ class TestHubEndpoints:
             print(f"❌ Пряме WebSocket з'єднання не вдалося: {e}")
             # Не fail-имо тест, бо це може бути нормально в dev
 
-    async def test_websocket_proxy(self):
-        """Тест WebSocket через Vite proxy (динамічний хост/порт)"""
-        print(f"\n🔄 Тестування WebSocket через Vite proxy...")
-        parsed = urlparse(WEBSOCKET_PROXY_URL)
-        host = parsed.hostname or "localhost"
-        port = parsed.port or 3000
-        if not self._is_port_open(host, port):
-            pytest.skip(
-                "Frontend WS proxy не запущений — пропускаємо, щоб уникнути таймаутів"
-            )
-
-        try:
-            async with websockets.connect(
-                WEBSOCKET_PROXY_URL, open_timeout=2
-            ) as websocket:
-                print("✅ WebSocket proxy з'єднання успішне")
-
-                # Надсилаємо тестове повідомлення
-                await websocket.send('{"type": "ping"}')
-
-                # Чекаємо відповідь
-                try:
-                    response = await asyncio.wait_for(websocket.recv(), timeout=0.5)
-                    print(f"✅ WebSocket proxy відповідь: {response[:50]}...")
-                except asyncio.TimeoutError:
-                    print("⚠️  WebSocket proxy відповідь не отримана (timeout)")
-
-        except Exception as e:
-            print(f"❌ WebSocket proxy з'єднання не вдалося: {e}")
-            # Не fail-имо, бо frontend може бути не запущений
+    # WebSocket proxy тест вилучено
 
     async def test_cors_headers(self, session):
         """Тест CORS заголовків"""
         print(f"\n🌍 Тестування CORS заголовків...")
 
         headers = {
-            "Origin": "http://localhost:3000",
+            "Origin": "http://localhost:8000",
             "Access-Control-Request-Method": "GET",
             "Access-Control-Request-Headers": "authorization,content-type",
         }
@@ -545,11 +396,11 @@ class TestHubEndpoints:
                 print(f"✅ CORS Origin: {cors_origin}")
                 print(f"✅ CORS Methods: {cors_methods}")
 
-                # Перевіряємо що localhost:3000 дозволений
+                # Перевіряємо що localhost:8000 дозволений
                 assert cors_origin in [
                     "*",
-                    "http://localhost:3000",
-                ], f"CORS не дозволяє localhost:3000: {cors_origin}"
+                    "http://localhost:8000",
+                ], f"CORS не дозволяє localhost:8000: {cors_origin}"
 
         except Exception as e:
             print(f"❌ CORS тест не вдався: {e}")
@@ -573,9 +424,7 @@ def check_servers_running():
             return False
 
     backend_running = check_port("localhost", 8000, "Backend")
-    frontend_running = check_port("localhost", 3000, "Frontend")
-
-    return backend_running, frontend_running
+    return backend_running, False
 
 
 async def run_comprehensive_test():
@@ -586,7 +435,7 @@ async def run_comprehensive_test():
     # Перевіряємо сервери
     backend_running, frontend_running = check_servers_running()
 
-    if not backend_running and not frontend_running:
+    if not backend_running:
         print("\n❌ Ні backend, ні frontend не запущені!")
         # Підказка без прив’язки до конкретного режиму: запускайте як вам зручно
         print(
@@ -605,10 +454,7 @@ async def run_comprehensive_test():
                 await test_instance.test_websocket_direct()
                 await test_instance.test_cors_headers(session)
 
-            # Тест proxy ендпоінтів
-            if frontend_running:
-                await test_instance.test_proxy_endpoints(session)
-                await test_instance.test_websocket_proxy()
+            # Proxy тести вилучено
 
             print(f"\n✅ Всі тести завершені успішно!")
             return True
@@ -637,16 +483,7 @@ def test_dev_mode_startup():
     except Exception as e:
         pytest.fail(f"Помилка імпорту hub_launcher: {e}")
 
-    # Перевіряємо frontend директорію
-    frontend_dir = project_root / "frontend"
-    if frontend_dir.exists():
-        package_json = frontend_dir / "package.json"
-        if package_json.exists():
-            print("✅ Frontend директорія та package.json знайдені")
-        else:
-            print("⚠️  package.json не знайдено у frontend")
-    else:
-        print("⚠️  Frontend директорія не знайдена")
+    # Frontend директорія більше не очікується
 
 
 if __name__ == "__main__":

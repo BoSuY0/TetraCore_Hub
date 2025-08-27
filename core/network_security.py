@@ -91,7 +91,8 @@ class NetworkSecurityManager:
 
         # Конфігурація
         self.rate_limit_config = RateLimitConfig()
-        self.cors_origins = ["http://localhost:3000", "https://tetracore.app"]
+        # Видалено жорсткий localhost:3000; тепер лише з ALLOWED_ORIGINS або прод-домени
+        self.cors_origins = ["https://tetracore.app"]
 
         # Завантажуємо whitelist
         self._load_whitelist()

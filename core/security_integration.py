@@ -235,9 +235,7 @@ class SecurityIntegration:
                     "localhost",
                     "127.0.0.1",
                     "0.0.0.0",
-                    "localhost:3000",
                     "localhost:8000",
-                    "127.0.0.1:3000",
                     "127.0.0.1:8000",
                 ]
             )
@@ -417,26 +415,13 @@ async def require_auth_middleware(request: Request, call_next):
         # Обмежимо публічні API до health/metrics. Інші вимагатимуть токен
         "/api/health",
         "/api/metrics",
-        # Frontend lightweight status/health залишаємо публічними для пінгів UI
-        "/api/frontend/status",
-        "/api/frontend/health",
-    ]
-
-    # Dashboard routes (HTML сторінки мають бути публічними для React SPA)
-    dashboard_paths = [
-        "/dashboard/",
-        "/dashboard/clients",
-        "/dashboard/api/status",  # Статус дашборду має бути публічним
-        "/api/auth/validate",
     ]
 
     # Пропускаємо OPTIONS запити для CORS preflight
     if request.method == "OPTIONS":
         return await call_next(request)
 
-    # Статичні файли також публічні
-    if request.url.path.startswith("/static/") or request.url.path == "/":
-        return await call_next(request)
+    # Більше не робимо винятків для статики/кореня — бекенд не сервить SPA
 
     # Перевірка чи шлях публічний
     if request.url.path in public_paths:
@@ -450,16 +435,10 @@ async def require_auth_middleware(request: Request, call_next):
     if request.url.path.startswith("/ws"):  # Виправлено: видалено зайвий слеш
         return await call_next(request)
 
-    # Dashboard HTML сторінки залишаємо публічними для SPA
-    if any(request.url.path.startswith(path) for path in dashboard_paths):
-        return await call_next(request)
+    # Dashboard сторінки відсутні — без винятків
 
     # Перевірка автентифікації для захищених ендпоінтів
     needs_auth = False
-
-    # Dashboard API ендпоінти потребують автентифікації (навіть якщо раніше були публічні)
-    if request.url.path.startswith("/dashboard/api/"):
-        needs_auth = True
 
     # Security ендпоінти потребують автентифікації
     if request.url.path.startswith("/api/security/"):
@@ -469,10 +448,7 @@ async def require_auth_middleware(request: Request, call_next):
     if request.url.path.startswith("/api/admin/"):
         needs_auth = True
 
-    # Frontend API: все під /api/frontend/ (крім явних public_paths вище) вимагає токен
-    # Публічні /api/frontend/status та /api/frontend/health вже пропускаються раніше через public_paths
-    if request.url.path.startswith("/api/frontend/"):
-        needs_auth = True
+    # Всі /api/* окрім явних public_paths вимагають токен
 
     # Клієнти/таски — тепер потребують токен
     if (

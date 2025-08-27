@@ -21,7 +21,6 @@ import os
 import fastapi  # type: ignore  # noqa: F401 (used for typing and sub-modules)
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException  # type: ignore
 from fastapi.middleware.cors import CORSMiddleware  # type: ignore
-from fastapi.staticfiles import StaticFiles  # type: ignore
 
 import structlog  # type: ignore
 
@@ -52,7 +51,6 @@ from core.async_optimization import AsyncOptimizer
 from core.auth_manager import get_current_user
 
 # Celery task queue видалено - завдання тепер обробляються через tetra-core-api
-# Removed old dashboard imports - now using React SPA
 
 
 class StreamHub:
@@ -185,12 +183,6 @@ class StreamHub:
             # Самореєстрація як клієнт
             await self._register_self_as_client()
 
-            # Запуск periodic broadcast для task stats
-            asyncio.create_task(self._periodic_task_stats_broadcast())
-
-            # Запуск periodic broadcast для системних метрик (реальний стрім для дашборду)
-            asyncio.create_task(self._periodic_metrics_broadcast())
-
             self.start_time = datetime.utcnow()
             self.is_running = True
 
@@ -276,18 +268,13 @@ class StreamHub:
         self.logger.info(
             "URL Configuration",
             backend_url=self.settings.get_backend_url(),
-            frontend_url=self.settings.get_frontend_url(),
-            dashboard_url=self.settings.get_dashboard_url(),
             websocket_url=self.settings.get_websocket_url(),
             is_heroku=is_heroku_environment(),
             host=self.settings.host,
             port=self.settings.port,
         )
 
-        # Templates removed - using React SPA instead
-
-        # Відключено сервінг React статики з backend
-        # Якщо потрібно повертати статику — ввімкніть окремий CDN/статичний сервер
+        # Frontend/dashboard сервінг відключено
 
         # Реєстрація роутів
         self.logger.info(
@@ -358,105 +345,6 @@ class StreamHub:
             # Отримуємо справжній hub instance з app.state якщо доступний
             hub = getattr(request.app.state, "hub", self)
             return await hub.get_health_status()
-
-        # Видалений зайвий лог config endpoint
-        @self.app.get("/api/config")  # type: ignore[attr-defined]
-        async def get_app_config():
-            """Отримання конфігурації додатку для frontend"""
-            return {
-                "backend_url": self.settings.get_backend_url(),
-                "frontend_url": self.settings.get_frontend_url(),
-                "dashboard_url": self.settings.get_dashboard_url(),
-                "websocket_url": self.settings.get_websocket_url(),
-                "environment": self.settings.environment.value,
-                "version": "1.0.0",
-            }
-
-        # Prometheus metrics endpoint (обмеження доступу в production в security_integration)
-        @self.app.get("/metrics")  # type: ignore[attr-defined]
-        async def prometheus_metrics():
-            from fastapi.responses import PlainTextResponse  # type: ignore
-
-            try:
-                if self.metrics_collector:
-                    text = await self.metrics_collector.export_prometheus_metrics()
-                    return PlainTextResponse(text, media_type="text/plain")
-            except Exception as e:
-                self.logger.error("Failed to export Prometheus metrics", error=str(e))
-            return PlainTextResponse("", media_type="text/plain")
-
-        # Remove duplicate route registrations - these will be handled by dashboard.py
-        # Only register routes that are NOT handled by dashboard.py to avoid conflicts
-
-        # Видалений зайвий лог alternative endpoints
-        @self.app.get("/clients")  # type: ignore[attr-defined]
-        async def get_clients_alternative(
-            request: fastapi.Request,
-            user: Dict[str, Any] = fastapi.Depends(get_current_user),
-        ):
-            """Отримання списку підключених клієнтів (альтернативний ендпоінт)"""
-            # Отримуємо справжній hub instance з app.state якщо доступний
-            hub = getattr(request.app.state, "hub", self)
-
-            if not hub.client_manager or not hub.client_manager.is_healthy():
-                return {"clients": [], "total_count": 0}
-
-            return {
-                "clients": [
-                    client.to_dict() for client in hub.client_manager.get_all_clients()
-                ],
-                "total_count": hub.client_manager.get_client_count(),
-            }
-
-        # Видалений зайвий лог tasks endpoint
-        @self.app.get("/tasks")  # type: ignore[attr-defined]
-        async def get_tasks_alternative(
-            request: fastapi.Request,
-            user: Dict[str, Any] = fastapi.Depends(get_current_user),
-        ):
-            """Отримання інформації про завдання (альтернативний ендпоінт)"""
-            # Отримуємо справжній hub instance з app.state якщо доступний
-            hub = getattr(request.app.state, "hub", self)
-
-            try:
-                if not hub.task_router:
-                    # Повертаємо порожні статистики якщо TaskRouter недоступний
-                    return {
-                        "total_tasks": 0,
-                        "pending_tasks": 0,
-                        "processing_tasks": 0,
-                        "completed_tasks": 0,
-                        "failed_tasks": 0,
-                        "average_processing_time": 0,
-                        "queue_sizes": {
-                            "critical": 0,
-                            "high": 0,
-                            "normal": 0,
-                            "low": 0,
-                        },
-                        "worker_distribution": {},
-                    }
-
-                return await hub.task_router.get_queue_stats()
-            except Exception as e:
-                hub.logger.error("Error getting task stats", error=str(e))
-                # Повертаємо порожні статистики при помилці
-                return {
-                    "total_tasks": 0,
-                    "pending_tasks": 0,
-                    "processing_tasks": 0,
-                    "completed_tasks": 0,
-                    "failed_tasks": 0,
-                    "average_processing_time": 0,
-                    "queue_sizes": {"critical": 0, "high": 0, "normal": 0, "low": 0},
-                    "worker_distribution": {},
-                }
-
-        # Task cancel endpoint will be handled by dashboard.py to avoid conflicts
-
-        @self.app.get("/")  # type: ignore[attr-defined]
-        async def root_handler():
-            return {"message": "TetraCore StreamHub API", "status": "running"}
 
         @self.app.get("/{path:path}")  # type: ignore[attr-defined]
         async def not_found_fallback(path: str):
