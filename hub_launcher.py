@@ -638,9 +638,7 @@ class StreamHubLauncher:
         """Створює FastAPI додаток"""
         from fastapi.middleware.cors import CORSMiddleware
         from core.security_integration import integrate_security
-        from web.jwks import router as jwks_router
-        from web.dashboard import register_dashboard_routes
-        from web.security_diagnostics import router as security_diag_router
+        # Видалено імпорти web модулів - фронтенд виключено
         from config import get_settings
 
         # Глобальна змінна для збереження hub instance
@@ -678,28 +676,10 @@ class StreamHubLauncher:
             require_auth=settings.require_authentication,
         )
 
-        # JWKS endpoint (always)
-        app.include_router(jwks_router)
+        # JWKS endpoint видалено - фронтенд виключено
+        # Security diagnostics endpoint видалено - фронтенд виключено
 
-        # Security diagnostics endpoint тільки у development
-        try:
-            if settings.is_development():
-                app.include_router(security_diag_router)
-        except Exception:
-            pass
-
-        # Реєструємо базові fallback-роути для API (health/metrics/clients/tasks)
-        # ТІЛЬКИ якщо embedded-режим вимкнений. Інакше вони перекриють реальні роути
-        # і фронтенд бачитиме "неактивні" компоненти навіть після запуску хаба.
-        if os.getenv("AUTO_BOOTSTRAP_HUB_FOR_APP", "true").lower() not in (
-            "1",
-            "true",
-            "yes",
-        ):
-            try:
-                register_dashboard_routes(app, streamhub_instance=None)
-            except Exception:
-                pass
+        # Реєстрація dashboard роутів видалена - фронтенд виключено
 
         # Підключення статичних файлів буде в run_backend після реєстрації API роутів
         # щоб уникнути перехоплення API запитів SPA fallback'ом
@@ -707,70 +687,6 @@ class StreamHubLauncher:
         # НЕ реєструємо роути тут - це буде зроблено після створення реального hub
         # Зберігаємо посилання на app для пізнішої реєстрації
         self._app = app
-
-        #
-        # Embedded режим (універсальний, не тестовий):
-        # Створюємо мінімальний StreamHub, щоб додаток був самодостатнім у вбудованих сценаріях
-        # (наприклад, інтеграційні тести, вбудування в інші процеси), навіть без повного run_backend().
-        # Керується прапорцем AUTO_BOOTSTRAP_HUB_FOR_APP (за замовчуванням увімкнено).
-        if os.getenv("AUTO_BOOTSTRAP_HUB_FOR_APP", "true").lower() in (
-            "1",
-            "true",
-            "yes",
-        ):
-            try:
-                from core.hub import StreamHub
-
-                hub = StreamHub()
-                # Прив'язуємо поточний FastAPI app до hub та реєструємо маршрути (включно з /ws)
-                hub.app = app
-                hub._register_routes()  # реєструє @app.websocket("/ws") та інші необхідні ендпойнти
-
-                # Робимо hub доступним для ендпойнтів через app.state
-                app.state.hub = hub
-                # Зберігаємо інстанс, щоб уникнути GC у середовищі embed/тестів
-                self._hub_instance = hub
-
-                # Опційна авто-ініціалізація embedded hub на startup події,
-                # щоб /api/health повертав реальний стан компонентів
-                if os.getenv("AUTO_INIT_EMBEDDED_HUB", "true").lower() in (
-                    "1",
-                    "true",
-                    "yes",
-                ):
-
-                    @app.on_event("startup")
-                    async def _auto_init_embedded_hub():  # type: ignore[misc]
-                        try:
-                            # Якщо вже ініціалізований (або run_backend це робитиме) — пропускаємо
-                            if getattr(self, "_hub_instance", None) and getattr(
-                                self._hub_instance, "is_running", False
-                            ):
-                                return
-                            await hub.initialize()
-                            # Після ініціалізації переконаємось, що роути прив'язані до реального hub
-                            try:
-                                hub.app = app
-                                hub._register_routes()
-                            except Exception:
-                                pass
-                            if hasattr(self, "logger"):
-                                self.logger.info(
-                                    "✅ Embedded StreamHub initialized on startup"
-                                )
-                        except Exception as e:
-                            if hasattr(self, "logger"):
-                                self.logger.warning(
-                                    "Could not auto-initialize embedded StreamHub",
-                                    extra={"error": str(e)},
-                                )
-                            # Не падаємо під час create_app()
-
-            except Exception:
-                # Повний хаб буде ініціалізований у run_backend(); ця секція не критична.
-                pass
-
-        return app
 
     async def _startup_hub(self):
         """Запуск StreamHub окремо від FastAPI"""

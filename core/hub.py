@@ -301,8 +301,7 @@ class StreamHub:
         """Реєстрація HTTP та WebSocket роутів"""
         # Видалений зайвий лог registration
 
-        # Налаштування дашборду (перед реєстрацією роутів)
-        self._setup_dashboard()
+        # Налаштування дашборду видалено - фронтенд виключено
 
         # Auth router is now included in security integration
 
@@ -2356,43 +2355,8 @@ class StreamHub:
 
     def _setup_dashboard(self):
         """Налаштування веб-дашборду (React SPA)"""
-        try:
-            # Імпорт та реєстрація dashboard роутів
-            from web.dashboard import register_dashboard_routes
-
-            self.logger.info(
-                "🔧 Attempting to register dashboard routes",
-                app_exists=hasattr(self, "app") and self.app is not None,
-                streamhub_exists=bool(self),
-            )
-
-            register_dashboard_routes(self.app, self)
-
-            # Перевіряємо що роути зареєстровані
-            api_routes = [
-                r for r in self.app.routes if hasattr(r, "path") and "/api/" in r.path
-            ]
-
-            self.logger.info(
-                "✅ Dashboard configured successfully",
-                total_routes=len(self.app.routes),
-                api_routes_count=len(api_routes),
-            )
-
-        except ImportError as e:
-            self.logger.warning("Dashboard routes not available", error=str(e))
-        except Exception as e:
-            self.logger.error(
-                "❌ Failed to setup dashboard",
-                error=str(e),
-                error_type=type(e).__name__,
-            )
-            # Додаємо більше деталей для діагностики
-            import traceback
-
-            self.logger.error(
-                "Dashboard setup traceback", traceback=traceback.format_exc()
-            )
+        # Видалено - фронтенд виключено
+        self.logger.info("Dashboard setup skipped - frontend disabled")
 
     async def _register_self_as_client(self):
         """Реєстрація StreamHub як клієнта в системі"""

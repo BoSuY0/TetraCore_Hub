@@ -24,7 +24,7 @@ from core.https_enforcement import (
     https_enforcement_middleware,
     https_router,
 )
-from web.auth import auth_router
+# Видалено імпорт web.auth - фронтенд виключено
 from config import get_settings
 
 logger = structlog.get_logger()
@@ -169,7 +169,8 @@ class SecurityIntegration:
                 return await call_next(request)
 
         # 8. Додавання auth router
-        app.include_router(auth_router)
+        # Видалено імпорт web.auth - фронтенд виключено
+        # app.include_router(auth_router)
 
         # 9. Додавання security management endpoints
         # Включаємо в development для тестування
