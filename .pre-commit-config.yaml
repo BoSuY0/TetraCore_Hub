@@ -27,5 +27,11 @@ repos:
         language: system
         stages: [post-commit]
         always_run: true
+      - id: clean-caches-after-commit
+        name: Clean test/lint caches after commit
+        entry: bash -lc 'bash scripts/clean_caches.sh || sh scripts/clean_caches.sh || true'
+        language: system
+        stages: [post-commit]
+        always_run: true
 
 

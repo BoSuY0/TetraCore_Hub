@@ -3,6 +3,7 @@ import asyncio
 import os
 from unittest.mock import AsyncMock, MagicMock
 from fastapi.testclient import TestClient
+import shutil
 
 # Speed up bcrypt during tests: set environment early (before importing test modules)
 os.environ.setdefault("ENVIRONMENT", "testing")
@@ -38,6 +39,30 @@ def enable_debug_logging_for_pytest():
         launcher.setup_logging(verbose=True)
     except Exception:
         # Do not break tests if logging setup fails in some environments
+        pass
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_sessionfinish(session, exitstatus):  # type: ignore[unused-argument]
+    """Після завершення всієї сесії pytest — очищаємо кеші тестів та звітів.
+
+    Видаляємо: .pytest_cache, .hypothesis, .coverage, htmlcov
+    """
+    for path in [
+        ".pytest_cache",
+        ".hypothesis",
+        "htmlcov",
+    ]:
+        try:
+            if os.path.isdir(path):
+                shutil.rmtree(path, ignore_errors=True)
+        except Exception:
+            pass
+    # .coverage — файл
+    try:
+        if os.path.exists(".coverage"):
+            os.remove(".coverage")
+    except Exception:
         pass
 
 
