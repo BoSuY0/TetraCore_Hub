@@ -317,9 +317,9 @@ class RedisManager:
 
         # Якщо доступний REDIS_TLS_URL або увімкнуто TLS — форсуємо rediss://
         try:
-            force_tls = bool(getattr(self.settings, "redis_tls_enabled", True))
+            force_tls = bool(getattr(self.settings, "redis_tls_enabled", False))
         except Exception:
-            force_tls = True
+            force_tls = False
 
         if redis_url and force_tls and redis_url.startswith("redis://"):
             redis_url = redis_url.replace("redis://", "rediss://", 1)
