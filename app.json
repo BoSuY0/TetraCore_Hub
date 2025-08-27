@@ -36,12 +36,12 @@
       "value": "0.0.0.0",
       "required": false
     },
-    "REDIS_URL": {
+    "REDISCLOUD_URL": {
       "description": "URL для підключення до Redis (встановіть у Heroku Config Vars)",
       "required": true
     },
     "REDIS_TLS_URL": {
-      "description": "TLS URL для Redis (якщо доступний, має пріоритет над REDIS_URL)",
+      "description": "TLS URL для Redis (якщо доступний, має пріоритет над REDISCLOUD_URL)",
       "required": false
     },
     "AUTH_TOKEN": {

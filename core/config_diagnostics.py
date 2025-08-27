@@ -192,7 +192,7 @@ def _check_cors_hosts(
 def _check_redis(issues: List[Dict[str, Any]]) -> None:
     """Перевірки Redis/TLS (REDIS_ENABLED використовується як тригер)."""
     if os.getenv("REDIS_ENABLED") is not None:
-        url = os.getenv("REDIS_URL", "")
+        url = os.getenv("REDISCLOUD_URL", "")
         tls_cert_reqs = os.getenv("REDIS_SSL_CERT_REQS", "required").lower()
         check_host = os.getenv("REDIS_SSL_CHECK_HOSTNAME", "true").lower() in (
             "1",
@@ -221,7 +221,7 @@ def _check_redis(issues: List[Dict[str, Any]]) -> None:
                 issues,
                 "warning",
                 "REDIS_NO_TLS",
-                "REDIS_URL без TLS (не rediss://)",
+                "REDISCLOUD_URL без TLS (не rediss://)",
                 "Використати TLS (rediss://)",
             )
 

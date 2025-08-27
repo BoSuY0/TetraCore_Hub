@@ -1610,9 +1610,7 @@ class TaskRouter:
                 )
                 return v
             except Exception as e:
-                self.logger.warning(
-                    "Failed to bump task stats version", error=str(e)
-                )
+                self.logger.warning("Failed to bump task stats version", error=str(e))
                 return None
 
         await self.redis_error_handler.execute_with_retry(_bump_version)
@@ -1802,14 +1800,12 @@ class TaskRouter:
                 # Додаємо версію namespace, щоб уникати масових DEL
                 try:
                     version_bytes = await self.redis_client.get("task_stats:version")
-                    version = (
-                        int(version_bytes)
-                        if version_bytes is not None
-                        else 0
-                    )
+                    version = int(version_bytes) if version_bytes is not None else 0
                 except Exception:
                     version = 0
-                cache_key = f"task_stats:{version}:{hash(str(sorted(cache_params.items())))}"
+                cache_key = (
+                    f"task_stats:{version}:{hash(str(sorted(cache_params.items())))}"
+                )
 
                 # Спробуємо отримати з кешу з retry логікою
                 async def _get_cached():

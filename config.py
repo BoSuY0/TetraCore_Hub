@@ -80,7 +80,7 @@ class Settings:
 
     # Redis налаштування (Redis завжди увімкнений)
     redis_enabled: bool = True
-    redis_url: str = ""  # Має бути встановлено через REDIS_URL
+    redis_url: str = ""  # Має бути встановлено через REDISCLOUD_URL
     redis_tls_enabled: bool = True  # За замовчуванням TLS для продакшн
     redis_ssl_cert_reqs: str = "required"
     redis_max_connections: int = (
@@ -232,12 +232,12 @@ class Settings:
         # Ігноруємо REDIS_ENABLED: Redis завжди увімкнений
         self.redis_enabled = True
 
-        # Підтримка REDIS_TLS_URL (пріоритетніше за REDIS_URL якщо задано)
+        # Підтримка REDIS_TLS_URL (пріоритетніше за REDISCLOUD_URL якщо задано)
         redis_tls_url = os.getenv("REDIS_TLS_URL")
         if redis_tls_url:
             self.redis_url = redis_tls_url
         else:
-            self.redis_url = os.getenv("REDIS_URL", self.redis_url)
+            self.redis_url = os.getenv("REDISCLOUD_URL", self.redis_url)
         self.redis_tls_enabled = os.getenv(
             "REDIS_TLS_ENABLED", str(self.redis_tls_enabled)
         ).lower() in ("true", "1", "yes")

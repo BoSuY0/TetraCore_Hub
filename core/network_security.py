@@ -78,9 +78,9 @@ class NetworkSecurityManager:
 
         # Керування використанням Redis через ENV
         # За замовчуванням у production вимикаємо Redis-лімітер, щоб зменшити кількість записів
-        self.use_redis_for_ratelimit: bool = (
-            os.getenv("USE_REDIS_FOR_RATELIMIT", "false").lower() in ("1", "true", "yes")
-        )
+        self.use_redis_for_ratelimit: bool = os.getenv(
+            "USE_REDIS_FOR_RATELIMIT", "false"
+        ).lower() in ("1", "true", "yes")
 
         # In-memory storage
         self.rate_limiters: Dict[str, deque] = defaultdict(deque)
@@ -204,7 +204,11 @@ class NetworkSecurityManager:
                         "Redis INCR ratelimit",
                         redis_log=True,
                         key=key,
-                        count=int(current_count) if isinstance(current_count, int) else None,
+                        count=(
+                            int(current_count)
+                            if isinstance(current_count, int)
+                            else None
+                        ),
                     )
                 except Exception:
                     pass
@@ -535,11 +539,15 @@ async def security_middleware(request: Request, call_next):
         duration = time.time() - start_time
         environment = os.getenv("ENVIRONMENT", "development").lower()
         slow_threshold = float(os.getenv("REQUEST_LOG_SLOW_THRESHOLD_SECONDS", "5.0"))
-        enable_request_logs = os.getenv("ENABLE_REQUEST_LOGS", (
-            "true" if environment == "development" else "false"
-        )).lower() in ("1", "true", "yes")
+        enable_request_logs = os.getenv(
+            "ENABLE_REQUEST_LOGS", ("true" if environment == "development" else "false")
+        ).lower() in ("1", "true", "yes")
 
-        if enable_request_logs or duration > slow_threshold or response.status_code >= 400:
+        if (
+            enable_request_logs
+            or duration > slow_threshold
+            or response.status_code >= 400
+        ):
             await network_security.log_request(request, response, duration)
 
         return response

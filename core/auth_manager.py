@@ -1126,9 +1126,7 @@ class AuthManager:
             throttle_key = f"session:touch_throttle:{session_id}"
             try:
                 set_res = self.redis_client.set(throttle_key, "1", nx=True, ex=60)
-                set_done = (
-                    await set_res if inspect.isawaitable(set_res) else set_res
-                )
+                set_done = await set_res if inspect.isawaitable(set_res) else set_res
             except Exception:
                 set_done = True  # якщо помилка — краще оновити
 

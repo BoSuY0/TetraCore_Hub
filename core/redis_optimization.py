@@ -320,7 +320,11 @@ class RedisOptimizer:
                     redis_log=True,
                     key=full_key,
                     ttl=ttl,
-                    size_bytes=len(encoded_value) if hasattr(encoded_value, "__len__") else None,
+                    size_bytes=(
+                        len(encoded_value)
+                        if hasattr(encoded_value, "__len__")
+                        else None
+                    ),
                 )
             except Exception:
                 pass
@@ -339,7 +343,9 @@ class RedisOptimizer:
         """Helper для set з TTL"""
         res = await self.redis_client.set(key, value, ex=ttl)
         try:
-            logger.debug("Redis SET", redis_log=True, key=f"{CACHE_PREFIX}{key}", ttl=ttl)
+            logger.debug(
+                "Redis SET", redis_log=True, key=f"{CACHE_PREFIX}{key}", ttl=ttl
+            )
         except Exception:
             pass
         return res

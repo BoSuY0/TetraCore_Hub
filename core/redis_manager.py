@@ -239,17 +239,17 @@ class RedisManager:
     async def _detect_redis_mode(self):
         """Визначення режиму роботи Redis"""
         try:
-            # 1) Якщо задано REDIS_URL — завжди standalone (пріоритетно простий Redis)
+            # 1) Якщо задано REDISCLOUD_URL — завжди standalone (пріоритетно простий Redis)
             if getattr(self.settings, "redis_url", ""):
                 self.redis_mode = "standalone"
                 return
 
-            # 2) Sentinel — лише якщо немає REDIS_URL, але явно налаштовано sentinel
+            # 2) Sentinel — лише якщо немає REDISCLOUD_URL, але явно налаштовано sentinel
             if getattr(self.settings, "redis_sentinel_urls", []):
                 self.redis_mode = "sentinel"
                 return
 
-            # 3) Cluster — лише якщо немає REDIS_URL і sentinel, але налаштовано cluster
+            # 3) Cluster — лише якщо немає REDISCLOUD_URL і sentinel, але налаштовано cluster
             if getattr(self.settings, "redis_cluster_nodes", []):
                 self.redis_mode = "cluster"
                 return
@@ -453,13 +453,13 @@ class RedisManager:
                 "❌ Redis connection test failed", error=_mask_text_patterns(str(e))
             )
 
-            # Якщо ми в режимі sentinel і є REDIS_URL — пробуємо fallback на standalone
+            # Якщо ми в режимі sentinel і є REDISCLOUD_URL — пробуємо fallback на standalone
             if getattr(self, "redis_mode", "") == "sentinel" and getattr(
                 self.settings, "redis_url", ""
             ):
                 try:
                     self.logger.warning(
-                        "Sentinel ping failed, falling back to standalone using REDIS_URL"
+                        "Sentinel ping failed, falling back to standalone using REDISCLOUD_URL"
                     )
                     await self._close_connections()
                     self.redis_mode = "standalone"
@@ -535,7 +535,9 @@ class RedisManager:
                     "Redis PUBLISH",
                     redis_log=True,
                     channel=channel,
-                    size_bytes=len(message_data) if hasattr(message_data, "__len__") else None,
+                    size_bytes=(
+                        len(message_data) if hasattr(message_data, "__len__") else None
+                    ),
                 )
 
             # Кешування для надійності

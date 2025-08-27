@@ -598,7 +598,7 @@ class StreamHubLauncher:
             "PORT": os.environ.get("PORT", "8000"),
             "FRONTEND_URL": "http://localhost:3000",
             "BACKEND_URL": "http://localhost:8000",
-            # REDIS_URL видалено для development - Redis вимкнено за замовчуванням
+            # REDISCLOUD_URL видалено для development - Redis вимкнено за замовчуванням
             "SECRET_KEY": secrets.token_urlsafe(32),
             "WORKERS": "1",
             "LOG_LEVEL": "INFO",
@@ -623,7 +623,7 @@ class StreamHubLauncher:
 
     def _validate_environment(self):
         """Валідація змінних оточення"""
-        required_vars = ["SECRET_KEY"]  # REDIS_URL більше не обов'язковий
+        required_vars = ["SECRET_KEY"]  # REDISCLOUD_URL більше не обов'язковий
 
         for var in required_vars:
             if not os.environ.get(var):
@@ -1651,7 +1651,7 @@ def main():
             ]
         ):
             launcher.logger.error(
-                "🔴 Redis недоступний або неправильно налаштований. Перевірте REDIS_URL/мережу/DNS. Завершення роботи."
+                "🔴 Redis недоступний або неправильно налаштований. Перевірте REDISCLOUD_URL/мережу/DNS. Завершення роботи."
             )
         sys.exit(1)
 

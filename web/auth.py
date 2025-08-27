@@ -436,7 +436,9 @@ async def logout(
                 index_key = f"user_sessions:{user['user_id']}"
                 members_res = auth_mgr.redis_client.smembers(index_key)
                 members = (
-                    await members_res if inspect.isawaitable(members_res) else members_res
+                    await members_res
+                    if inspect.isawaitable(members_res)
+                    else members_res
                 )
                 if members:
                     for sid_bytes in members:
