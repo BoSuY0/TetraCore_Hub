@@ -5,14 +5,25 @@ repos:
       - id: black
         language_version: python3
         args: ["--line-length=88"]
-        stages: [pre-commit]
+        stages: [post-commit]
         additional_dependencies: [black]
+  
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.2
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+        stages: [post-commit]
+      - id: ruff-format
+        stages: [post-commit]
   
   - repo: local
     hooks:
-      - id: git-add-after-black
-        name: Git add after black
-        entry: bash -c 'git add .'
+      - id: auto-amend-after-format
+        name: Auto-amend commit with formatter changes
+        # Якщо після форматтерів залишились незакомічені зміни, додаємо їх і
+        # робимо amend до щойно створеного комміту (без повторного запуску хуків).
+        entry: bash -lc 'if [ -n "$(git status --porcelain)" ]; then git add -A && git commit --amend --no-edit --no-verify; fi'
         language: system
         stages: [post-commit]
         always_run: true

@@ -12,8 +12,7 @@ from fastapi import APIRouter, Request, HTTPException, Query, Depends
 from core.security_integration import (
     get_authenticated_user,
 )
-from fastapi.responses import HTMLResponse, Response
-from fastapi.templating import Jinja2Templates
+from fastapi.responses import Response
 import structlog
 
 from core.rate_limiter import get_rate_limiter  # pylint: disable=import-error
@@ -23,8 +22,7 @@ from utils.in_memory_logger import get_recent_logs  # pylint: disable=import-err
 
 logger = structlog.get_logger(__name__)
 
-# Ініціалізація шаблонів
-templates = Jinja2Templates(directory="templates")
+# Шаблони HTML видалено. Дашборд сторінки не рендеряться сервером.
 
 
 async def rate_limit_dependency(request: Request, limit: int = 100, window: int = 60):
@@ -72,47 +70,6 @@ SIMPLE_FAVICON = (
     b"\xc9e<\x00\x00\x00\x0eIDATx\xdac\xf8\x0f\x00\x00\x01\x00\x01\x00\x00\x00\x00"
     b"\x00IEND\xaeB`\x82"
 )
-
-
-# =============================================================================
-# HTML СТОРІНКИ ДАШБОРДУ
-# =============================================================================
-
-
-@dashboard_router.get("/", response_class=HTMLResponse)
-async def dashboard_home(request: Request):
-    """Головна сторінка дашборду"""
-    try:
-        return templates.TemplateResponse(
-            "dashboard.html",
-            {
-                "request": request,
-                "title": "StreamHub Dashboard",
-                "timestamp": datetime.utcnow().isoformat(),
-            },
-        )
-    except Exception as e:
-        logger.error("Error rendering dashboard", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to render dashboard") from e
-
-
-@dashboard_router.get("/clients", response_class=HTMLResponse)
-async def dashboard_clients(request: Request):
-    """Сторінка клієнтів дашборду"""
-    try:
-        return templates.TemplateResponse(
-            "clients.html",
-            {
-                "request": request,
-                "title": "StreamHub Clients",
-                "timestamp": datetime.utcnow().isoformat(),
-            },
-        )
-    except Exception as e:
-        logger.error("Error rendering clients page", error=str(e))
-        raise HTTPException(
-            status_code=500, detail="Failed to render clients page"
-        ) from e
 
 
 # =============================================================================

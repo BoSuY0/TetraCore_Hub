@@ -29,8 +29,8 @@ from core.logging import configure_unified_logging
 # Константи безпеки
 MAX_PATH_LENGTH = 4096
 MAX_COMMAND_LENGTH = 8192
-ALLOWED_NODE_COMMANDS = ["node", "npm", "npx", "npm.cmd", "npx.cmd"]
-ALLOWED_NPM_SCRIPTS = ["install", "ci", "build", "start", "test"]
+ALLOWED_NODE_COMMANDS = []
+ALLOWED_NPM_SCRIPTS = []
 DEFAULT_TIMEOUT = 300  # 5 хвилин
 MAX_TIMEOUT = 3600  # 1 година
 SAFE_ENV_VARS = [
@@ -211,15 +211,12 @@ class SecureCommand:
         # Валідація
         command = self.validate_command(command)
 
-        # Перевіряємо, чи команда є node, і якщо так, чи існує виконуваний файл
+        # Node/ npm команди більше не підтримуються
         base_cmd = os.path.basename(command[0])
-        if base_cmd.startswith("node"):
-            node_executable = self.find_node_executable()
-            if not node_executable:
-                raise SecurityError(
-                    "Node.js не знайдено. Будь ласка, встановіть Node.js і переконайтеся, що він є у вашому PATH."
-                )
-            command[0] = node_executable
+        if base_cmd in ["node", "npm", "npx", "node.exe", "npm.cmd", "npx.cmd"]:
+            raise SecurityError(
+                "Node/npm команди заборонені: фронтенд вилучено з проекту"
+            )
 
         if timeout > MAX_TIMEOUT:
             timeout = MAX_TIMEOUT
@@ -344,7 +341,6 @@ class StreamHubLauncher:
         elif mode == "fast":
             self.logger.info("⚡ Fast режим:")
             self.logger.info("   • Тільки backend")
-            self.logger.info("   • Використовує готову збірку frontend")
             self.logger.info("   • Швидкий старт\n")
         elif mode == "prod":
             self.logger.info("🚀 Production режим:")
@@ -1242,7 +1238,7 @@ class StreamHubLauncher:
         # Виводимо банер
         self.print_banner("prod")
 
-        # Збірка frontend відключена
+        # Збірка фронтенду відключена (фронтенд вилучено з проекту)
 
         try:
             # Запускаємо production сервер
@@ -1610,14 +1606,9 @@ def main():
                 )
             )
         elif args.mode == "build":
-            if not args.no_banner:
-                launcher.print_banner("build")
-            launcher.logger.info("🔨 Збірка frontend...")
-            if asyncio.run(launcher.build_frontend(force=True)):
-                launcher.logger.info("✅ Збірка завершена успішно")
-            else:
-                launcher.logger.error("❌ Помилка збірки")
-                sys.exit(1)
+            # Режим збірки видалено — фронтенд вилучено з проекту
+            launcher.logger.error("Фронтенд вилучено: режим 'build' недоступний")
+            sys.exit(1)
         elif args.mode == "main":
             # Режим main.py для сумісності
             asyncio.run(launcher.run_main_mode(verbose=args.verbose))

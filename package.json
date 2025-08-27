@@ -2,18 +2,13 @@
   "name": "tetra-core-hub",
   "version": "1.0.0",
   "$schema": "https://json.schemastore.org/package",
-  "description": "TetraCore StreamHub - Integrated Backend and Frontend",
+  "description": "TetraCore StreamHub - Backend only",
   "main": "hub_launcher.py",
   "scripts": {
     "dev": "python hub_launcher.py dev",
-    "start": "python hub_launcher.py prod",
-    "dev-integrated": "python hub_launcher.py dev",
-    "dev-backend-only": "python hub_launcher.py fast"
+    "start": "python hub_launcher.py prod"
   },
-  "engines": {
-    "node": "20.x",
-    "npm": "10.x"
-  },
+  
   "repository": {
     "type": "git",
     "url": "https://github.com/your-username/tetra-core-hub.git"
@@ -22,7 +17,6 @@
   "license": "MIT",
   "keywords": [
     "fastapi",
-    "react",
     "websockets",
     "streamhub",
     "dashboard"
