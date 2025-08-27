@@ -232,12 +232,18 @@ class Settings:
         # Ігноруємо REDIS_ENABLED: Redis завжди увімкнений
         self.redis_enabled = True
 
-        # Підтримка REDIS_TLS_URL (пріоритетніше за REDISCLOUD_URL якщо задано)
+        # Підтримка REDIS_TLS_URL (пріоритетніше), потім REDIS_URL/UPSTASH_REDIS_URL/REDISCLOUD_URL
         redis_tls_url = os.getenv("REDIS_TLS_URL")
         if redis_tls_url:
             self.redis_url = redis_tls_url
         else:
-            self.redis_url = os.getenv("REDISCLOUD_URL", self.redis_url)
+            # Порядок пріоритету URL без TLS-префікса: REDIS_URL → UPSTASH_REDIS_URL → REDISCLOUD_URL
+            self.redis_url = (
+                os.getenv("REDIS_URL")
+                or os.getenv("UPSTASH_REDIS_URL")
+                or os.getenv("REDISCLOUD_URL")
+                or self.redis_url
+            )
         self.redis_tls_enabled = os.getenv(
             "REDIS_TLS_ENABLED", str(self.redis_tls_enabled)
         ).lower() in ("true", "1", "yes")

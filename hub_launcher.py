@@ -1558,7 +1558,7 @@ def main():
             ]
         ):
             launcher.logger.error(
-                "🔴 Redis недоступний або неправильно налаштований. Перевірте REDISCLOUD_URL/мережу/DNS. Завершення роботи."
+                "🔴 Redis недоступний або неправильно налаштований. Перевірте REDIS_TLS_URL/REDIS_URL/REDISCLOUD_URL та мережу/DNS. Завершення роботи."
             )
         sys.exit(1)
 
