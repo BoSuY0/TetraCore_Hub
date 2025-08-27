@@ -6,7 +6,6 @@ from typing import Any, Dict
 # structlog доступний у проекті
 import structlog
 from structlog.stdlib import ProcessorFormatter, LoggerFactory
-from structlog.exceptions import DropEvent
 from structlog.processors import TimeStamper, add_log_level, format_exc_info
 
 
@@ -259,102 +258,8 @@ def simple_console_renderer(logger, method_name, event_dict):
 
 
 # === Duplicate log suppression ===
-# Глобальний кеш для придушення ідентичних логів у короткому вікні часу
-_DEDUP_CACHE: Dict[str, float] = {}
-_DEDUP_MAX_SIZE: int = 1024
-
-
-def _get_dedup_ttl_seconds() -> float:
-    try:
-        return float(os.getenv("LOG_DEDUP_WINDOW_SECONDS", "5"))
-    except Exception:
-        return 5.0
-
-
-_DEDUP_TTL_SECONDS = _get_dedup_ttl_seconds()
-
-
-def _build_log_signature(method_name: str, event_dict: Dict[str, Any]) -> str:
-    # Ігноруємо мінливі службові ключі
-    excluded = {
-        "logger",
-        "timestamp",
-        "level",
-        "event",
-        "exc_info",
-        "exception",
-        "stack_info",
-        "positional_args",
-        "name",
-        "pathname",
-        "filename",
-        "lineno",
-        "module",
-        "funcName",
-        "process",
-        "processName",
-        "thread",
-        "threadName",
-        "_record",
-        "from_structlog",
-        "_from_structlog",
-    }
-
-    event = str(event_dict.get("event", ""))
-
-    # Збираємо стабільні пари k=v
-    parts = []
-    for k, v in sorted(event_dict.items(), key=lambda kv: str(kv[0])):
-        if k in excluded:
-            continue
-        try:
-            v_str = str(v)
-        except Exception:
-            v_str = "<obj>"
-        parts.append(f"{k}={v_str}")
-
-    extras_str = "|".join(parts)
-    return f"{method_name}|{event}|{extras_str}"
-
-
+# Вимкнено: на вимогу користувача дублікати не придушуються.
 def suppress_duplicate_logs_processor(logger, method_name, event_dict):
-    """Придушує ідентичні події в межах короткого вікна часу, не змінюючи рівні.
-
-    Логуємо першу подію одразу; наступні з таким самим підписом
-    у межах LOG_DEDUP_WINDOW_SECONDS (дефолт 10с) відкидаються.
-    """
-    # Не придушувати спеціально позначені логи Redis (вимога: щоб фільтр не прибирав їх)
-    try:
-        if event_dict.get("redis_log") is True:
-            return event_dict
-    except Exception:
-        # У разі будь-якої помилки — не придушуємо
-        return event_dict
-    try:
-        signature = _build_log_signature(method_name, event_dict)
-        now = time.monotonic()
-
-        last_ts = _DEDUP_CACHE.get(signature)
-        if last_ts is not None and (now - last_ts) < _DEDUP_TTL_SECONDS:
-            raise DropEvent
-
-        # Оновлюємо кеш і обмежуємо його розмір
-        _DEDUP_CACHE[signature] = now
-        if len(_DEDUP_CACHE) > _DEDUP_MAX_SIZE:
-            # Грубе очищення: видалимо приблизно половину найстаріших записів
-            try:
-                # Сортування за часом і видалення старих ключів
-                for key, _ in sorted(_DEDUP_CACHE.items(), key=lambda kv: kv[1])[
-                    : len(_DEDUP_CACHE) // 2
-                ]:
-                    _DEDUP_CACHE.pop(key, None)
-            except Exception:
-                _DEDUP_CACHE.clear()
-    except DropEvent:
-        raise
-    except Exception:
-        # На будь-яку помилку у процесорі — не заважаємо логам
-        return event_dict
     return event_dict
 
 
@@ -573,7 +478,7 @@ def configure_unified_logging() -> None:
     structlog.configure(
         processors=shared_processors
         + [
-            suppress_duplicate_logs_processor,
+            # дублікати логів не придушуються
             ProcessorFormatter.wrap_for_formatter,
         ],
         logger_factory=LoggerFactory(),
