@@ -8,6 +8,7 @@ import uuid
 import hashlib
 from datetime import datetime
 from typing import Dict, List
+import inspect
 
 from fastapi import APIRouter, HTTPException, Depends, Request, Security
 from fastapi.responses import JSONResponse
@@ -433,7 +434,10 @@ async def logout(
             # Видаляємо всі сесії користувача через індекс user_sessions:{user_id}
             try:
                 index_key = f"user_sessions:{user['user_id']}"
-                members = await auth_mgr.redis_client.smembers(index_key)
+                members_res = auth_mgr.redis_client.smembers(index_key)
+                members = (
+                    await members_res if inspect.isawaitable(members_res) else members_res
+                )
                 if members:
                     for sid_bytes in members:
                         try:
@@ -442,7 +446,9 @@ async def logout(
                                 if isinstance(sid_bytes, (bytes, bytearray))
                                 else str(sid_bytes)
                             )
-                            await auth_mgr.redis_client.delete(f"session:{sid}")
+                            del_res = auth_mgr.redis_client.delete(f"session:{sid}")
+                            if inspect.isawaitable(del_res):
+                                await del_res
                             logger.info(
                                 "Deleted user session",
                                 key=f"session:{sid}",
@@ -455,7 +461,9 @@ async def logout(
                                 error=str(e),
                             )
                     # Очищаємо індекс
-                    await auth_mgr.redis_client.delete(index_key)
+                    del_index_res = auth_mgr.redis_client.delete(index_key)
+                    if inspect.isawaitable(del_index_res):
+                        await del_index_res
             except Exception as e:
                 logger.error("Error deleting user sessions index", error=str(e))
 
