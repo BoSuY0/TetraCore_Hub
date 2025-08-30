@@ -3,4 +3,4 @@ pub mod health {
         "ok"
     }
 }
-pub mod ws;
+// Empty shim: this crate will be removed after hub consolidation

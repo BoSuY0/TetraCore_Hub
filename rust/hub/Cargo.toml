@@ -11,10 +11,17 @@ serde_json = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 models = { path = "../models" }
-tetra_core = { path = "../core" }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 futures = "0.3"
 rsa = { version = "0.9", default-features = false, features = ["pem"] }
 base64 = "0.22"
 tower-http = { version = "0.5", features = ["cors"] }
 hex = "0.4.3"
+axum-server = { version = "0.6", features = ["tls-rustls"] }
+dashmap = "5"
+hmac = "0.12"
+sha2 = "0.10"
+jsonwebtoken = { version = "9", default-features = false, features = ["use_pem"] }
+http = "1"
+tokio-tungstenite = { version = "0.24", features = ["deflate"] }
+tungstenite = { version = "0.24", features = ["deflate"] }

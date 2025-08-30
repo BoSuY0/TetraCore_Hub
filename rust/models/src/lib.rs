@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub enum WsMessage {
     Ping,
     Pong,
+    Noop,
     Subscribe { channel: String },
     Unsubscribe { channel: String },
     TaskSubmit {
@@ -15,12 +16,21 @@ pub enum WsMessage {
         #[serde(default)] timeout: Option<u64>,
         #[serde(default)] max_retries: Option<u32>,
     },
+    TaskUpdate {
+        task_id: String,
+        status: String,
+        #[serde(default)] data: Option<serde_json::Value>,
+    },
     TaskResult {
         task_id: String,
         status: String,
         #[serde(default)] data: Option<serde_json::Value>,
     },
     Broadcast { channel: String, #[serde(default)] payload: serde_json::Value },
+    StatsUpdate { #[serde(default)] stats: serde_json::Value },
+    HealthStatus { #[serde(default)] status: serde_json::Value },
+    MetricsResponse { #[serde(default)] metrics: serde_json::Value },
+    SystemNotification { level: String, message: String, #[serde(default)] data: Option<serde_json::Value> },
     ClientRegistration {
         client_id: String,
         client_type: String,
@@ -40,3 +50,6 @@ pub struct WsEnvelope<T = WsMessage> {
     #[serde(flatten)]
     pub payload: T,
 }
+
+pub mod task;
+pub mod client;
