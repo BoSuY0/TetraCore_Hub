@@ -7,7 +7,7 @@ import time
 import asyncio
 import ipaddress
 import json
-from typing import Dict, Optional, Set, Any
+from typing import Dict, Optional, Set, Any, Union
 from datetime import datetime
 from collections import defaultdict, deque
 from functools import wraps
@@ -86,6 +86,9 @@ class NetworkSecurityManager:
         self.rate_limiters: Dict[str, deque] = defaultdict(deque)
         self.blocked_ips: Set[str] = set()
         self.whitelist_ips: Set[str] = set()
+        self.whitelist_networks: Set[
+            Union[ipaddress.IPv4Network, ipaddress.IPv6Network]
+        ] = set()
         self.ip_connections: Dict[str, int] = defaultdict(int)
         self.suspicious_patterns: Dict[str, int] = defaultdict(int)
 
@@ -100,13 +103,72 @@ class NetworkSecurityManager:
         # Запускаємо cleanup task
         self._cleanup_task = None
 
+    def _is_whitelisted(self, ip: str) -> bool:
+        """Перевірка IP/мережі на whitelist (підтримує CIDR)."""
+        if not ip:
+            return False
+        if ip in self.whitelist_ips:
+            return True
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            return False
+        return any(addr in net for net in self.whitelist_networks)
+
     def _load_whitelist(self):
         """Завантаження IP адрес у whitelist"""
         # Локальні адреси завжди в whitelist
         self.whitelist_ips.update(["127.0.0.1", "::1", "localhost"])
 
         # Додаткові trusted IP з конфігурації
-        # TODO: Завантажити з конфігурації або БД
+        raw = os.getenv("WHITELIST_IPS", "").strip()
+        file_path = os.getenv("WHITELIST_IPS_FILE", "").strip()
+
+        def add_entry(entry: str) -> None:
+            token = (entry or "").strip()
+            if not token:
+                return
+            # CIDR
+            if "/" in token:
+                try:
+                    self.whitelist_networks.add(ipaddress.ip_network(token, strict=False))
+                    return
+                except ValueError:
+                    logger.warning("Invalid CIDR in WHITELIST_IPS", cidr=token)
+                    return
+            # IP або hostname
+            try:
+                ipaddress.ip_address(token)
+            except ValueError:
+                self.whitelist_ips.add(token)
+                return
+            self.whitelist_ips.add(token)
+
+        # ENV: comma/newline separated list
+        if raw:
+            for part in raw.replace("\n", ",").split(","):
+                add_entry(part)
+
+        # Optional file: JSON list or newline-separated
+        if file_path:
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read().strip()
+                if content:
+                    if content.lstrip().startswith("["):
+                        data = json.loads(content)
+                        if isinstance(data, list):
+                            for item in data:
+                                add_entry(str(item))
+                    else:
+                        for line in content.splitlines():
+                            add_entry(line)
+            except Exception as e:
+                logger.warning(
+                    "Failed to load WHITELIST_IPS_FILE",
+                    path=file_path,
+                    error=str(e),
+                )
 
     def setup_cors(self, app):
         """Налаштування CORS middleware"""
@@ -245,7 +307,7 @@ class NetworkSecurityManager:
     async def is_ip_blocked(self, ip: str) -> bool:
         """Перевірка чи IP заблокована"""
         # Whitelist завжди дозволений
-        if ip in self.whitelist_ips:
+        if self._is_whitelisted(ip):
             return False
 
         # Перевірка в Redis
@@ -272,7 +334,7 @@ class NetworkSecurityManager:
 
     async def block_ip(self, ip: str, duration: int = None, reason: str = None):
         """Блокування IP адреси"""
-        if ip in self.whitelist_ips:
+        if self._is_whitelisted(ip):
             logger.warning("Attempt to block whitelisted IP", ip=ip)
             return
 
@@ -314,7 +376,7 @@ class NetworkSecurityManager:
         time.time()
 
         # Пропускаємо перевірку для whitelisted IP (включає localhost)
-        if ip in self.whitelist_ips:
+        if self._is_whitelisted(ip):
             return False
 
         # Аналіз патернів запитів
@@ -622,7 +684,7 @@ def require_ip_whitelist(func):
 
         ip = network_security.get_client_ip(request)
 
-        if ip not in network_security.whitelist_ips:
+        if not network_security._is_whitelisted(ip):
             logger.warning(
                 "Access denied for non-whitelisted IP", ip=ip, path=request.url.path
             )
@@ -656,5 +718,16 @@ async def block_ip_endpoint(ip: str, duration: int = 3600, reason: str = None):
 @require_ip_whitelist
 async def whitelist_ip_endpoint(ip: str):
     """Додавання IP до whitelist"""
-    network_security.whitelist_ips.add(ip)
+    token = (ip or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="IP is required")
+    if "/" in token:
+        try:
+            network_security.whitelist_networks.add(
+                ipaddress.ip_network(token, strict=False)
+            )
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid CIDR")
+    else:
+        network_security.whitelist_ips.add(token)
     return {"message": f"IP {ip} added to whitelist"}
