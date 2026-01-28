@@ -1,0 +1,636 @@
+openapi: 3.0.3
+info:
+  title: TetraCore Hub API
+  description: |
+    TetraCore Hub is a distributed task orchestration and management system.
+
+    ## Authentication
+    The API supports two authentication methods:
+    - **JWT Token**: Use `Authorization: Bearer <token>` header
+    - **API Key**: Use `X-API-Key: <key>` header or `Authorization: Bearer tk_<key>`
+
+    ## Rate Limiting
+    Default rate limit is 1000 requests per minute. API keys may have custom limits.
+  version: 2.0.0
+  contact:
+    name: TetraCore Support
+    email: support@tetra-core.website
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8000
+    description: Local development
+  - url: https://hub.tetra-core.website
+    description: Production
+
+tags:
+  - name: Health
+    description: Health check endpoints
+  - name: Auth
+    description: Authentication endpoints
+  - name: Tasks
+    description: Task management
+  - name: Clients
+    description: Client management
+  - name: Sessions
+    description: Session management
+  - name: Schedules
+    description: Task scheduling
+  - name: Webhooks
+    description: Webhook management
+  - name: Templates
+    description: Task templates
+  - name: DLQ
+    description: Dead letter queue
+  - name: Users
+    description: User management
+  - name: Roles
+    description: Role management
+  - name: API Keys
+    description: API key management
+  - name: Secrets
+    description: Secrets management
+  - name: Plugins
+    description: Plugin management
+  - name: Audit
+    description: Audit logs
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /ready:
+    get:
+      tags: [Health]
+      summary: Readiness check
+      operationId: readyCheck
+      responses:
+        '200':
+          description: Service is ready
+        '503':
+          description: Service is not ready
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Invalid credentials
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout
+      operationId: logout
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Logout successful
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh token
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Token refreshed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+
+  /api/v1/tasks:
+    get:
+      tags: [Tasks]
+      summary: List tasks
+      operationId: listTasks
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/status'
+        - $ref: '#/components/parameters/priority'
+        - $ref: '#/components/parameters/tags'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+      responses:
+        '200':
+          description: Task list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskListResponse'
+    post:
+      tags: [Tasks]
+      summary: Create task
+      operationId: createTask
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskRequest'
+      responses:
+        '201':
+          description: Task created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+
+  /api/v1/tasks/{id}:
+    get:
+      tags: [Tasks]
+      summary: Get task
+      operationId: getTask
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/id'
+      responses:
+        '200':
+          description: Task details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '404':
+          description: Task not found
+    delete:
+      tags: [Tasks]
+      summary: Cancel task
+      operationId: cancelTask
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/id'
+      responses:
+        '200':
+          description: Task cancelled
+
+  /api/v1/clients:
+    get:
+      tags: [Clients]
+      summary: List clients
+      operationId: listClients
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      responses:
+        '200':
+          description: Client list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientListResponse'
+
+  /api/v1/clients/{id}:
+    get:
+      tags: [Clients]
+      summary: Get client
+      operationId: getClient
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/id'
+      responses:
+        '200':
+          description: Client details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Client'
+
+  /api/v1/templates:
+    get:
+      tags: [Templates]
+      summary: List templates
+      operationId: listTemplates
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+      responses:
+        '200':
+          description: Template list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateListResponse'
+    post:
+      tags: [Templates]
+      summary: Create template
+      operationId: createTemplate
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTemplateRequest'
+      responses:
+        '201':
+          description: Template created
+
+  /api/v1/templates/{id}/execute:
+    post:
+      tags: [Templates]
+      summary: Execute template
+      operationId: executeTemplate
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecuteTemplateRequest'
+      responses:
+        '201':
+          description: Task created from template
+
+  /api/v1/dlq:
+    get:
+      tags: [DLQ]
+      summary: List DLQ entries
+      operationId: listDLQ
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+      responses:
+        '200':
+          description: DLQ entries
+
+  /api/v1/dlq/{id}/retry:
+    post:
+      tags: [DLQ]
+      summary: Retry DLQ entry
+      operationId: retryDLQ
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/id'
+      responses:
+        '200':
+          description: Entry scheduled for retry
+
+  /api/v1/users:
+    get:
+      tags: [Users]
+      summary: List users
+      operationId: listUsers
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: User list
+    post:
+      tags: [Users]
+      summary: Create user
+      operationId: createUser
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        '201':
+          description: User created
+
+  /api/v1/apikeys:
+    get:
+      tags: [API Keys]
+      summary: List API keys
+      operationId: listAPIKeys
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: API key list
+    post:
+      tags: [API Keys]
+      summary: Create API key
+      operationId: createAPIKey
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAPIKeyRequest'
+      responses:
+        '201':
+          description: API key created
+
+  /api/v1/secrets:
+    get:
+      tags: [Secrets]
+      summary: List secrets
+      operationId: listSecrets
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Secret list
+    post:
+      tags: [Secrets]
+      summary: Create secret
+      operationId: createSecret
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSecretRequest'
+      responses:
+        '201':
+          description: Secret created
+
+  /api/v1/plugins:
+    get:
+      tags: [Plugins]
+      summary: List plugins
+      operationId: listPlugins
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Plugin list
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  parameters:
+    id:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    status:
+      name: status
+      in: query
+      schema:
+        type: string
+        enum: [pending, assigned, processing, completed, failed, cancelled]
+    priority:
+      name: priority
+      in: query
+      schema:
+        type: string
+        enum: [low, normal, high, critical]
+    tags:
+      name: tags
+      in: query
+      schema:
+        type: string
+      description: Comma-separated tags
+    limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        default: 50
+    offset:
+      name: offset
+      in: query
+      schema:
+        type: integer
+        default: 0
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        version:
+          type: string
+        uptime:
+          type: number
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+
+    LoginResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        refresh_token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+
+    Task:
+      type: object
+      properties:
+        task_id:
+          type: string
+        task_type:
+          type: string
+        status:
+          type: string
+        priority:
+          type: string
+        payload:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+
+    TaskListResponse:
+      type: object
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Task'
+        count:
+          type: integer
+
+    CreateTaskRequest:
+      type: object
+      required: [task_type, payload]
+      properties:
+        task_type:
+          type: string
+        payload:
+          type: object
+        priority:
+          type: string
+          default: normal
+        timeout:
+          type: integer
+        tags:
+          type: array
+          items:
+            type: string
+
+    Client:
+      type: object
+      properties:
+        client_id:
+          type: string
+        status:
+          type: string
+        connected_at:
+          type: string
+          format: date-time
+
+    ClientListResponse:
+      type: object
+      properties:
+        clients:
+          type: array
+          items:
+            $ref: '#/components/schemas/Client'
+        count:
+          type: integer
+
+    TemplateListResponse:
+      type: object
+      properties:
+        templates:
+          type: array
+          items:
+            type: object
+        count:
+          type: integer
+
+    CreateTemplateRequest:
+      type: object
+      required: [name, task_type, executor_type]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        task_type:
+          type: string
+        executor_type:
+          type: string
+
+    ExecuteTemplateRequest:
+      type: object
+      properties:
+        variables:
+          type: object
+
+    CreateUserRequest:
+      type: object
+      required: [username, password, role_id]
+      properties:
+        username:
+          type: string
+        email:
+          type: string
+        password:
+          type: string
+        role_id:
+          type: string
+
+    CreateAPIKeyRequest:
+      type: object
+      required: [name, role_id]
+      properties:
+        name:
+          type: string
+        role_id:
+          type: string
+        expires_in:
+          type: string
+
+    CreateSecretRequest:
+      type: object
+      required: [key, value]
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string

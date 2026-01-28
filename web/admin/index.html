@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TetraCore Hub Admin</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="login-form" class="card">
+        <h1>TetraCore Hub</h1>
+        <div id="error-msg" class="hidden"></div>
+        <input type="text" id="username" placeholder="Username" autocomplete="username">
+        <input type="password" id="password" placeholder="Password" autocomplete="current-password">
+        <button class="btn" id="login-btn">Login</button>
+    </div>
+
+    <div id="dashboard" class="container hidden">
+        <header>
+            <h1>TetraCore Hub Admin</h1>
+            <div class="status">
+                <span id="status-text">Disconnected</span>
+                <div id="status-dot" class="status-dot"></div>
+                <button class="btn btn-danger" id="logout-btn">Logout</button>
+            </div>
+        </header>
+
+        <div class="grid">
+            <div class="card">
+                <h2>System</h2>
+                <div class="stat"><span>Uptime</span><span class="stat-value" id="uptime">-</span></div>
+                <div class="stat"><span>Memory</span><span class="stat-value" id="memory">-</span></div>
+                <div class="stat"><span>Goroutines</span><span class="stat-value" id="goroutines">-</span></div>
+            </div>
+            <div class="card">
+                <h2>Clients</h2>
+                <div class="stat"><span>Connected</span><span class="stat-value" id="clients-connected">0</span></div>
+                <div class="stat"><span>Workers</span><span class="stat-value" id="clients-workers">0</span></div>
+                <div class="stat"><span>Bots</span><span class="stat-value" id="clients-bots">0</span></div>
+            </div>
+            <div class="card">
+                <h2>Tasks</h2>
+                <div class="stat"><span>Pending</span><span class="stat-value" id="tasks-pending">0</span></div>
+                <div class="stat"><span>Running</span><span class="stat-value" id="tasks-running">0</span></div>
+                <div class="stat"><span>Completed</span><span class="stat-value" id="tasks-completed">0</span></div>
+            </div>
+            <div class="card">
+                <h2>Sessions</h2>
+                <div class="stat"><span>Active</span><span class="stat-value" id="sessions-active">0</span></div>
+            </div>
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" data-tab="clients">Clients</button>
+            <button class="tab" data-tab="tasks">Tasks</button>
+            <button class="tab" data-tab="sessions">Sessions</button>
+        </div>
+
+        <div id="clients-tab" class="tab-content active card">
+            <table>
+                <thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Connected</th><th>Actions</th></tr></thead>
+                <tbody id="clients-table"></tbody>
+            </table>
+        </div>
+
+        <div id="tasks-tab" class="tab-content card">
+            <table>
+                <thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Priority</th><th>Created</th><th>Actions</th></tr></thead>
+                <tbody id="tasks-table"></tbody>
+            </table>
+        </div>
+
+        <div id="sessions-tab" class="tab-content card">
+            <table>
+                <thead><tr><th>ID</th><th>User</th><th>Role</th><th>Created</th><th>Expires</th><th>Actions</th></tr></thead>
+                <tbody id="sessions-table"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

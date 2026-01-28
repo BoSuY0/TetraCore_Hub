@@ -1,0 +1,606 @@
+{
+  "info": {
+    "name": "TetraCore Hub API",
+    "description": "TetraCore Hub - Distributed Task Orchestration System API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{jwt_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Auto-refresh token if expired",
+          "const tokenExpiry = pm.environment.get('token_expiry');",
+          "if (tokenExpiry && new Date(tokenExpiry) < new Date()) {",
+          "    pm.sendRequest({",
+          "        url: pm.environment.get('base_url') + '/auth/refresh',",
+          "        method: 'POST',",
+          "        header: { 'Content-Type': 'application/json' },",
+          "        body: {",
+          "            mode: 'raw',",
+          "            raw: JSON.stringify({ refresh_token: pm.environment.get('refresh_token') })",
+          "        }",
+          "    }, function(err, res) {",
+          "        if (!err && res.code === 200) {",
+          "            const json = res.json();",
+          "            pm.environment.set('jwt_token', json.token);",
+          "            pm.environment.set('token_expiry', json.expires_at);",
+          "        }",
+          "    });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/health",
+            "auth": { "type": "noauth" }
+          }
+        },
+        {
+          "name": "Ready Check",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/ready",
+            "auth": { "type": "noauth" }
+          }
+        },
+        {
+          "name": "Live Check",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/live",
+            "auth": { "type": "noauth" }
+          }
+        },
+        {
+          "name": "Stats",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/stats",
+            "auth": { "type": "noauth" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    pm.environment.set('jwt_token', json.token);",
+                  "    pm.environment.set('refresh_token', json.refresh_token);",
+                  "    pm.environment.set('token_expiry', json.expires_at);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/auth/login",
+            "auth": { "type": "noauth" },
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/auth/refresh",
+            "auth": { "type": "noauth" },
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/auth/logout"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tasks",
+      "item": [
+        {
+          "name": "List Tasks",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/tasks?limit=50&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "tasks"],
+              "query": [
+                { "key": "limit", "value": "50" },
+                { "key": "offset", "value": "0" },
+                { "key": "status", "value": "", "disabled": true },
+                { "key": "priority", "value": "", "disabled": true },
+                { "key": "tags", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Task",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/tasks",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"task_type\": \"data_processing\",\n  \"payload\": {\n    \"file\": \"data.csv\",\n    \"action\": \"process\"\n  },\n  \"priority\": \"normal\",\n  \"timeout\": 300,\n  \"tags\": [\"batch\", \"import\"]\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Task",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/tasks/{{task_id}}"
+          }
+        },
+        {
+          "name": "Cancel Task",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/api/v1/tasks/{{task_id}}"
+          }
+        },
+        {
+          "name": "Get Task Stats",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/tasks/stats"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Clients",
+      "item": [
+        {
+          "name": "List Clients",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/clients"
+          }
+        },
+        {
+          "name": "Get Client",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/clients/{{client_id}}"
+          }
+        },
+        {
+          "name": "Disconnect Client",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/clients/{{client_id}}/disconnect"
+          }
+        },
+        {
+          "name": "Get Client Stats",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/clients/stats"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Templates",
+      "item": [
+        {
+          "name": "List Templates",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/templates"
+          }
+        },
+        {
+          "name": "Create Template",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/templates",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Data Import\",\n  \"description\": \"Import data from CSV file\",\n  \"task_type\": \"data_processing\",\n  \"executor_type\": \"worker\",\n  \"default_payload\": {\n    \"action\": \"import\"\n  },\n  \"default_tags\": [\"import\"],\n  \"default_priority\": \"normal\",\n  \"default_timeout\": 600,\n  \"variables\": [\n    {\n      \"name\": \"file_path\",\n      \"type\": \"string\",\n      \"required\": true,\n      \"description\": \"Path to CSV file\"\n    }\n  ],\n  \"is_public\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Template",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/templates/{{template_id}}"
+          }
+        },
+        {
+          "name": "Execute Template",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/templates/{{template_id}}/execute",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"variables\": {\n    \"file_path\": \"/data/import.csv\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete Template",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/api/v1/templates/{{template_id}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Dead Letter Queue",
+      "item": [
+        {
+          "name": "List DLQ Entries",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/dlq"
+          }
+        },
+        {
+          "name": "Get DLQ Entry",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/dlq/{{dlq_id}}"
+          }
+        },
+        {
+          "name": "Retry DLQ Entry",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/dlq/{{dlq_id}}/retry"
+          }
+        },
+        {
+          "name": "Delete DLQ Entry",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/api/v1/dlq/{{dlq_id}}"
+          }
+        },
+        {
+          "name": "Get DLQ Stats",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/dlq/stats"
+          }
+        },
+        {
+          "name": "Retry All DLQ",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/dlq/retry-all"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "List Users",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/users"
+          }
+        },
+        {
+          "name": "Create User",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/users",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"newuser\",\n  \"email\": \"user@example.com\",\n  \"password\": \"SecurePassword123!\",\n  \"role_id\": \"operator\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get User",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/users/{{user_id}}"
+          }
+        },
+        {
+          "name": "Get Current User",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/users/me"
+          }
+        },
+        {
+          "name": "Delete User",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/api/v1/users/{{user_id}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "API Keys",
+      "item": [
+        {
+          "name": "List API Keys",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/apikeys"
+          }
+        },
+        {
+          "name": "Create API Key",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/apikeys",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"CI/CD Key\",\n  \"role_id\": \"operator\",\n  \"expires_in\": \"720h\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete API Key",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/api/v1/apikeys/{{apikey_id}}"
+          }
+        },
+        {
+          "name": "Rotate API Key",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/apikeys/{{apikey_id}}/rotate"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Secrets",
+      "item": [
+        {
+          "name": "List Secrets",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/secrets"
+          }
+        },
+        {
+          "name": "Create Secret",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/secrets",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"key\": \"database_password\",\n  \"value\": \"super-secret-password\",\n  \"description\": \"Database connection password\",\n  \"tags\": [\"database\", \"production\"]\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Secret Metadata",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/secrets/{{secret_key}}"
+          }
+        },
+        {
+          "name": "Get Secret Value",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/secrets/{{secret_key}}/value"
+          }
+        },
+        {
+          "name": "Delete Secret",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/api/v1/secrets/{{secret_key}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Plugins",
+      "item": [
+        {
+          "name": "List Plugins",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/plugins"
+          }
+        },
+        {
+          "name": "Get Plugin",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/plugins/{{plugin_id}}"
+          }
+        },
+        {
+          "name": "Enable Plugin",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/plugins/{{plugin_id}}/enable"
+          }
+        },
+        {
+          "name": "Disable Plugin",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/plugins/{{plugin_id}}/disable"
+          }
+        },
+        {
+          "name": "List Hooks",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/plugins/hooks"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Schedules",
+      "item": [
+        {
+          "name": "List Schedules",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/schedules"
+          }
+        },
+        {
+          "name": "Create Schedule",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/schedules",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Daily Report\",\n  \"cron\": \"0 9 * * *\",\n  \"task_type\": \"data_processing\",\n  \"payload\": {\n    \"action\": \"generate_report\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Schedule",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/schedules/{{schedule_id}}"
+          }
+        },
+        {
+          "name": "Delete Schedule",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/api/v1/schedules/{{schedule_id}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Webhooks",
+      "item": [
+        {
+          "name": "List Webhooks",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/webhooks"
+          }
+        },
+        {
+          "name": "Create Webhook",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/webhooks",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Task Completion\",\n  \"url\": \"https://example.com/webhook\",\n  \"events\": [\"task.completed\", \"task.failed\"],\n  \"secret\": \"webhook-secret\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete Webhook",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/api/v1/webhooks/{{webhook_id}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Audit",
+      "item": [
+        {
+          "name": "List Audit Logs",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/audit"
+          }
+        },
+        {
+          "name": "Get Audit Actions",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/audit/actions"
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000"
+    }
+  ]
+}

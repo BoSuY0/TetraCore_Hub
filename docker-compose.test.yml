@@ -1,0 +1,39 @@
+# docker-compose.test.yml — iнфраструктура для iнтеграцiйних тестiв Hub + Worker
+# Порти: Redis 16379, MySQL 13306 (щоб не конфлiктувати з dev/prod)
+
+version: "3.9"
+
+services:
+  redis-test:
+    image: redis:7-alpine
+    container_name: tetracore-test-redis
+    ports:
+      - "16379:6379"
+    command: redis-server --appendonly no --save ""
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  mysql-test:
+    image: mysql:8.0
+    container_name: tetracore-test-mysql
+    ports:
+      - "13306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: testroot
+      MYSQL_DATABASE: tetracore_test
+      MYSQL_USER: tetra_test
+      MYSQL_PASSWORD: tetra_test
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --skip-log-bin
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -ptestroot"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 10s

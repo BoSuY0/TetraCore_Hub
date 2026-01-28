@@ -1,0 +1,493 @@
+openapi: 3.0.3
+info:
+  title: TetraCore Hub API
+  description: WebSocket hub for distributed task management
+  version: 2.0.0
+  contact:
+    name: TetraCore Team
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:8000
+    description: Development server
+  - url: https://hub.tetra-core.website
+    description: Production server
+
+tags:
+  - name: health
+    description: Health check endpoints
+  - name: auth
+    description: Authentication endpoints
+  - name: clients
+    description: Client management
+  - name: tasks
+    description: Task management
+  - name: sessions
+    description: Session management
+  - name: metrics
+    description: Metrics and monitoring
+
+paths:
+  /health:
+    get:
+      tags: [health]
+      summary: Health check
+      description: Returns the health status of the service
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /stats:
+    get:
+      tags: [health]
+      summary: Get statistics
+      description: Returns detailed statistics about the hub
+      responses:
+        '200':
+          description: Statistics retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatsResponse'
+
+  /metrics:
+    get:
+      tags: [metrics]
+      summary: Prometheus metrics
+      description: Returns metrics in Prometheus format
+      responses:
+        '200':
+          description: Metrics in Prometheus format
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Login
+      description: Authenticate and receive JWT tokens
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Logout
+      description: Invalidate current session
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Logout successful
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Refresh token
+      description: Get new access token using refresh token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refresh_token:
+                  type: string
+      responses:
+        '200':
+          description: Token refreshed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+
+  /api/v1/clients:
+    get:
+      tags: [clients]
+      summary: List clients
+      description: Get all connected clients
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [bot, worker, worker_api, monitor, admin]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [connected, disconnected]
+      responses:
+        '200':
+          description: Clients list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientsResponse'
+
+  /api/v1/clients/stats:
+    get:
+      tags: [clients]
+      summary: Client statistics
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Client stats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientStats'
+
+  /api/v1/clients/{id}:
+    get:
+      tags: [clients]
+      summary: Get client by ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Client details
+        '404':
+          description: Client not found
+    delete:
+      tags: [clients]
+      summary: Delete client
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Client deleted
+
+  /api/v1/tasks:
+    get:
+      tags: [tasks]
+      summary: List tasks
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, assigned, running, completed, failed, timeout, cancelled]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: Tasks list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TasksResponse'
+    post:
+      tags: [tasks]
+      summary: Create task
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskRequest'
+      responses:
+        '201':
+          description: Task created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+
+  /api/v1/tasks/stats:
+    get:
+      tags: [tasks]
+      summary: Task statistics
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Task stats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskStats'
+
+  /api/v1/tasks/{id}:
+    get:
+      tags: [tasks]
+      summary: Get task by ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Task details
+        '404':
+          description: Task not found
+    delete:
+      tags: [tasks]
+      summary: Cancel task
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Task cancelled
+
+  /api/v1/sessions:
+    get:
+      tags: [sessions]
+      summary: List sessions
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Sessions list
+
+  /api/v1/sessions/stats:
+    get:
+      tags: [sessions]
+      summary: Session statistics
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Session stats
+
+  /ws:
+    get:
+      tags: [websocket]
+      summary: WebSocket endpoint
+      description: Connect via WebSocket for real-time communication
+      parameters:
+        - name: token
+          in: query
+          schema:
+            type: string
+          description: JWT token for authentication
+        - name: client_type
+          in: query
+          schema:
+            type: string
+            enum: [bot, worker, worker_api, monitor]
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: boolean
+        message:
+          type: string
+        code:
+          type: string
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        uptime:
+          type: string
+        timestamp:
+          type: string
+        checks:
+          type: object
+        system:
+          type: object
+
+    StatsResponse:
+      type: object
+      properties:
+        uptime_seconds:
+          type: number
+        memory:
+          type: object
+        runtime:
+          type: object
+        hub:
+          type: object
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+
+    LoginResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        token_type:
+          type: string
+        expires_at:
+          type: string
+        session_id:
+          type: string
+
+    ClientsResponse:
+      type: object
+      properties:
+        clients:
+          type: array
+          items:
+            $ref: '#/components/schemas/Client'
+        total:
+          type: integer
+
+    Client:
+      type: object
+      properties:
+        client_id:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+        connected_at:
+          type: string
+        last_seen:
+          type: string
+
+    ClientStats:
+      type: object
+      properties:
+        total:
+          type: integer
+        bots:
+          type: integer
+        workers:
+          type: integer
+        connected:
+          type: integer
+        disconnected:
+          type: integer
+
+    CreateTaskRequest:
+      type: object
+      required: [task_type]
+      properties:
+        task_type:
+          type: string
+        executor_type:
+          type: string
+          default: worker
+        priority:
+          type: string
+          default: normal
+        payload:
+          type: object
+        timeout:
+          type: integer
+        idempotency_key:
+          type: string
+
+    TasksResponse:
+      type: object
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskResponse'
+        total:
+          type: integer
+
+    TaskResponse:
+      type: object
+      properties:
+        task_id:
+          type: string
+        task_type:
+          type: string
+        priority:
+          type: string
+        status:
+          type: string
+        worker_id:
+          type: string
+        created_at:
+          type: string
+        started_at:
+          type: string
+        completed_at:
+          type: string
+
+    TaskStats:
+      type: object
+      properties:
+        total:
+          type: integer
+        pending:
+          type: integer
+        running:
+          type: integer
+        completed:
+          type: integer
+        failed:
+          type: integer

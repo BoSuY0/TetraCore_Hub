@@ -1,0 +1,80 @@
+# TetraCore Hub Configuration
+# This file contains default configuration values.
+# Environment variables take precedence over these values.
+
+app:
+  name: TetraCore StreamHub
+  version: 2.0.0
+  environment: development
+  debug: false
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  custom_domain: hub.tetra-core.website
+  read_timeout: 30s
+  write_timeout: 30s
+  idle_timeout: 120s
+  max_connections: 1000
+
+websocket:
+  path: /ws
+  timeout: 10m
+  heartbeat_interval: 60s
+  max_connections: 1000
+  read_buffer_size: 1024
+  write_buffer_size: 1024
+
+auth:
+  require_auth: true
+  # admin_username and admin_password should be set via environment variables
+  session_duration: 24h
+  token_refresh_threshold: 1h
+  max_login_attempts: 5
+  lockout_duration: 15m
+  cleanup_interval: 1h
+
+redis:
+  # url should be set via environment variable (REDIS_URL)
+  tls_enabled: false
+  max_connections: 50
+  min_idle_conns: 5
+  conn_max_idle_time: 5m
+  conn_max_lifetime: 30m
+  retry_on_timeout: true
+  health_check_interval: 2m
+  sentinel_service_name: tetracore-master
+  pipeline_enabled: true
+  pipeline_batch_size: 100
+  pipeline_flush_interval: 100ms
+  default_ttl: 24h
+  cleanup_interval: 1h
+  task_channel: tetra:tasks
+  result_channel: tetra:results
+  broadcast_channel: tetra:broadcast
+  health_channel: tetra:health
+  task_stream: tetra:tasks:stream
+  task_stream_group: hub
+  task_stream_consumer: ""
+  task_stream_block: 5s
+  task_stream_batch: 10
+  task_stream_max_len: 10000
+
+logging:
+  level: info
+  format: json
+  time_format: "2006-01-02T15:04:05Z07:00"
+  caller_info: false
+
+security:
+  allowed_origins:
+    - "*"
+  rate_limit_requests: 1000
+  rate_limit_window: 1m
+  enable_compression: true
+  token_rotation_interval: 24h
+
+metrics:
+  enabled: true
+  port: 9090
+  health_check_endpoint: /health
