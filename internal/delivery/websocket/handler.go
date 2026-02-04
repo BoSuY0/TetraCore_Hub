@@ -3,7 +3,12 @@ package websocket
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/json"
+	"encoding/hex"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,6 +29,11 @@ type Config struct {
 	ReadBufferSize    int
 	WriteBufferSize   int
 	RequireAuth       bool
+	// MachineAuthTokens — токени для HMAC-автентифікації машинних клієнтів (worker/bot).
+	// Порожній список означає, що machine-auth вимкнено.
+	MachineAuthTokens []string
+	// MachineAuthSkew — допустиме відхилення часу для X-Timestamp.
+	MachineAuthSkew time.Duration
 }
 
 // SessionValidator validates authentication tokens.
@@ -39,7 +49,7 @@ type MessageHandler interface {
 	HandleTaskResult(ctx context.Context, msg entity.TaskResultMessage) error
 	HandleTaskProgress(ctx context.Context, msg entity.TaskProgressMessage) error
 	HandleHeartbeat(ctx context.Context, clientID string, metrics map[string]any) error
-	HandleWorkerStatusChange(ctx context.Context, clientID string, status entity.WorkerStatus) error
+	HandleWorkerStatusChange(ctx context.Context, clientID string, msg entity.WorkerStatusMessage) error
 	IncrementMessageCount()
 }
 
@@ -53,6 +63,9 @@ type Handler struct {
 	clientConnections map[string]string // clientID -> connID
 	mu                sync.RWMutex
 	log               logger.LogFields
+
+	nonceMu    sync.Mutex
+	usedNonces map[string]time.Time
 }
 
 // Connection represents a WebSocket connection.
@@ -61,6 +74,8 @@ type Connection struct {
 	Conn        *websocket.Conn
 	Client      *entity.Client
 	ClientID    string
+	ExpectedClientID   string
+	ExpectedClientType entity.ClientType
 	SessionID   string
 	RemoteAddr  string
 	UserAgent   string
@@ -74,6 +89,9 @@ type Connection struct {
 
 // NewHandler creates a new WebSocket handler.
 func NewHandler(cfg Config, jwtManager *security.JWTManager, sessionValidator SessionValidator) *Handler {
+	if cfg.MachineAuthSkew <= 0 {
+		cfg.MachineAuthSkew = 90 * time.Second
+	}
 	return &Handler{
 		config:            cfg,
 		jwtManager:        jwtManager,
@@ -81,6 +99,7 @@ func NewHandler(cfg Config, jwtManager *security.JWTManager, sessionValidator Se
 		connections:       make(map[string]*Connection),
 		clientConnections: make(map[string]string),
 		log:               logger.LogFields{"component": "websocket"},
+		usedNonces:         make(map[string]time.Time),
 	}
 }
 
@@ -100,22 +119,35 @@ func (h *Handler) SetupRoutes(app *fiber.App, msgHandler MessageHandler) {
 				}
 			}
 
-			// Validate token if auth is required
-			if h.config.RequireAuth && token == "" {
+			// Якщо auth обов'язковий — приймаємо або JWT-сесію, або machine-auth (HMAC).
+			if h.config.RequireAuth {
+				// 1) Спроба JWT-сесії (користувацькі клієнти).
+				if token != "" {
+					if session, err := h.sessionValidator.ValidateToken(c.Context(), token); err == nil {
+						c.Locals("session", session)
+						c.Locals("sessionID", session.SessionID)
+						c.Locals("allowed", true)
+						return c.Next()
+					}
+				}
+
+				// 2) Спроба machine-auth (worker/bot).
+				if ok := h.tryMachineAuth(c); ok {
+					c.Locals("allowed", true)
+					return c.Next()
+				}
+
 				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 					"error": "authentication required",
 				})
 			}
 
+			// Якщо auth не обов'язковий — намагаємось витягнути сесію з JWT (best-effort).
 			if token != "" {
-				session, err := h.sessionValidator.ValidateToken(c.Context(), token)
-				if err != nil {
-					return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-						"error": "invalid token",
-					})
+				if session, err := h.sessionValidator.ValidateToken(c.Context(), token); err == nil {
+					c.Locals("session", session)
+					c.Locals("sessionID", session.SessionID)
 				}
-				c.Locals("session", session)
-				c.Locals("sessionID", session.SessionID)
 			}
 
 			c.Locals("allowed", true)
@@ -159,6 +191,16 @@ func (h *Handler) handleConnection(c *websocket.Conn) {
 	// Get session ID from locals if available
 	if sessionID := c.Locals("sessionID"); sessionID != nil {
 		conn.SessionID = sessionID.(string)
+	}
+	if expectedID := c.Locals("expectedClientID"); expectedID != nil {
+		if s, ok := expectedID.(string); ok {
+			conn.ExpectedClientID = s
+		}
+	}
+	if expectedType := c.Locals("expectedClientType"); expectedType != nil {
+		if ct, ok := expectedType.(entity.ClientType); ok {
+			conn.ExpectedClientType = ct
+		}
 	}
 
 	// Register connection
@@ -333,6 +375,24 @@ func (h *Handler) handleClientRegistration(ctx context.Context, conn *Connection
 		return
 	}
 
+	// Якщо з'єднання пройшло machine-auth — вимагаємо відповідності client_id/type.
+	if conn.ExpectedClientID != "" && msg.ClientID != conn.ExpectedClientID {
+		log.Warn().
+			Str("expected_client_id", conn.ExpectedClientID).
+			Str("client_id", msg.ClientID).
+			Msg("Client registration client_id mismatch (machine-auth)")
+		h.sendError(conn, "AUTH_FAILED", "client_id mismatch")
+		return
+	}
+	if conn.ExpectedClientType != "" && msg.ClientType != conn.ExpectedClientType {
+		log.Warn().
+			Str("expected_client_type", string(conn.ExpectedClientType)).
+			Str("client_type", string(msg.ClientType)).
+			Msg("Client registration client_type mismatch (machine-auth)")
+		h.sendError(conn, "AUTH_FAILED", "client_type mismatch")
+		return
+	}
+
 	client, err := h.messageHandler.HandleClientRegistration(ctx, msg)
 	if err != nil {
 		log.Warn().Err(err).Msg("Client registration failed")
@@ -364,6 +424,97 @@ func (h *Handler) handleClientRegistration(ctx context.Context, conn *Connection
 		Str("client_id", client.Info.ClientID).
 		Str("type", string(client.Info.ClientType)).
 		Msg("Client registered")
+}
+
+func (h *Handler) tryMachineAuth(c *fiber.Ctx) bool {
+	// Вмикаємо лише якщо є хоча б один токен.
+	if len(h.config.MachineAuthTokens) == 0 {
+		return false
+	}
+
+	authHeader := c.Get("Authorization")
+	token := ""
+	if strings.HasPrefix(authHeader, "Bearer ") && len(authHeader) > 7 {
+		token = authHeader[7:]
+	}
+	if token == "" {
+		return false
+	}
+
+	allowedToken := false
+	for _, t := range h.config.MachineAuthTokens {
+		if t != "" && token == t {
+			allowedToken = true
+			break
+		}
+	}
+	if !allowedToken {
+		return false
+	}
+
+	clientID := c.Get("X-Client-Id")
+	tsRaw := c.Get("X-Timestamp")
+	nonce := c.Get("X-Nonce")
+	clientTypeRaw := c.Get("X-Client-Type")
+	clientVersion := c.Get("X-Client-Version")
+	sigHex := c.Get("X-Signature")
+
+	if clientID == "" || tsRaw == "" || nonce == "" || clientTypeRaw == "" || clientVersion == "" || sigHex == "" {
+		return false
+	}
+
+	ts, err := strconv.ParseInt(tsRaw, 10, 64)
+	if err != nil {
+		return false
+	}
+
+	now := time.Now().Unix()
+	skew := int64(h.config.MachineAuthSkew.Seconds())
+	if skew <= 0 {
+		skew = 90
+	}
+	if ts < now-skew || ts > now+skew {
+		return false
+	}
+
+	clientType := entity.ClientType(strings.ToLower(clientTypeRaw))
+	switch clientType {
+	case entity.ClientTypeWorker, entity.ClientTypeWorkerAPI, entity.ClientTypeBot:
+	default:
+		return false
+	}
+
+	nonceKey := clientID + ":" + nonce
+	h.nonceMu.Lock()
+	// очищаємо прострочені nonce (простий GC)
+	for k, exp := range h.usedNonces {
+		if time.Now().After(exp) {
+			delete(h.usedNonces, k)
+		}
+	}
+	if _, exists := h.usedNonces[nonceKey]; exists {
+		h.nonceMu.Unlock()
+		return false
+	}
+	h.usedNonces[nonceKey] = time.Unix(ts, 0).Add(h.config.MachineAuthSkew * 2)
+	h.nonceMu.Unlock()
+
+	canonical := clientID + "|" + tsRaw + "|" + nonce + "|" + string(clientType) + "|" + clientVersion
+	mac := hmac.New(sha256.New, []byte(token))
+	_, _ = mac.Write([]byte(canonical))
+	expected := mac.Sum(nil)
+
+	provided, err := hex.DecodeString(sigHex)
+	if err != nil {
+		return false
+	}
+	if !hmac.Equal(expected, provided) {
+		return false
+	}
+
+	c.Locals("expectedClientID", clientID)
+	c.Locals("expectedClientType", clientType)
+	return true
 }
 
 func (h *Handler) handleTaskSubmission(ctx context.Context, conn *Connection, data []byte) {
@@ -462,7 +613,7 @@ func (h *Handler) handleWorkerStatus(ctx context.Context, conn *Connection, data
 	}
 
 	if h.messageHandler != nil && conn.ClientID != "" {
-		_ = h.messageHandler.HandleWorkerStatusChange(ctx, conn.ClientID, msg.Status)
+		_ = h.messageHandler.HandleWorkerStatusChange(ctx, conn.ClientID, msg)
 	}
 }
 

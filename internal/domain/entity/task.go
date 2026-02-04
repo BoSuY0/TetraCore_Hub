@@ -2,6 +2,7 @@
 package entity
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,8 +21,6 @@ const (
 	TaskTypeCalculation     TaskType = "calculation"
 	TaskTypeSendMessage     TaskType = "send_message"
 	TaskTypeCustom          TaskType = "custom"
-	TaskTypeActivateModule  TaskType = "activate_module"
-	TaskTypeDeactivateModule TaskType = "deactivate_module"
 	TaskTypeWorkerTask      TaskType = "worker_task"
 )
 
@@ -149,6 +148,7 @@ type TaskContext struct {
 	StartedAt        *time.Time            `json:"started_at,omitempty"`
 	CompletedAt      *time.Time            `json:"completed_at,omitempty"`
 	ExpiresAt        *time.Time            `json:"expires_at,omitempty"`
+	RetryAt          *time.Time            `json:"retry_at,omitempty"`
 	CurrentStatus    TaskStatus            `json:"current_status"`
 	StatusHistory    []StatusHistoryEntry  `json:"status_history"`
 	CurrentAttempt   int                   `json:"current_attempt"`
@@ -374,6 +374,9 @@ func (t *Task) AssignToWorker(workerID string) {
 func (t *Task) StartExecution() {
 	now := time.Now().UTC()
 	t.Context.StartedAt = &now
+	if t.Timeout > 0 {
+		t.SetExpiration(t.Timeout)
+	}
 	t.Context.AddStatusChange(TaskStatusProcessing, "Task execution started")
 }
 
@@ -417,8 +420,9 @@ func (t *Task) CanRetry() bool {
 // ScheduleRetry schedules a retry attempt.
 func (t *Task) ScheduleRetry() bool {
 	if t.CanRetry() {
-		t.Context.AddStatusChange(TaskStatusRetry,
-			"Scheduling retry attempt "+string(rune(t.Context.CurrentAttempt+'0')))
+		retryAt := time.Now().UTC().Add(time.Duration(t.RetryDelay) * time.Second)
+		t.Context.RetryAt = &retryAt
+		t.Context.AddStatusChange(TaskStatusRetry, fmt.Sprintf("Scheduling retry attempt %d", t.Context.CurrentAttempt))
 		return true
 	}
 	return false

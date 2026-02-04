@@ -4,7 +4,7 @@ Bot stub for Hub integration testing.
 
 Lightweight WebSocket client that implements the bot registration protocol
 used by TetraCore_Bot. Connects to Hub, registers as client_type="bot",
-handles incoming tasks (ping_bot), and sends heartbeats.
+обробляє вхідні задачі (generic_bot_task) та надсилає heartbeat-повідомлення.
 
 Environment variables:
     HUB_URL     - WebSocket URL (default: ws://localhost:8000/ws)
@@ -14,10 +14,13 @@ Environment variables:
 """
 
 import asyncio
+import hashlib
+import hmac
 import json
 import os
 import signal
 import sys
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -42,7 +45,20 @@ async def main():
 
     headers = {}
     if AUTH_TOKEN:
+        ts = str(int(time.time()))
+        nonce = uuid.uuid4().hex
+        client_type = "bot"
+        version = "1.0.0"
+        canonical = f"{CLIENT_ID}|{ts}|{nonce}|{client_type}|{version}"
+        sig = hmac.new(AUTH_TOKEN.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha256).hexdigest()
+
         headers["Authorization"] = f"Bearer {AUTH_TOKEN}"
+        headers["X-Client-Id"] = CLIENT_ID
+        headers["X-Timestamp"] = ts
+        headers["X-Nonce"] = nonce
+        headers["X-Client-Type"] = client_type
+        headers["X-Client-Version"] = version
+        headers["X-Signature"] = sig
 
     try:
         async with websockets.connect(
@@ -61,11 +77,7 @@ async def main():
                 "version": "1.0.0",
                 "capabilities": {
                     "supported_task_types": [
-                        "ping_bot",
                         "generic_bot_task",
-                        "activate_module",
-                        "deactivate_module",
-                        "check_user_admin",
                     ],
                     "max_concurrent_tasks": 5,
                     "average_processing_time": 0.0,

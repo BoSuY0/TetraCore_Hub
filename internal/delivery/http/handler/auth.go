@@ -2,7 +2,9 @@
 package handler
 
 import (
+	"bytes"
 	"context"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -106,6 +108,10 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		})
 	}
 
+	// Optional: set refresh token cookie for SPA "silent refresh" flows.
+	// This is additive; existing clients can still use the JSON response.
+	setRefreshCookie(c, result.RefreshToken)
+
 	return c.JSON(LoginResponse{
 		AccessToken:  result.AccessToken,
 		RefreshToken: result.RefreshToken,
@@ -120,18 +126,91 @@ type RefreshRequest struct {
 	RefreshToken string `json:"refresh_token" validate:"required"`
 }
 
+func isSecureRequest(c *fiber.Ctx) bool {
+	// Best-effort: honor reverse proxy headers when present.
+	proto := strings.ToLower(strings.TrimSpace(c.Get("X-Forwarded-Proto")))
+	if proto == "https" {
+		return true
+	}
+	if proto == "http" {
+		return false
+	}
+	return strings.ToLower(c.Protocol()) == "https"
+}
+
+func pickBearerToken(authHeader string) string {
+	raw := strings.TrimSpace(authHeader)
+	if raw == "" {
+		return ""
+	}
+	parts := strings.Fields(raw)
+	if len(parts) == 2 && strings.EqualFold(parts[0], "bearer") {
+		return strings.TrimSpace(parts[1])
+	}
+	return ""
+}
+
+func pickRefreshToken(c *fiber.Ctx, req RefreshRequest) string {
+	if strings.TrimSpace(req.RefreshToken) != "" {
+		return strings.TrimSpace(req.RefreshToken)
+	}
+	if v := strings.TrimSpace(c.Get("X-Refresh-Token")); v != "" {
+		return v
+	}
+	if v := pickBearerToken(c.Get("Authorization")); v != "" {
+		return v
+	}
+	// Cookie-based flows (silent refresh) often send an empty body and rely on a cookie.
+	for _, name := range []string{"refresh_token", "refreshToken", "rt"} {
+		if v := strings.TrimSpace(c.Cookies(name)); v != "" {
+			return v
+		}
+	}
+	// Legacy / fallback (not recommended, but helps avoid hard breakages).
+	if v := strings.TrimSpace(c.Query("refresh_token")); v != "" {
+		return v
+	}
+	return ""
+}
+
+func setRefreshCookie(c *fiber.Ctx, refreshToken string) {
+	if strings.TrimSpace(refreshToken) == "" {
+		return
+	}
+	secure := isSecureRequest(c)
+	sameSite := fiber.CookieSameSiteLaxMode
+	if secure {
+		// Enables cross-site SPA deployments when CORS credentials are enabled.
+		sameSite = fiber.CookieSameSiteNoneMode
+	}
+	c.Cookie(&fiber.Cookie{
+		Name:     "refresh_token",
+		Value:    refreshToken,
+		HTTPOnly: true,
+		Secure:   secure,
+		SameSite: sameSite,
+		Path:     "/",
+	})
+}
+
 // RefreshToken handles the /auth/refresh endpoint.
 func (h *AuthHandler) RefreshToken(c *fiber.Ctx) error {
 	var req RefreshRequest
-	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error":   true,
-			"message": "Invalid request body",
-			"code":    "INVALID_REQUEST",
-		})
+
+	// Support cookie-based refresh clients that send an empty body.
+	body := bytes.TrimSpace(c.Body())
+	if len(body) > 0 {
+		if err := c.BodyParser(&req); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error":   true,
+				"message": "Invalid request body",
+				"code":    "INVALID_REQUEST",
+			})
+		}
 	}
 
-	if req.RefreshToken == "" {
+	refreshToken := pickRefreshToken(c, req)
+	if refreshToken == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error":   true,
 			"message": "Refresh token is required",
@@ -140,7 +219,7 @@ func (h *AuthHandler) RefreshToken(c *fiber.Ctx) error {
 	}
 
 	// Refresh tokens
-	result, err := h.authService.RefreshToken(c.Context(), req.RefreshToken)
+	result, err := h.authService.RefreshToken(c.Context(), refreshToken)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error":   true,
@@ -148,6 +227,9 @@ func (h *AuthHandler) RefreshToken(c *fiber.Ctx) error {
 			"code":    "INVALID_REFRESH_TOKEN",
 		})
 	}
+
+	// Keep cookie-based clients working (rotation-friendly).
+	setRefreshCookie(c, result.RefreshToken)
 
 	return c.JSON(LoginResponse{
 		AccessToken:  result.AccessToken,

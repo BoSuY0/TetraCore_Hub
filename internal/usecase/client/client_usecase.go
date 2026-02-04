@@ -75,6 +75,9 @@ func (uc *UseCase) RegisterClient(ctx context.Context, input RegisterInput) (*en
 			return nil, errors.ErrConflict.With("client already registered")
 		}
 
+		// Fail-safe: очищаємо активні задачі при реконекті, щоб не "залипав" ліміт конкурентності.
+		_ = uc.clientRepo.ClearActiveTasks(ctx, input.ClientID)
+
 		// Update existing client
 		existing.Info.ConnectionStatus = entity.ConnectionStatusConnected
 		existing.Info.LastSeen = time.Now().UTC()
@@ -150,6 +153,9 @@ func (uc *UseCase) DisconnectClient(ctx context.Context, clientID string, reason
 		return errors.ErrInternalServer.Wrap(err, "failed to update client")
 	}
 
+	// Fail-safe: очищаємо активні задачі при дисконекті, щоб при наступному підключенні не блокувати планувальник.
+	_ = uc.clientRepo.ClearActiveTasks(ctx, clientID)
+
 	// Remove from connection tracking
 	uc.connectionsMu.Lock()
 	delete(uc.connections, clientID)
@@ -183,21 +189,26 @@ func (uc *UseCase) GetConnectedClients(ctx context.Context) ([]*entity.Client, e
 	return uc.clientRepo.GetConnected(ctx)
 }
 
-// GetAvailableWorkers retrieves workers that can handle a task type.
-func (uc *UseCase) GetAvailableWorkers(ctx context.Context, taskType string) ([]*entity.Client, error) {
-	workers, err := uc.clientRepo.GetAvailableWorkers(ctx, taskType)
+// GetAvailableExecutors retrieves executors that can handle a task type.
+func (uc *UseCase) GetAvailableExecutors(ctx context.Context, executorType entity.ExecutorType, taskType string) ([]*entity.Client, error) {
+	executors, err := uc.clientRepo.GetAvailableExecutors(ctx, executorType, taskType)
 	if err != nil {
 		return nil, err
 	}
 
 	// Sort by load (lowest first) for load balancing
-	sort.Slice(workers, func(i, j int) bool {
-		loadI := workers[i].Info.GetCurrentLoad()
-		loadJ := workers[j].Info.GetCurrentLoad()
+	sort.Slice(executors, func(i, j int) bool {
+		loadI := executors[i].Info.GetCurrentLoad()
+		loadJ := executors[j].Info.GetCurrentLoad()
 		return loadI < loadJ
 	})
 
-	return workers, nil
+	return executors, nil
+}
+
+// GetAvailableWorkers retrieves workers that can handle a task type.
+func (uc *UseCase) GetAvailableWorkers(ctx context.Context, taskType string) ([]*entity.Client, error) {
+	return uc.GetAvailableExecutors(ctx, entity.ExecutorTypeWorker, taskType)
 }
 
 // SelectWorker selects the best worker for a task.
@@ -232,6 +243,49 @@ func (uc *UseCase) UpdateWorkerStatus(ctx context.Context, clientID string, stat
 	}
 
 	log.Debug().Msg("Worker status updated")
+	return nil
+}
+
+// UpdateWorkerStatusReport оновлює статус воркера разом з метриками, які він репортує через WS.
+// Це "best-effort" дані; основний трекінг конкурентності ведеться через activeTasks set.
+func (uc *UseCase) UpdateWorkerStatusReport(ctx context.Context, clientID string, status entity.WorkerStatus, activeTasks int, load float64, metrics map[string]any) error {
+	log := logger.WithFields(uc.log).With("client_id", clientID, "status", status)
+
+	client, err := uc.clientRepo.Get(ctx, clientID)
+	if err != nil {
+		return errors.ErrNotFound.With("client not found")
+	}
+	if client.Info == nil {
+		return errors.ErrInternalServer.With("client info missing")
+	}
+
+	client.Info.WorkerStatus = &status
+	client.Info.LastSeen = time.Now().UTC()
+
+	if client.Info.Stats == nil {
+		client.Info.Stats = entity.NewClientStats()
+	}
+	if activeTasks >= 0 {
+		client.Info.Stats.ActiveTasks = activeTasks
+		client.Info.CurrentLoad = activeTasks
+	}
+
+	if metrics != nil {
+		client.Info.Metrics = metrics
+	}
+	if load != 0 {
+		if client.Info.Metrics == nil {
+			client.Info.Metrics = make(map[string]any)
+		}
+		client.Info.Metrics["reported_load"] = load
+	}
+
+	if err := uc.clientRepo.Save(ctx, client); err != nil {
+		log.Error().Err(err).Msg("Failed to update worker report")
+		return errors.ErrInternalServer.Wrap(err, "failed to update client")
+	}
+
+	log.Debug().Msg("Worker report updated")
 	return nil
 }
 

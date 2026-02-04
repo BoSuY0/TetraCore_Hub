@@ -29,8 +29,7 @@ class TaskType(str, Enum):
     CUSTOM = "custom"
 
     # Типи завдань для бота
-    ACTIVATE_MODULE = "activate_module"
-    DEACTIVATE_MODULE = "deactivate_module"
+    GENERIC_BOT_TASK = "generic_bot_task"
 
     # Типи завдань для воркерів
     WORKER_TASK = "worker_task"

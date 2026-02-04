@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	goredis "github.com/redis/go-redis/v9"
 	"github.com/tetra/core-hub/internal/domain/entity"
 	"github.com/tetra/core-hub/internal/domain/repository"
 	"github.com/tetra/core-hub/internal/infrastructure/redis"
@@ -137,42 +138,84 @@ func (r *RedisClientRepository) GetConnected(ctx context.Context) ([]*entity.Cli
 
 // GetAvailableWorkers retrieves available workers for task assignment.
 func (r *RedisClientRepository) GetAvailableWorkers(ctx context.Context, taskType string) ([]*entity.Client, error) {
-	// Get connected clients that are workers
-	workerIDs, err := r.client.SMembers(ctx, clientTypeSetKey+string(entity.ClientTypeWorker))
-	if err != nil {
-		return nil, err
+	// Зберігаємо попередню поведінку: "worker" включає і worker_api.
+	return r.GetAvailableExecutors(ctx, entity.ExecutorTypeWorker, taskType)
+}
+
+// GetAvailableExecutors retrieves available executors for task assignment.
+func (r *RedisClientRepository) GetAvailableExecutors(ctx context.Context, executorType entity.ExecutorType, taskType string) ([]*entity.Client, error) {
+	var clientTypes []entity.ClientType
+	switch executorType {
+	case entity.ExecutorTypeBot:
+		clientTypes = []entity.ClientType{entity.ClientTypeBot}
+	case entity.ExecutorTypeWorkerAPI:
+		clientTypes = []entity.ClientType{entity.ClientTypeWorkerAPI}
+	case entity.ExecutorTypeWorker:
+		// Backward-compatible: "worker" може бути і worker_api.
+		clientTypes = []entity.ClientType{entity.ClientTypeWorker, entity.ClientTypeWorkerAPI}
+	default:
+		// Безпечний дефолт: трактуємо як "worker".
+		clientTypes = []entity.ClientType{entity.ClientTypeWorker, entity.ClientTypeWorkerAPI}
 	}
 
-	workerAPIIDs, err := r.client.SMembers(ctx, clientTypeSetKey+string(entity.ClientTypeWorkerAPI))
-	if err != nil {
-		return nil, err
+	// Отримуємо ids кандидатів за типами клієнтів.
+	candidateSet := make(map[string]struct{})
+	for _, ct := range clientTypes {
+		ids, err := r.client.SMembers(ctx, clientTypeSetKey+string(ct))
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range ids {
+			candidateSet[id] = struct{}{}
+		}
 	}
 
-	// Combine worker types
-	allWorkerIDs := append(workerIDs, workerAPIIDs...)
-
-	// Get connected set
+	// Підмножина підключених клієнтів.
 	connectedIDs, err := r.client.SMembers(ctx, connectedSetKey)
 	if err != nil {
 		return nil, err
 	}
-	connectedSet := make(map[string]bool)
+	connectedSet := make(map[string]struct{}, len(connectedIDs))
 	for _, id := range connectedIDs {
-		connectedSet[id] = true
+		connectedSet[id] = struct{}{}
+	}
+
+	candidates := make([]string, 0, len(candidateSet))
+	for id := range candidateSet {
+		if _, ok := connectedSet[id]; ok {
+			candidates = append(candidates, id)
+		}
+	}
+
+	// Отримуємо кількість активних задач по кожному кандидату через pipeline.
+	pipe := r.client.Pipeline()
+	activeCmds := make(map[string]*goredis.IntCmd, len(candidates))
+	for _, id := range candidates {
+		activeCmds[id] = pipe.SCard(ctx, activeTasksKey+id)
+	}
+	if _, err := pipe.Exec(ctx); err != nil {
+		return nil, err
 	}
 
 	available := make([]*entity.Client, 0)
-	for _, id := range allWorkerIDs {
-		if !connectedSet[id] {
-			continue
-		}
-
+	for _, id := range candidates {
 		client, err := r.Get(ctx, id)
 		if err != nil {
 			continue
 		}
+		if client.Info == nil {
+			continue
+		}
+		if client.Info.Stats == nil {
+			client.Info.Stats = entity.NewClientStats()
+		}
 
-		// Check if worker can handle task type and is available
+		if cmd, ok := activeCmds[id]; ok {
+			client.Info.Stats.ActiveTasks = int(cmd.Val())
+			client.Info.CurrentLoad = client.Info.Stats.ActiveTasks
+		}
+
+		// Перевірка: чи може виконувати цей тип задачі і чи є доступним.
 		if client.Info.CanHandleTask(taskType) && client.Info.IsAvailable() {
 			available = append(available, client)
 		}
@@ -256,6 +299,11 @@ func (r *RedisClientRepository) SetActiveTask(ctx context.Context, clientID, tas
 // RemoveActiveTask removes a task from client's active tasks.
 func (r *RedisClientRepository) RemoveActiveTask(ctx context.Context, clientID, taskID string) error {
 	return r.client.SRem(ctx, activeTasksKey+clientID, taskID)
+}
+
+// ClearActiveTasks clears the active task tracking set for a client.
+func (r *RedisClientRepository) ClearActiveTasks(ctx context.Context, clientID string) error {
+	return r.client.Del(ctx, activeTasksKey+clientID)
 }
 
 // Count returns the total number of clients.

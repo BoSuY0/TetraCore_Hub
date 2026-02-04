@@ -56,7 +56,9 @@ type SubmitInput struct {
 // TaskSender is an interface for sending tasks to workers.
 type TaskSender interface {
 	SendToClient(clientID string, message any) error
-	GetAvailableWorkers(ctx context.Context, taskType string) ([]*entity.Client, error)
+	GetAvailableExecutors(ctx context.Context, executorType entity.ExecutorType, taskType string) ([]*entity.Client, error)
+	SetActiveTask(ctx context.Context, clientID, taskID string) error
+	RemoveActiveTask(ctx context.Context, clientID, taskID string) error
 }
 
 // ProducerAuth handles producer authentication.
@@ -85,6 +87,7 @@ type UseCase struct {
 	auth           ProducerAuth
 	log            logger.LogFields
 	mu             sync.RWMutex
+	processMu      sync.Mutex
 }
 
 // NewUseCase creates a new task use case.
@@ -201,6 +204,15 @@ func (uc *UseCase) CompleteTask(ctx context.Context, taskID string, result map[s
 		return fmt.Errorf("task not found: %w", err)
 	}
 
+	uc.mu.RLock()
+	sender := uc.sender
+	uc.mu.RUnlock()
+
+	workerID := task.Context.WorkerID
+	if sender != nil && workerID != "" {
+		_ = sender.RemoveActiveTask(ctx, workerID, taskID)
+	}
+
 	task.Complete(result)
 
 	if err := uc.taskRepo.Update(ctx, task); err != nil {
@@ -223,12 +235,28 @@ func (uc *UseCase) FailTask(ctx context.Context, taskID, errorType, errorMessage
 		return fmt.Errorf("task not found: %w", err)
 	}
 
-	// Check if we can retry
-	if task.CanRetry() {
-		task.ScheduleRetry()
+	uc.mu.RLock()
+	sender := uc.sender
+	uc.mu.RUnlock()
+
+	workerID := task.Context.WorkerID
+	if sender != nil && workerID != "" {
+		_ = sender.RemoveActiveTask(ctx, workerID, taskID)
+	}
+
+	// Mark failed for this attempt
+	task.Fail(errorMessage, errorTrace)
+	if task.Context != nil {
+		task.Context.AddAttempt(workerID, errorMessage)
+	}
+
+	// If we can retry, schedule retry and reset assignment/execution timestamps
+	if task.ScheduleRetry() {
 		task.Context.WorkerID = ""
 		task.Context.AssignedAt = nil
 		task.Context.StartedAt = nil
+		task.Context.CompletedAt = nil
+		task.Context.ExpiresAt = nil
 
 		if err := uc.taskRepo.Update(ctx, task); err != nil {
 			return fmt.Errorf("failed to schedule retry: %w", err)
@@ -241,9 +269,6 @@ func (uc *UseCase) FailTask(ctx context.Context, taskID, errorType, errorMessage
 
 		return nil
 	}
-
-	// Mark as failed
-	task.Fail(errorMessage, errorTrace)
 
 	if err := uc.taskRepo.Update(ctx, task); err != nil {
 		return fmt.Errorf("failed to update failed task: %w", err)
@@ -262,6 +287,9 @@ func (uc *UseCase) FailTask(ctx context.Context, taskID, errorType, errorMessage
 func (uc *UseCase) ProcessPendingTasks(ctx context.Context) (int, error) {
 	log := logger.WithFields(uc.log)
 
+	uc.processMu.Lock()
+	defer uc.processMu.Unlock()
+
 	uc.mu.RLock()
 	sender := uc.sender
 	uc.mu.RUnlock()
@@ -269,6 +297,9 @@ func (uc *UseCase) ProcessPendingTasks(ctx context.Context) (int, error) {
 	if sender == nil {
 		return 0, nil
 	}
+
+	// Спочатку обробляємо прострочені (timeout) задачі.
+	_, _ = uc.processExpiredTasks(ctx, sender)
 
 	// Get pending tasks
 	tasks, err := uc.taskRepo.GetPending(ctx, uc.config.BatchSize)
@@ -278,21 +309,16 @@ func (uc *UseCase) ProcessPendingTasks(ctx context.Context) (int, error) {
 
 	var assigned int
 	for _, task := range tasks {
-		// Skip tasks that are being retried with delay
-		if task.Context.CurrentStatus == entity.TaskStatusRetry {
+		// Find available executor based on executor_type
+		executors, err := sender.GetAvailableExecutors(ctx, task.ExecutorType, string(task.TaskType))
+		if err != nil || len(executors) == 0 {
 			continue
 		}
 
-		// Find available worker
-		workers, err := sender.GetAvailableWorkers(ctx, string(task.TaskType))
-		if err != nil || len(workers) == 0 {
-			continue
-		}
-
-		// Pick the least loaded worker
+		// Pick the least loaded executor
 		var selectedWorker *entity.Client
 		minLoad := 100.0
-		for _, w := range workers {
+		for _, w := range executors {
 			load := w.Info.GetLoadPercentage()
 			if load < minLoad {
 				minLoad = load
@@ -304,6 +330,15 @@ func (uc *UseCase) ProcessPendingTasks(ctx context.Context) (int, error) {
 			continue
 		}
 
+		// Mark task as active for the executor (fail-safe for concurrency)
+		if err := sender.SetActiveTask(ctx, selectedWorker.Info.ClientID, task.TaskID); err != nil {
+			log.Warn().Err(err).
+				Str("task_id", task.TaskID).
+				Str("worker_id", selectedWorker.Info.ClientID).
+				Msg("Failed to mark task as active for executor")
+			continue
+		}
+
 		// Assign task to worker
 		task.AssignToWorker(selectedWorker.Info.ClientID)
 		task.StartExecution()
@@ -311,6 +346,7 @@ func (uc *UseCase) ProcessPendingTasks(ctx context.Context) (int, error) {
 		// Update task in repository
 		if err := uc.taskRepo.Update(ctx, task); err != nil {
 			log.Warn().Err(err).Str("task_id", task.TaskID).Msg("Failed to update task")
+			_ = sender.RemoveActiveTask(ctx, selectedWorker.Info.ClientID, task.TaskID)
 			continue
 		}
 
@@ -334,6 +370,7 @@ func (uc *UseCase) ProcessPendingTasks(ctx context.Context) (int, error) {
 			// Reset task assignment
 			task.Context.ResetAssignment()
 			uc.taskRepo.Update(ctx, task)
+			_ = sender.RemoveActiveTask(ctx, selectedWorker.Info.ClientID, task.TaskID)
 			continue
 		}
 
@@ -349,6 +386,63 @@ func (uc *UseCase) ProcessPendingTasks(ctx context.Context) (int, error) {
 	}
 
 	return assigned, nil
+}
+
+func (uc *UseCase) processExpiredTasks(ctx context.Context, sender TaskSender) (int, error) {
+	expired, err := uc.taskRepo.GetExpired(ctx, uc.config.BatchSize)
+	if err != nil {
+		return 0, err
+	}
+	if len(expired) == 0 {
+		return 0, nil
+	}
+
+	log := logger.WithFields(uc.log)
+
+	processed := 0
+	for _, task := range expired {
+		if task == nil || task.Context == nil || task.Context.IsCompleted() {
+			continue
+		}
+
+		workerID := task.Context.WorkerID
+		if workerID != "" {
+			_ = sender.RemoveActiveTask(ctx, workerID, task.TaskID)
+		}
+
+		// Позначаємо як timeout (це важливо для CanRetry()).
+		task.Context.AddError("timeout", "Task timed out", "")
+		task.MarkTimeout()
+		task.Context.AddAttempt(workerID, "timeout")
+
+		// Якщо можна повторити — плануємо retry.
+		if task.ScheduleRetry() {
+			task.Context.WorkerID = ""
+			task.Context.AssignedAt = nil
+			task.Context.StartedAt = nil
+			task.Context.CompletedAt = nil
+			task.Context.ExpiresAt = nil
+		}
+
+		if err := uc.taskRepo.Update(ctx, task); err != nil {
+			log.Warn().Err(err).Str("task_id", task.TaskID).Msg("Failed to update expired task")
+			continue
+		}
+
+		expiredAt := ""
+		if task.Context.ExpiresAt != nil {
+			expiredAt = task.Context.ExpiresAt.UTC().Format(time.RFC3339)
+		}
+
+		processed++
+		log.Info().
+			Str("task_id", task.TaskID).
+			Str("status", string(task.Context.CurrentStatus)).
+			Str("expired_at", expiredAt).
+			Msg("Expired task processed")
+	}
+
+	return processed, nil
 }
 
 // CleanupOldTasks removes completed tasks older than the configured duration.

@@ -35,6 +35,10 @@ type ClientRepository interface {
 	// GetAvailableWorkers retrieves available workers for task assignment.
 	GetAvailableWorkers(ctx context.Context, taskType string) ([]*entity.Client, error)
 
+	// GetAvailableExecutors retrieves available executors for task assignment.
+	// executorType визначає, який клас клієнтів шукати (bot/worker/worker_api).
+	GetAvailableExecutors(ctx context.Context, executorType entity.ExecutorType, taskType string) ([]*entity.Client, error)
+
 	// Delete removes a client.
 	Delete(ctx context.Context, clientID string) error
 
@@ -52,6 +56,10 @@ type ClientRepository interface {
 
 	// RemoveActiveTask removes a task from client's active tasks.
 	RemoveActiveTask(ctx context.Context, clientID, taskID string) error
+
+	// ClearActiveTasks очищає трекінг активних задач для клієнта.
+	// Використовується як fail-safe при реконекті/дисконекті, щоб уникнути "залипання" ліміту конкурентності.
+	ClearActiveTasks(ctx context.Context, clientID string) error
 
 	// Count returns the total number of clients.
 	Count(ctx context.Context) (int64, error)

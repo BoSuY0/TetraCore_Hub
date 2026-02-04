@@ -525,16 +525,16 @@ func (uc *UseCase) HandleHeartbeat(ctx context.Context, clientID string, metrics
 }
 
 // HandleWorkerStatusChange handles worker status change.
-func (uc *UseCase) HandleWorkerStatusChange(ctx context.Context, clientID string, status entity.WorkerStatus) error {
-	log := logger.WithFields(uc.log).With("client_id", clientID, "status", status)
+func (uc *UseCase) HandleWorkerStatusChange(ctx context.Context, clientID string, msg entity.WorkerStatusMessage) error {
+	log := logger.WithFields(uc.log).With("client_id", clientID, "status", msg.Status)
 
-	if err := uc.clientUC.UpdateWorkerStatus(ctx, clientID, status); err != nil {
+	if err := uc.clientUC.UpdateWorkerStatusReport(ctx, clientID, msg.Status, msg.ActiveTasks, msg.Load, msg.Metrics); err != nil {
 		log.Error().Err(err).Msg("Failed to update worker status")
 		return err
 	}
 
 	// If worker becomes idle, try to assign pending tasks
-	if status == entity.WorkerStatusIdle {
+	if msg.Status == entity.WorkerStatusIdle {
 		go func() {
 			_, _ = uc.taskUC.ProcessPendingTasks(context.Background())
 		}()
@@ -551,9 +551,19 @@ func (uc *UseCase) SendToClient(clientID string, message any) error {
 	return uc.connMgr.SendToClient(clientID, message)
 }
 
-// GetAvailableWorkers returns available workers for a task type (implements task.TaskSender).
-func (uc *UseCase) GetAvailableWorkers(ctx context.Context, taskType string) ([]*entity.Client, error) {
-	return uc.clientUC.GetAvailableWorkers(ctx, taskType)
+// GetAvailableExecutors returns available executors for a task type (implements task.TaskSender).
+func (uc *UseCase) GetAvailableExecutors(ctx context.Context, executorType entity.ExecutorType, taskType string) ([]*entity.Client, error) {
+	return uc.clientUC.GetAvailableExecutors(ctx, executorType, taskType)
+}
+
+// SetActiveTask marks a task as active for a client (implements task.TaskSender).
+func (uc *UseCase) SetActiveTask(ctx context.Context, clientID, taskID string) error {
+	return uc.clientUC.SetActiveTask(ctx, clientID, taskID)
+}
+
+// RemoveActiveTask removes a task from active tracking for a client (implements task.TaskSender).
+func (uc *UseCase) RemoveActiveTask(ctx context.Context, clientID, taskID string) error {
+	return uc.clientUC.RemoveActiveTask(ctx, clientID, taskID)
 }
 
 // Broadcast sends a message to all connected clients.

@@ -141,17 +141,6 @@ func DefaultActionSpecRegistry() *ActionSpecRegistry {
 		MaxAttempts: 3,
 	})
 
-	// check_user_admin: перевірка адмін-статусу користувача
-	registry.Register(&ActionSpec{
-		Name: "check_user_admin",
-		Required: map[string]bool{
-			"chat_id": true,
-			"user_id": true,
-		},
-		Allowed:     map[string]bool{"user_id": true},
-		MaxAttempts: 3,
-	})
-
 	// set_group_status: встановлення статусу групи
 	registry.Register(&ActionSpec{
 		Name: "set_group_status",

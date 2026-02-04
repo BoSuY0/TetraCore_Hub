@@ -94,7 +94,7 @@ func (r *Router) setupMiddleware() {
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     origins,
 		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS,PATCH",
-		AllowHeaders:     "Origin,Content-Type,Accept,Authorization,X-Request-ID",
+		AllowHeaders:     "Origin,Content-Type,Accept,Authorization,X-Request-ID,X-Refresh-Token",
 		AllowCredentials: allowCredentials,
 		ExposeHeaders:    "Content-Length,Content-Type,X-Request-ID",
 		MaxAge:           int(12 * time.Hour / time.Second),
@@ -137,6 +137,12 @@ func (r *Router) setupRoutes(h Handlers) {
 
 	// Logout requires auth
 	auth.Post("/logout", r.config.AuthMiddleware.Handler(), h.Auth.Logout)
+
+	// Backward/alternate compatibility routes (some clients expect versioned auth under /v1).
+	v1auth := app.Group("/v1/auth")
+	v1auth.Post("/login", h.Auth.Login)
+	v1auth.Post("/refresh", h.Auth.RefreshToken)
+	v1auth.Post("/logout", r.config.AuthMiddleware.Handler(), h.Auth.Logout)
 
 	// API routes (auth required)
 	api := app.Group("/api/v1")

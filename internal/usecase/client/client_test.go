@@ -90,6 +90,45 @@ func (r *mockClientRepo) GetAvailableWorkers(ctx context.Context, taskType strin
 	return result, nil
 }
 
+func (r *mockClientRepo) GetAvailableExecutors(ctx context.Context, executorType entity.ExecutorType, taskType string) ([]*entity.Client, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var result []*entity.Client
+	for _, c := range r.clients {
+		if c.Info.ConnectionStatus != entity.ConnectionStatusConnected {
+			continue
+		}
+
+		switch executorType {
+		case entity.ExecutorTypeBot:
+			if c.Info.ClientType != entity.ClientTypeBot {
+				continue
+			}
+		case entity.ExecutorTypeWorkerAPI:
+			if c.Info.ClientType != entity.ClientTypeWorkerAPI {
+				continue
+			}
+		default:
+			// "worker" (та дефолт) — дозволяємо і worker_api.
+			if c.Info.ClientType != entity.ClientTypeWorker && c.Info.ClientType != entity.ClientTypeWorkerAPI {
+				continue
+			}
+		}
+
+		// Для простоти: як і раніше, враховуємо idle-статус тільки для воркерів.
+		if c.Info.ClientType == entity.ClientTypeWorker || c.Info.ClientType == entity.ClientTypeWorkerAPI {
+			if c.Info.WorkerStatus == nil || *c.Info.WorkerStatus != entity.WorkerStatusIdle {
+				continue
+			}
+		}
+
+		result = append(result, c)
+	}
+
+	return result, nil
+}
+
 func (r *mockClientRepo) Delete(ctx context.Context, clientID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -157,6 +196,18 @@ func (r *mockClientRepo) RemoveActiveTask(ctx context.Context, clientID, taskID 
 		}
 		if c.Info.Stats != nil && c.Info.Stats.ActiveTasks > 0 {
 			c.Info.Stats.ActiveTasks--
+		}
+	}
+	return nil
+}
+
+func (r *mockClientRepo) ClearActiveTasks(ctx context.Context, clientID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if c, ok := r.clients[clientID]; ok {
+		c.ActiveTasks = make(map[string]time.Time)
+		if c.Info.Stats != nil {
+			c.Info.Stats.ActiveTasks = 0
 		}
 	}
 	return nil

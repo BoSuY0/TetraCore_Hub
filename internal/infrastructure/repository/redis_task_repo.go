@@ -23,6 +23,7 @@ const (
 	taskClientSetKey      = "tasks:client:"
 	taskWorkerSetKey      = "tasks:worker:"
 	taskPendingZSetKey    = "tasks:pending"
+	taskRetryZSetKey      = "tasks:retry"
 	taskIdempotencyKey    = "tasks:idempotency:"
 	taskExecutorSetKey    = "tasks:executor:"
 )
@@ -45,6 +46,12 @@ func NewRedisTaskRepository(client *redis.Client, ttl time.Duration) *RedisTaskR
 
 // Save stores a task.
 func (r *RedisTaskRepository) Save(ctx context.Context, task *entity.Task) error {
+	// Ensure RetryAt is set when scheduling retries (so Redis score is deterministic).
+	if task.Context != nil && task.Context.CurrentStatus == entity.TaskStatusRetry && task.Context.RetryAt == nil {
+		retryAt := time.Now().UTC().Add(time.Duration(task.RetryDelay) * time.Second)
+		task.Context.RetryAt = &retryAt
+	}
+
 	data, err := json.Marshal(task)
 	if err != nil {
 		return fmt.Errorf("failed to marshal task: %w", err)
@@ -73,6 +80,13 @@ func (r *RedisTaskRepository) Save(ctx context.Context, task *entity.Task) error
 		pipe.ZAdd(ctx, taskPendingZSetKey, goredis.Z{Score: score, Member: task.TaskID})
 	} else {
 		pipe.ZRem(ctx, taskPendingZSetKey, task.TaskID)
+	}
+
+	// Retry scheduling: keep retry tasks in a time-based ZSET, remove otherwise.
+	if task.Context.CurrentStatus == entity.TaskStatusRetry && task.Context.RetryAt != nil {
+		pipe.ZAdd(ctx, taskRetryZSetKey, goredis.Z{Score: float64(task.Context.RetryAt.Unix()), Member: task.TaskID})
+	} else {
+		pipe.ZRem(ctx, taskRetryZSetKey, task.TaskID)
 	}
 
 	// Store idempotency key mapping if present
@@ -223,6 +237,9 @@ func (r *RedisTaskRepository) GetByWorkerID(ctx context.Context, workerID string
 
 // GetPending retrieves pending tasks ordered by priority.
 func (r *RedisTaskRepository) GetPending(ctx context.Context, limit int) ([]*entity.Task, error) {
+	// Best-effort: promote due retries back into pending before selecting tasks.
+	_ = r.promoteDueRetries(ctx, limit)
+
 	// Get from sorted set with scores
 	results, err := r.client.ZRangeWithScores(ctx, taskPendingZSetKey, 0, -1)
 	if err != nil {
@@ -253,6 +270,58 @@ func (r *RedisTaskRepository) GetPending(ctx context.Context, limit int) ([]*ent
 	}
 
 	return tasks, nil
+}
+
+func (r *RedisTaskRepository) promoteDueRetries(ctx context.Context, limit int) error {
+	promoteLimit := limit
+	if promoteLimit <= 0 {
+		promoteLimit = 100
+	}
+
+	nowUnix := time.Now().UTC().Unix()
+	ids, err := r.client.ZRangeByScore(ctx, taskRetryZSetKey, &goredis.ZRangeBy{
+		Min:    "-inf",
+		Max:    fmt.Sprintf("%d", nowUnix),
+		Offset: 0,
+		Count:  int64(promoteLimit),
+	})
+	if err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+
+	now := time.Now().UTC()
+	for _, id := range ids {
+		task, err := r.Get(ctx, id)
+		if err != nil || task == nil || task.Context == nil {
+			_ = r.client.ZRem(ctx, taskRetryZSetKey, id)
+			continue
+		}
+
+		if task.Context.CurrentStatus != entity.TaskStatusRetry {
+			_ = r.client.ZRem(ctx, taskRetryZSetKey, id)
+			continue
+		}
+		if task.Context.RetryAt != nil && task.Context.RetryAt.After(now) {
+			continue
+		}
+
+		task.Context.RetryAt = nil
+		task.Context.WorkerID = ""
+		task.Context.AssignedAt = nil
+		task.Context.StartedAt = nil
+		task.Context.CompletedAt = nil
+		task.Context.ExpiresAt = nil
+		task.Context.AddStatusChange(entity.TaskStatusPending, "Повтор дозрів: переведено в pending")
+
+		if err := r.Update(ctx, task); err != nil {
+			continue
+		}
+	}
+
+	return nil
 }
 
 // GetPendingByExecutorType retrieves pending tasks for a specific executor type.
@@ -351,6 +420,7 @@ func (r *RedisTaskRepository) Delete(ctx context.Context, taskID string) error {
 	pipe.SRem(ctx, taskTypeSetKey+string(task.TaskType), taskID)
 	pipe.SRem(ctx, taskExecutorSetKey+string(task.ExecutorType), taskID)
 	pipe.ZRem(ctx, taskPendingZSetKey, taskID)
+	pipe.ZRem(ctx, taskRetryZSetKey, taskID)
 
 	if task.Context.ClientID != "" {
 		pipe.SRem(ctx, taskClientSetKey+task.Context.ClientID, taskID)

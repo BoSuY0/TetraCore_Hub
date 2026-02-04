@@ -358,6 +358,8 @@ func main() {
 		ReadBufferSize:    cfg.WebSocket.ReadBufferSize,
 		WriteBufferSize:   cfg.WebSocket.WriteBufferSize,
 		RequireAuth:       cfg.Auth.RequireAuth,
+		MachineAuthTokens: []string{cfg.Security.AuthTokenActive, cfg.Security.AuthTokenNext, cfg.Security.AuthToken},
+		MachineAuthSkew:   90 * time.Second,
 	}, jwtManager, authUC)
 
 	// Set connection manager for hub
