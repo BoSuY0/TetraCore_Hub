@@ -104,16 +104,54 @@ func TestHubWorkerIntegration(t *testing.T) {
 
 	waitForWorkers(t, ctx, baseURL+"/api/v1/clients/stats", token)
 
-	taskID := createTestTask(t, ctx, baseURL+"/api/v1/tasks", token)
-	result := waitForTaskCompletion(t, ctx, baseURL+"/api/v1/tasks/"+taskID, token)
-
-	if result.Status != "completed" {
-		t.Fatalf("очікував статус completed, отримано %q (task_id=%s)", result.Status, taskID)
+	taskCases := []struct {
+		name string
+		body map[string]any
+	}{
+		{
+			name: "canonical_action_task_type",
+			body: map[string]any{
+				"task_type":     "test_simple",
+				"executor_type": "worker",
+				"priority":      "normal",
+				"data": map[string]any{
+					"action": "test_simple",
+					"params": map[string]any{
+						"message": "ping-canonical",
+					},
+				},
+				"timeout": 10,
+			},
+		},
+		{
+			name: "legacy_worker_task_envelope",
+			body: map[string]any{
+				"task_type":     "worker_task",
+				"executor_type": "worker",
+				"priority":      "normal",
+				"data": map[string]any{
+					"action": "test_simple",
+					"params": map[string]any{
+						"message": "ping-legacy",
+					},
+				},
+				"timeout": 10,
+			},
+		},
 	}
 
-	msg, _ := result.Result["message"].(string)
-	if !strings.Contains(msg, "Test successful") {
-		t.Fatalf("неочікуваний результат task_id=%s, message=%q", taskID, msg)
+	for _, tc := range taskCases {
+		taskID := createTestTask(t, ctx, baseURL+"/api/v1/tasks", token, tc.body)
+		result := waitForTaskCompletion(t, ctx, baseURL+"/api/v1/tasks/"+taskID, token)
+
+		if result.Status != "completed" {
+			t.Fatalf("[%s] очікував статус completed, отримано %q (task_id=%s)", tc.name, result.Status, taskID)
+		}
+
+		msg, _ := result.Result["message"].(string)
+		if !strings.Contains(msg, "Test successful") {
+			t.Fatalf("[%s] неочікуваний результат task_id=%s, message=%q", tc.name, taskID, msg)
+		}
 	}
 }
 
@@ -311,20 +349,8 @@ func waitForWorkers(t *testing.T, ctx context.Context, url, token string) {
 	}
 }
 
-func createTestTask(t *testing.T, ctx context.Context, url, token string) string {
+func createTestTask(t *testing.T, ctx context.Context, url, token string, body map[string]any) string {
 	t.Helper()
-	body := map[string]any{
-		"task_type":     "test_simple",
-		"executor_type": "worker",
-		"priority":      "normal",
-		"data": map[string]any{
-			"action": "test_simple",
-			"params": map[string]any{
-				"message": "ping",
-			},
-		},
-		"timeout": 10,
-	}
 	data, _ := json.Marshal(body)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))

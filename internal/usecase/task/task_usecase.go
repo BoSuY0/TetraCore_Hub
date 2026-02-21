@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -309,8 +310,10 @@ func (uc *UseCase) ProcessPendingTasks(ctx context.Context) (int, error) {
 
 	var assigned int
 	for _, task := range tasks {
+		routingTaskType := resolveExecutorTaskType(task)
+
 		// Find available executor based on executor_type
-		executors, err := sender.GetAvailableExecutors(ctx, task.ExecutorType, string(task.TaskType))
+		executors, err := sender.GetAvailableExecutors(ctx, task.ExecutorType, routingTaskType)
 		if err != nil || len(executors) == 0 {
 			continue
 		}
@@ -386,6 +389,53 @@ func (uc *UseCase) ProcessPendingTasks(ctx context.Context) (int, error) {
 	}
 
 	return assigned, nil
+}
+
+// resolveExecutorTaskType returns the task type used for executor selection.
+// For legacy worker envelope "worker_task", route by embedded action when present.
+func resolveExecutorTaskType(task *entity.Task) string {
+	if task == nil {
+		return ""
+	}
+
+	routingTaskType := string(task.TaskType)
+	if task.ExecutorType != entity.ExecutorTypeWorker || task.TaskType != entity.TaskTypeWorkerTask {
+		return routingTaskType
+	}
+
+	if action, ok := extractWorkerAction(task.Data); ok {
+		return action
+	}
+
+	return routingTaskType
+}
+
+func extractWorkerAction(data map[string]any) (string, bool) {
+	if data == nil {
+		return "", false
+	}
+
+	if action, ok := data["action"].(string); ok {
+		action = strings.TrimSpace(action)
+		if action != "" {
+			return action, true
+		}
+	}
+
+	nested, ok := data["task_data"].(map[string]any)
+	if !ok {
+		return "", false
+	}
+
+	action, ok := nested["action"].(string)
+	if !ok {
+		return "", false
+	}
+	action = strings.TrimSpace(action)
+	if action == "" {
+		return "", false
+	}
+	return action, true
 }
 
 func (uc *UseCase) processExpiredTasks(ctx context.Context, sender TaskSender) (int, error) {
