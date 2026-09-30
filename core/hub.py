@@ -48,7 +48,6 @@ from core.metrics_collector import MetricsCollector
 from core.redis_manager import RedisManager
 from core.security_integration import integrate_security
 from core.async_optimization import AsyncOptimizer
-from core.auth_manager import get_current_user
 
 # Celery task queue видалено - завдання тепер обробляються через tetra-core-api
 

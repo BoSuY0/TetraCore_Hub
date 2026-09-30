@@ -245,9 +245,11 @@ class Settings:
                 or self.redis_url
             )
         # TLS вимкнено для діагностики - можна увімкнути через REDIS_TLS_ENABLED=true
-        self.redis_tls_enabled = os.getenv(
-            "REDIS_TLS_ENABLED", "false"
-        ).lower() in ("true", "1", "yes")
+        self.redis_tls_enabled = os.getenv("REDIS_TLS_ENABLED", "false").lower() in (
+            "true",
+            "1",
+            "yes",
+        )
         self.redis_ssl_cert_reqs = os.getenv(
             "REDIS_SSL_CERT_REQS", self.redis_ssl_cert_reqs
         )

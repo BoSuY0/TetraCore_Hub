@@ -131,7 +131,9 @@ class NetworkSecurityManager:
             # CIDR
             if "/" in token:
                 try:
-                    self.whitelist_networks.add(ipaddress.ip_network(token, strict=False))
+                    self.whitelist_networks.add(
+                        ipaddress.ip_network(token, strict=False)
+                    )
                     return
                 except ValueError:
                     logger.warning("Invalid CIDR in WHITELIST_IPS", cidr=token)

@@ -474,6 +474,7 @@ class StreamHubLauncher:
         """Створює FastAPI додаток"""
         from fastapi.middleware.cors import CORSMiddleware
         from core.security_integration import integrate_security
+
         # Видалено імпорти web модулів - фронтенд виключено
         from config import get_settings
 

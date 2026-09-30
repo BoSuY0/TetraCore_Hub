@@ -24,6 +24,7 @@ from core.https_enforcement import (
     https_enforcement_middleware,
     https_router,
 )
+
 # Видалено імпорт web.auth - фронтенд виключено
 from config import get_settings
 
