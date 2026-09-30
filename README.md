@@ -1,134 +1,93 @@
 # TetraCore Hub
 
-Centralized stream hub and task orchestration platform for microservices architecture.
+A task hub for the TetraCore project. Clients such as the TetraCore Telegram bot send tasks
+over WebSocket or REST. The hub routes each task to a connected worker, such as
+[TetraCore Worker](https://github.com/BoSuY0/TetraCore_Worker), and tracks its progress and
+result. Redis stores the tasks and carries messages inside the hub.
 
-## Features
+TetraCore is my learning project. I built it with the help of AI tools.
 
-- **Task Orchestration**: Route and coordinate tasks between bots and workers
-- **WebSocket Support**: Real-time bidirectional communication
-- **RBAC**: Role-based access control with fine-grained permissions
-- **JWT Authentication**: Secure token-based authentication with refresh tokens
-- **2FA/TOTP**: Two-factor authentication support
-- **API Keys**: Scoped API key management
-- **Redis Backend**: High-performance data storage with cluster/sentinel support
-- **Plugin System**: Lua-based extensibility
-- **Audit Logging**: Complete audit trail for compliance
-- **Prometheus Metrics**: Built-in observability
+## What is in this repository
 
-## Quick Start
+| Part | Where | Status |
+| --- | --- | --- |
+| Go hub | `cmd/`, `internal/`, `pkg/`, `sdk/go/`, `web/admin/` | Current version |
+| Python StreamHub | `core/`, `models/`, `hub_launcher.py`, `config.py` | First version (FastAPI, asyncio) |
+| Rust prototype | `rust/` | Early experiment, not finished |
 
-### Prerequisites
+## How it works
 
-- Go 1.22+
-- Redis 7+
-- Make
+1. Clients and workers connect to `/ws` and register with a `client_registration` message.
+2. A client sends a `task` message or calls `POST /api/v1/tasks`. The hub replies with `task_ack`.
+3. The hub saves the task in Redis and sends it to a worker that handles this task type.
+4. The worker sends `task_progress` and `task_result` messages.
+   The hub forwards progress to the client and saves the result.
+   The Python version also sends the result to the client over WebSocket.
+   With the Go hub, the client reads it from `GET /api/v1/tasks/{id}`.
 
-### Installation
+## Features of the Go hub
 
-```bash
-# Clone the repository
-git clone https://github.com/your-username/tetra-core-hub.git
-cd tetra-core-hub
+- WebSocket connections for clients and workers, with heartbeats and machine tokens
+- JWT login with refresh tokens, and API keys
+- Users, roles and permissions
+- Task queue with cancel, retry and a dead-letter queue
+- Task templates and a secrets store encrypted with AES-GCM
+- Plugins in Lua
+- Health checks (`/health`, `/ready`, `/live`) and a small admin page at `/admin/`
 
-# Install dependencies
-make deps
+The code for two-factor authentication, webhooks, scheduled tasks and the audit log is in
+`internal/usecase/`, but it is not connected to the HTTP API yet.
 
-# Copy environment configuration
-cp .env.example .env
+## Run the Go hub
 
-# Start Redis (if not running)
-make redis-start
-
-# Run in development mode
-make dev
-```
-
-### Production Build
+You need Go 1.22 or newer and a Redis server on `localhost:6379`.
 
 ```bash
-make build-prod
-./build/tetracore-hub
+git clone https://github.com/BoSuY0/TetraCore_Hub.git
+cd TetraCore_Hub
+cp .env.example .env    # then set your own JWT_SECRET and ADMIN_PASSWORD
+go run ./cmd/hub
 ```
 
-### Docker
+Check that it works:
 
 ```bash
-# Build and run with Docker Compose
-make docker-compose-up
-
-# Or build image manually
-make docker-build
-docker run -p 8000:8000 --env-file .env tetracore-hub:latest
+curl http://localhost:8000/health
 ```
 
-## Configuration
+Main settings in `.env`:
 
-Configuration is managed via environment variables and `config/config.yaml`.
+| Variable | Meaning |
+| --- | --- |
+| `ENVIRONMENT` | `development`, `production` or `testing` |
+| `PORT` | HTTP port, `8000` by default |
+| `REDIS_URL` | Redis address, for example `redis://localhost:6379` |
+| `JWT_SECRET` | Secret for signing access tokens |
+| `ADMIN_USERNAME`, `ADMIN_PASSWORD` | The first admin user |
 
-Key environment variables:
-- `APP_ENV` - Environment (development/production)
-- `SERVER_PORT` - HTTP server port (default: 8000)
-- `REDIS_ADDR` - Redis connection address
-- `JWT_SECRET` - JWT signing secret
-- `ADMIN_USERNAME` - Initial admin username
-- `ADMIN_PASSWORD` - Initial admin password
+## Run the Python version
 
-## API Documentation
-
-- OpenAPI spec: `api/openapi/openapi.yaml`
-- Postman collection: `api/postman/`
-
-### Main Endpoints
-
-| Endpoint | Description |
-|----------|-------------|
-| `POST /auth/login` | User authentication |
-| `POST /auth/logout` | Session termination |
-| `GET /health` | Health check |
-| `GET /stats` | System statistics |
-| `WS /ws` | WebSocket connection |
-| `/api/v1/clients` | Client management |
-| `/api/v1/tasks` | Task operations |
-| `/api/v1/sessions` | Session management |
-| `/api/v1/users` | User management |
-| `/api/v1/roles` | Role management |
-
-## Architecture
-
-```
-cmd/
-  hub/          # Main hub server
-  tetra/        # CLI tool
-  secret-scan/  # Security scanner
-internal/
-  domain/       # Business entities and interfaces
-  usecase/      # Business logic
-  delivery/     # HTTP and WebSocket handlers
-  infrastructure/  # Redis, security, plugins
-pkg/            # Shared utilities
-sdk/go/         # Go client SDK
-web/admin/      # Admin dashboard
-```
-
-## Development
+You need Python 3.12 or 3.13 and the same `.env` file.
 
 ```bash
-# Run tests
-make test
-
-# Run tests with coverage
-make test-coverage
-
-# Lint code
-make lint
-
-# Format code
-make fmt
-
-# Generate Swagger docs
-make swagger
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python hub_launcher.py dev
 ```
+
+## Tests
+
+```bash
+go test ./...    # Go hub
+pytest           # Python version
+```
+
+## Related repositories
+
+- [TetraCore Worker](https://github.com/BoSuY0/TetraCore_Worker): a Go worker that runs tasks from this hub
+- TetraCore Bot: the Telegram bot client (private for now)
 
 ## License
 
-MIT
+[MIT](LICENSE)
