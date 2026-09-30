@@ -58,3 +58,13 @@ htmlcov/
 
 test_hub.py
 secrets_backup/
+
+# Build output and local data
+/hub
+/build/
+/bin/
+rust/target/
+coverage.out
+coverage.html
+*.rdb
+_tmp_*
