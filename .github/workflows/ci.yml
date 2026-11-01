@@ -15,8 +15,8 @@ jobs:
         ports:
           - 6379:6379
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.22"
       - run: go test -v ./...
@@ -26,8 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [test]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.22"
       - run: CGO_ENABLED=0 go build -o bin/hub ./cmd/hub
